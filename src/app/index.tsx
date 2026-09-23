@@ -1,98 +1,343 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useState } from "react";
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  SafeAreaView,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Alert,
+} from "react-native";
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
+import { router } from "expo-router";
+
+export default function Index() {
+  const [email, setEmail] = useState("");
+  const [senha, setSenha] = useState("");
+  const [mostrarSenha, setMostrarSenha] = useState(false);
+
+  function entrar() {
+    const emailLimpo = email.trim();
+    const senhaLimpa = senha.trim();
+
+    if (!emailLimpo) {
+      Alert.alert("Atenção", "Digite seu e-mail.");
+      return;
+    }
+
+    if (!senhaLimpa) {
+      Alert.alert("Atenção", "Digite sua senha.");
+      return;
+    }
+
+    const emailValido = /\S+@\S+\.\S+/.test(emailLimpo);
+
+    if (!emailValido) {
+      Alert.alert("Atenção", "Digite um e-mail válido.");
+      return;
+    }
+
+    console.log("Login:", {
+      email: emailLimpo,
+      senha: senhaLimpa,
+    });
+
+    router.replace("/home");
   }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
+
+  function criarConta() {
+    router.push("/cadastro");
   }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+
+  function esqueciSenha() {
+    router.push("/esqueci-senha");
+  }
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView
+        style={styles.keyboard}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Logo */}
+          <View style={styles.logo}>
+            <Text style={styles.logoText}>W</Text>
+          </View>
 
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+          {/* Título */}
+          <Text style={styles.title}>Bem-vindo ao WePay</Text>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+          <Text style={styles.subtitle}>
+            Faça login e continue organizando suas despesas pessoais e as
+            despesas em grupo, tudo num só lugar.
+          </Text>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+          {/* Formulário */}
+          <View style={styles.form}>
+            {/* E-mail */}
+            <TextInput
+              style={styles.input}
+              placeholder="E-mail"
+              placeholderTextColor="#6B8F86"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              textContentType="emailAddress"
+              returnKeyType="next"
+            />
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+            {/* Senha */}
+            <View style={styles.passwordContainer}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Senha"
+                placeholderTextColor="#6B8F86"
+                value={senha}
+                onChangeText={setSenha}
+                secureTextEntry={!mostrarSenha}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="password"
+                textContentType="password"
+                returnKeyType="done"
+                onSubmitEditing={entrar}
+              />
+
+              <TouchableOpacity
+                onPress={() => setMostrarSenha((valor) => !valor)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.showPassword}>
+                  {mostrarSenha ? "Ocultar" : "Mostrar"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Esqueci minha senha */}
+            <TouchableOpacity
+              style={styles.forgotContainer}
+              onPress={esqueciSenha}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.forgot}>
+                Esqueci minha senha
+              </Text>
+            </TouchableOpacity>
+
+            {/* Entrar */}
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={entrar}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.primaryButtonText}>
+                Entrar
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Divisor */}
+          <View style={styles.dividerContainer}>
+            <View style={styles.divider} />
+
+            <Text style={styles.or}>ou</Text>
+
+            <View style={styles.divider} />
+          </View>
+
+          {/* Cadastro */}
+          <View style={styles.registerContainer}>
+            <Text style={styles.registerText}>
+              Ainda não tem conta?
+            </Text>
+
+            <TouchableOpacity
+              onPress={criarConta}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.registerLink}>
+                Criar conta
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+    backgroundColor: "#F5FBF7",
   },
-  safeArea: {
+
+  keyboard: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
   },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+
+  scroll: {
+    flexGrow: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    paddingTop: 40,
+    paddingBottom: 40,
   },
+
+  // Logo
+  logo: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    backgroundColor: "#00C896",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  logoText: {
+    color: "#0B3B33",
+    fontSize: 30,
+    fontWeight: "700",
+  },
+
+  // Títulos
   title: {
-    textAlign: 'center',
+    color: "#0B3B33",
+    fontSize: 25,
+    fontWeight: "600",
+    marginTop: 22,
+    textAlign: "center",
   },
-  code: {
-    textTransform: 'uppercase',
+
+  subtitle: {
+    color: "#6B8F86",
+    fontSize: 14,
+    marginTop: 7,
+    textAlign: "center",
+    lineHeight: 21,
   },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+
+  // Formulário
+  form: {
+    width: "100%",
+    marginTop: 32,
+  },
+
+  input: {
+    height: 52,
+    backgroundColor: "#F0F8F4",
+    borderWidth: 1,
+    borderColor: "#E1EEE8",
+    borderRadius: 12,
+    paddingHorizontal: 15,
+    color: "#0B3B33",
+    fontSize: 14,
+    marginBottom: 11,
+  },
+
+  // Senha
+  passwordContainer: {
+    height: 52,
+    backgroundColor: "#F0F8F4",
+    borderWidth: 1,
+    borderColor: "#E1EEE8",
+    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: 15,
+    paddingRight: 12,
+  },
+
+  passwordInput: {
+    flex: 1,
+    color: "#0B3B33",
+    fontSize: 14,
+    height: "100%",
+  },
+
+  showPassword: {
+    color: "#00A17A",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+
+  // Esqueci senha
+  forgotContainer: {
+    alignItems: "flex-end",
+    marginTop: 9,
+  },
+
+  forgot: {
+    color: "#00A17A",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+
+  // Botão entrar
+  primaryButton: {
+    height: 52,
+    backgroundColor: "#00C896",
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 24,
+  },
+
+  primaryButtonText: {
+    color: "#0B3B33",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
+  // Divisor
+  dividerContainer: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 24,
+  },
+
+  divider: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "#E1EEE8",
+  },
+
+  or: {
+    color: "#6B8F86",
+    fontSize: 12,
+    marginHorizontal: 10,
+  },
+
+  // Cadastro
+  registerContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  registerText: {
+    color: "#6B8F86",
+    fontSize: 13,
+  },
+
+  registerLink: {
+    color: "#0B3B33",
+    fontSize: 13,
+    fontWeight: "700",
+    marginLeft: 5,
   },
 });
