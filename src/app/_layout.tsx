@@ -1,18 +1,29 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+/**
+ * WEPAY — LAYOUT PRINCIPAL
+ *
+ * Agrupa as telas que fazem parte da área interna do aplicativo.
+ * A navegação inferior continua seguindo o padrão do projeto de referência;
+ * este Stack fornece apenas o agrupamento e a navegação das rotas.
+ */
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+import { Stack } from "expo-router";
+import { UsuarioProvider } from "@/contexts/UsuarioContext";
 
-SplashScreen.preventAutoHideAsync();
-
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+export default function MainLayout() {
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
-    </ThemeProvider>
+    <UsuarioProvider>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="home" />
+        <Stack.Screen name="group/despesas-grupo" />
+        <Stack.Screen name="group/detalhes-despesa" />
+        <Stack.Screen name="group/nova-despesa" />
+        <Stack.Screen name="group/participantes" />
+        <Stack.Screen name="group/saldos" />
+        <Stack.Screen name="personal/despesas-pessoais" />
+        <Stack.Screen name="personal/nova-despesa-pessoal" />
+        <Stack.Screen name="receipt-reader/ler-recibo" />
+        <Stack.Screen name="gerenciamento-perfil" />
+      </Stack>
+    </UsuarioProvider>
   );
 }
