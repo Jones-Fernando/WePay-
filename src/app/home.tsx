@@ -14,10 +14,6 @@ type Aba = "grupos" | "pessoal";
 export default function Home() {
   const [abaSelecionada, setAbaSelecionada] = useState<Aba>("pessoal");
 
-  const irParaDespesasGrupo = () => {
-    setAbaSelecionada("grupos");
-  };
-
   const irParaBotaoMais = () => {
     if (abaSelecionada === "pessoal") {
       router.push("/despesas-pessoais");

@@ -15,58 +15,40 @@ import {
   Platform,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { router } from "expo-router";
+import { authApi } from "@/services/api";
 
 export default function EsqueciSenha() {
   const [email, setEmail] = useState("");
+  const [carregando, setCarregando] = useState(false);
 
-  function enviarRecuperacao() {
+  async function enviarRecuperacao() {
     const emailLimpo = email.trim();
 
     if (!emailLimpo) {
       Alert.alert("Atenção", "Digite seu e-mail.");
       return;
     }
-
-    const emailValido = /\S+@\S+\.\S+/.test(emailLimpo);
-
-    if (!emailValido) {
+    if (!/\S+@\S+\.\S+/.test(emailLimpo)) {
       Alert.alert("Atenção", "Digite um e-mail válido.");
       return;
     }
 
-    console.log("Solicitação de recuperação:", emailLimpo);
-
-    /*
-      FUTURAMENTE:
-      Aqui vamos chamar o backend Python.
-
-      Exemplo:
-
-      const response = await fetch(
-        "http://SEU_IP:8000/recuperar-senha",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            email: emailLimpo,
-          }),
-        }
-      );
-    */
+    setCarregando(true);
+    try {
+      await authApi.esqueciSenha(emailLimpo);
+    } catch {
+      // Silencia o erro para não revelar se o e-mail existe
+    } finally {
+      setCarregando(false);
+    }
 
     Alert.alert(
       "E-mail enviado",
       "Se o e-mail estiver cadastrado, você receberá as instruções para recuperar sua senha.",
-      [
-        {
-          text: "Voltar para o login",
-          onPress: () => router.replace("/(auth)/login"),
-        },
-      ]
+      [{ text: "Voltar para o login", onPress: () => router.replace("/(auth)/login") }]
     );
   }
 
@@ -129,10 +111,13 @@ export default function EsqueciSenha() {
               style={styles.primaryButton}
               onPress={enviarRecuperacao}
               activeOpacity={0.8}
+              disabled={carregando}
             >
-              <Text style={styles.primaryButtonText}>
-                Enviar instruções
-              </Text>
+              {carregando ? (
+                <ActivityIndicator color="#0B3B33" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Enviar instruções</Text>
+              )}
             </TouchableOpacity>
           </View>
 

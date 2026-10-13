@@ -1,835 +1,1473 @@
-/*
+
+/**
  * WEPAY — NOVA DESPESA EM GRUPO
  *
- * Funcionalidades:
- * - Descrição
- * - Valor
- * - Categoria
- * - Pagador
- * - Participantes
- * - Divisão igual
- * - Divisão por porcentagem
- * - Divisão por valores
+ * Mesmo padrão visual de nova-despesa-pessoal.tsx,
+ * com campos específicos para despesas compartilhadas.
+ *
+ * Observação: o formulário ainda utiliza participantes de demonstração.
+ * A gravação definitiva depende da integração com a API Flask.
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import {
+  SafeAreaView,
   View,
   Text,
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
+  StatusBar,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 
-import { Cores } from "../../../constants/Cores";
-
-type TipoDivisao =
-  | "igual"
-  | "porcentagem"
-  | "valores";
+type TipoDivisao = "IGUAL" | "VALOR" | "PERCENTUAL";
 
 type Participante = {
-  id: number;
+  id: string;
   nome: string;
   iniciais: string;
 };
 
-const participantes: Participante[] = [
-  { id: 1, nome: "Você", iniciais: "VC" },
-  { id: 2, nome: "Rafael", iniciais: "RA" },
-  { id: 3, nome: "Bruno", iniciais: "BR" },
-  { id: 4, nome: "Laura", iniciais: "LA" },
+const CATEGORIAS = [
+  { nome: "Alimentação", icone: "🍽️" },
+  { nome: "Transporte", icone: "🚕" },
+  { nome: "Casa", icone: "🏠" },
+  { nome: "Lazer", icone: "🎮" },
+  { nome: "Assinatura", icone: "🎬" },
+  { nome: "Outros", icone: "📦" },
 ];
 
-export default function NovaDespesa() {
-  const { groupId } = useLocalSearchParams<{
-    groupId?: string;
-  }>();
+// Dados temporários para visualizar a tela.
+// Posteriormente, buscar os membros reais do grupo pela API.
+const PARTICIPANTES: Participante[] = [
+  { id: "1", nome: "Você", iniciais: "VC" },
+  { id: "2", nome: "Ana Oliveira", iniciais: "AO" },
+  { id: "3", nome: "Pedro Santos", iniciais: "PS" },
+  { id: "4", nome: "Mariana Costa", iniciais: "MC" },
+];
 
-  const [descricao, setDescricao] =
-    useState("");
+function obterParametro(
+  parametro: string | string[] | undefined
+): string {
+  if (Array.isArray(parametro)) {
+    return parametro[0] ?? "";
+  }
 
-  const [valor, setValor] =
-    useState("");
+  return parametro ?? "";
+}
 
-  const [categoria, setCategoria] =
-    useState("Alimentação");
+function normalizarDataRecebida(data: string): string {
+  // Converte AAAA-MM-DD para DD/MM/AAAA quando a data
+  // chega preenchida pela leitura do recibo.
+  const iso = data.match(/^(\d{4})-(\d{2})-(\d{2})$/);
 
-  const [pagoPor, setPagoPor] =
-    useState(1);
+  if (iso) {
+    return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  }
 
-  const [tipoDivisao, setTipoDivisao] =
-    useState<TipoDivisao>("igual");
+  return data;
+}
 
-  const [selecionados, setSelecionados] =
-    useState<number[]>(
-      participantes.map((item) => item.id)
-    );
+function converterValor(valor: string): number {
+  const limpo = valor
+    .trim()
+    .replace(/R\$/gi, "")
+    .replace(/\s/g, "");
 
-  const [percentuais, setPercentuais] =
-    useState<Record<number, string>>({});
+  if (!limpo) {
+    return NaN;
+  }
 
-  const [valores, setValores] =
-    useState<Record<number, string>>({});
+  let normalizado = limpo;
 
-  const valorNumerico = useMemo(
-    () =>
-      Number(valor.replace(",", ".")) || 0,
-    [valor]
+  // Exemplos:
+  // 1.234,56 -> 1234.56
+  // 123,45   -> 123.45
+  // 123.45   -> 123.45
+  if (limpo.includes(",") && limpo.includes(".")) {
+    normalizado = limpo.replace(/\./g, "").replace(",", ".");
+  } else if (limpo.includes(",")) {
+    normalizado = limpo.replace(",", ".");
+  }
+
+  return Number(normalizado);
+}
+
+function formatarMoeda(valor: number): string {
+  return valor.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
+function validarData(data: string): boolean {
+  const resultado = data.match(
+    /^(\d{2})\/(\d{2})\/(\d{4})$/
   );
 
-  function alternarParticipante(
-    id: number
-  ) {
-    setSelecionados((estado) => {
-      if (estado.includes(id)) {
-        return estado.filter(
-          (item) => item !== id
-        );
-      }
+  if (!resultado) {
+    return false;
+  }
 
-      return [...estado, id];
+  const dia = Number(resultado[1]);
+  const mes = Number(resultado[2]);
+  const ano = Number(resultado[3]);
+
+  const dataValidada = new Date(ano, mes - 1, dia);
+
+  return (
+    dataValidada.getFullYear() === ano &&
+    dataValidada.getMonth() === mes - 1 &&
+    dataValidada.getDate() === dia
+  );
+}
+
+export default function NovaDespesaGrupo() {
+  const params = useLocalSearchParams();
+
+  const groupId = obterParametro(params.groupId);
+  const nomeGrupo =
+    obterParametro(params.grupoNome) || "Despesa compartilhada";
+
+  // Dados básicos da despesa.
+  const [descricao, setDescricao] = useState(() =>
+    obterParametro(params.descricao)
+  );
+
+  const [valor, setValor] = useState(() =>
+    obterParametro(params.valor)
+  );
+
+  const [data, setData] = useState(() =>
+    normalizarDataRecebida(obterParametro(params.data))
+  );
+
+  const [categoria, setCategoria] = useState(() => {
+    const categoriaRecebida = obterParametro(params.categoria);
+
+    return CATEGORIAS.some(
+      (item) => item.nome === categoriaRecebida
+    )
+      ? categoriaRecebida
+      : "Alimentação";
+  });
+
+  const [observacao, setObservacao] = useState("");
+
+  // Dados específicos do grupo.
+  const [pagadorId, setPagadorId] = useState("1");
+
+  const [participantesSelecionados, setParticipantesSelecionados] =
+    useState<string[]>(["1", "2", "3", "4"]);
+
+  const [tipoDivisao, setTipoDivisao] =
+    useState<TipoDivisao>("IGUAL");
+
+  const [valoresIndividuais, setValoresIndividuais] =
+    useState<Record<string, string>>({});
+
+  const [percentuaisIndividuais, setPercentuaisIndividuais] =
+    useState<Record<string, string>>({});
+
+  // Atualiza o formulário caso o leitor de recibo devolva os dados
+  // pelos parâmetros da rota.
+  function voltarParaTelaAnterior() {
+    router.back();
+  }
+
+  function lerRecibo() {
+    router.push({
+      pathname: "/(main)/receipt-reader/ler-recibo",
+      params: {
+        origem: "grupo",
+        modo: "criar",
+        groupId,
+        grupoNome: nomeGrupo,
+      },
     });
   }
 
-  function calcularValorIgual() {
-    if (!selecionados.length) {
-      return 0;
+  function alternarParticipante(id: string) {
+    setParticipantesSelecionados((atuais) => {
+      if (atuais.includes(id)) {
+        return atuais.filter((item) => item !== id);
+      }
+
+      return [...atuais, id];
+    });
+  }
+
+  function distribuirIgualmente(
+    valorTotal: number,
+    quantidade: number
+  ): number[] {
+    if (quantidade <= 0) {
+      return [];
     }
 
-    return valorNumerico / selecionados.length;
+    const totalCentavos = Math.round(valorTotal * 100);
+    const valorBase = Math.floor(totalCentavos / quantidade);
+    const resto = totalCentavos % quantidade;
+
+    return Array.from(
+      { length: quantidade },
+      (_, indice) =>
+        (valorBase + (indice < resto ? 1 : 0)) / 100
+    );
+  }
+
+  function distribuirPorPercentual(
+    valorTotal: number,
+    percentuais: number[]
+  ): number[] {
+    const totalCentavos = Math.round(valorTotal * 100);
+    const parcelas = percentuais.map((percentual) => {
+      const valorExato = (totalCentavos * percentual) / 100;
+      const centavos = Math.floor(valorExato);
+
+      return {
+        centavos,
+        fracao: valorExato - centavos,
+      };
+    });
+
+    let centavosRestantes = totalCentavos - parcelas.reduce(
+      (total, parcela) => total + parcela.centavos,
+      0
+    );
+
+    const indicesPorFracao = parcelas
+      .map((parcela, indice) => ({ indice, fracao: parcela.fracao }))
+      .sort((a, b) => b.fracao - a.fracao);
+
+    for (let indice = 0; centavosRestantes > 0; indice += 1) {
+      parcelas[indicesPorFracao[indice % parcelas.length].indice].centavos += 1;
+      centavosRestantes -= 1;
+    }
+
+    return parcelas.map((parcela) => parcela.centavos / 100);
+  }
+
+  function validarDivisao(valorNumerico: number): boolean {
+    if (participantesSelecionados.length === 0) {
+      Alert.alert(
+        "Atenção",
+        "Selecione pelo menos um participante para dividir a despesa."
+      );
+
+      return false;
+    }
+
+    if (tipoDivisao === "VALOR") {
+      const valores = participantesSelecionados.map((id) =>
+        converterValor(valoresIndividuais[id] ?? "")
+      );
+
+      if (valores.some((item) => !Number.isFinite(item) || item < 0)) {
+        Alert.alert(
+          "Valores inválidos",
+          "Informe um valor válido para cada participante."
+        );
+
+        return false;
+      }
+
+      const somaCentavos = valores.reduce(
+        (soma, item) => soma + Math.round(item * 100),
+        0
+      );
+
+      if (somaCentavos !== Math.round(valorNumerico * 100)) {
+        Alert.alert(
+          "Divisão não confere",
+          "A soma dos valores individuais deve ser igual ao valor total da despesa."
+        );
+
+        return false;
+      }
+    }
+
+    if (tipoDivisao === "PERCENTUAL") {
+      const percentuais = participantesSelecionados.map((id) =>
+        Number(
+          (percentuaisIndividuais[id] ?? "").replace(",", ".")
+        )
+      );
+
+      if (
+        percentuais.some(
+          (item) => !Number.isFinite(item) || item < 0 || item > 100
+        )
+      ) {
+        Alert.alert(
+          "Percentuais inválidos",
+          "Informe percentuais entre 0 e 100 para cada participante."
+        );
+
+        return false;
+      }
+
+      const soma = percentuais.reduce(
+        (total, item) => total + item,
+        0
+      );
+
+      if (Math.abs(soma - 100) > 0.01) {
+        Alert.alert(
+          "Divisão não confere",
+          "A soma dos percentuais de todos os participantes precisa ser 100%."
+        );
+
+        return false;
+      }
+    }
+
+    return true;
   }
 
   function salvarDespesa() {
-    const descricaoLimpa =
-      descricao.trim();
+    const descricaoLimpa = descricao.trim();
+    const valorNumerico = converterValor(valor);
+    const dataLimpa = data.trim();
+
+    if (!groupId) {
+      Alert.alert(
+        "Grupo não identificado",
+        "Abra o formulário pela tela de despesas do grupo para continuar."
+      );
+
+      return;
+    }
 
     if (!descricaoLimpa) {
       Alert.alert(
         "Atenção",
         "Digite a descrição da despesa."
       );
+
       return;
     }
 
-    if (valorNumerico <= 0) {
+    if (
+      !valor.trim() ||
+      !Number.isFinite(valorNumerico) ||
+      valorNumerico <= 0
+    ) {
       Alert.alert(
         "Atenção",
-        "Digite um valor válido."
+        "Digite um valor válido para a despesa."
       );
+
       return;
     }
 
-    if (!selecionados.length) {
+    if (!validarData(dataLimpa)) {
       Alert.alert(
-        "Atenção",
-        "Selecione pelo menos um participante."
+        "Data inválida",
+        "Informe uma data válida no formato DD/MM/AAAA."
       );
+
       return;
     }
 
-    /*
-     * Validação para porcentagens.
-     */
-    if (tipoDivisao === "porcentagem") {
-      const totalPercentual =
-        selecionados.reduce(
-          (total, id) =>
-            total +
-            (Number(
-              (percentuais[id] ?? "0")
-                .replace(",", ".")
-            ) || 0),
-          0
-        );
-
-      if (
-        Math.abs(totalPercentual - 100) >
-        0.01
-      ) {
-        Alert.alert(
-          "Atenção",
-          "A soma das porcentagens deve ser 100%."
-        );
-        return;
-      }
+    if (!validarDivisao(valorNumerico)) {
+      return;
     }
 
-    /*
-     * Validação para valores individuais.
-     */
-    if (tipoDivisao === "valores") {
-      const totalValores =
-        selecionados.reduce(
-          (total, id) =>
-            total +
-            (Number(
-              (valores[id] ?? "0")
-                .replace(",", ".")
-            ) || 0),
-          0
-        );
+    let divisaoCalculada: {
+      participanteId: string;
+      valor: number;
+    }[] = [];
 
-      if (
-        Math.abs(totalValores - valorNumerico) >
-        0.01
-      ) {
-        Alert.alert(
-          "Atenção",
-          "A soma dos valores individuais deve ser igual ao valor da despesa."
-        );
-        return;
-      }
+    if (tipoDivisao === "IGUAL") {
+      const valoresDivididos = distribuirIgualmente(
+        valorNumerico,
+        participantesSelecionados.length
+      );
+
+      divisaoCalculada = participantesSelecionados.map(
+        (participanteId, indice) => ({
+          participanteId,
+          valor: valoresDivididos[indice],
+        })
+      );
     }
 
-    console.log("Nova despesa:", {
-      groupId,
+    if (tipoDivisao === "VALOR") {
+      divisaoCalculada = participantesSelecionados.map(
+        (participanteId) => ({
+          participanteId,
+          valor: converterValor(
+            valoresIndividuais[participanteId] ?? ""
+          ),
+        })
+      );
+    }
+
+    if (tipoDivisao === "PERCENTUAL") {
+      const percentuais = participantesSelecionados.map((participanteId) =>
+        Number(
+          (percentuaisIndividuais[participanteId] ?? "0").replace(",", ".")
+        )
+      );
+      const valoresDivididos = distribuirPorPercentual(
+        valorNumerico,
+        percentuais
+      );
+
+      divisaoCalculada = participantesSelecionados.map(
+        (participanteId, indice) => ({
+          participanteId,
+          valor: valoresDivididos[indice],
+        })
+      );
+    }
+
+    // Demonstração local: os dados aparecem no console,
+    // mas ainda não são enviados nem gravados no MySQL.
+    console.log("Nova despesa em grupo:", {
+      grupoId: groupId,
       descricao: descricaoLimpa,
       valor: valorNumerico,
+      data: dataLimpa,
       categoria,
-      pagoPor,
+      pagadorId,
+      participantes: participantesSelecionados,
       tipoDivisao,
-      participantes: selecionados,
+      divisaoCalculada,
+      observacao: observacao.trim(),
     });
 
     Alert.alert(
-      "Despesa salva",
-      "A despesa foi registrada com sucesso.",
+      "Formulário validado",
+      "Os dados da despesa estão preenchidos corretamente. A gravação definitiva será habilitada quando o formulário estiver conectado à API Flask.",
       [
         {
-          text: "OK",
-          onPress: () => router.back(),
+          text: "Voltar",
+          onPress: voltarParaTelaAnterior,
         },
       ]
     );
   }
 
+  const valorNumerico = converterValor(valor);
+
+  const valorPorPessoa =
+    Number.isFinite(valorNumerico) &&
+    valorNumerico > 0 &&
+    participantesSelecionados.length > 0
+      ? valorNumerico / participantesSelecionados.length
+      : 0;
+
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
+      <StatusBar barStyle="dark-content" />
+
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <View style={styles.header}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.conteudo}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* CABEÇALHO */}
+
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={styles.botaoVoltar}
+              onPress={voltarParaTelaAnterior}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.voltar}>‹</Text>
+            </TouchableOpacity>
+
+            <View style={styles.headerTexto}>
+              <Text style={styles.titulo}>
+                Nova despesa em grupo
+              </Text>
+
+              <Text style={styles.subtitulo}>
+                {nomeGrupo}
+              </Text>
+            </View>
+          </View>
+
+          {/* LEITURA DE RECIBO COM IA */}
+
           <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
+            style={styles.cardIA}
+            activeOpacity={0.85}
+            onPress={lerRecibo}
           >
-            <Text style={styles.backText}>‹</Text>
+            <View style={styles.iconeIA}>
+              <Text style={styles.iconeIAText}>📷</Text>
+            </View>
+
+            <View style={styles.iaTexto}>
+              <Text style={styles.iaTitulo}>
+                Ler recibo com foto
+              </Text>
+
+              <Text style={styles.iaSubtitulo}>
+                Preencha os dados automaticamente com IA
+              </Text>
+            </View>
+
+            <Text style={styles.seta}>›</Text>
           </TouchableOpacity>
 
-          <View style={styles.headerCenter}>
-            <Text style={styles.headerTitle}>
-              Nova despesa
-            </Text>
+          {/* DESCRIÇÃO */}
 
-            <Text style={styles.headerSubtitle}>
-              Viagem Bahia
-            </Text>
+          <View style={styles.campo}>
+            <Text style={styles.label}>Descrição</Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="Ex.: Mercado, jantar, hospedagem"
+              placeholderTextColor="#8AA69E"
+              value={descricao}
+              onChangeText={setDescricao}
+              autoCapitalize="sentences"
+              maxLength={120}
+            />
           </View>
 
-          <View style={styles.headerSpace} />
-        </View>
+          {/* VALOR */}
 
-        <Text style={styles.label}>
-          Dividir como
-        </Text>
+          <View style={styles.campo}>
+            <Text style={styles.label}>Valor total</Text>
 
-        <View style={styles.divisionContainer}>
-          {[
-            {
-              key: "igual",
-              title: "Igual",
-            },
-            {
-              key: "porcentagem",
-              title: "%",
-            },
-            {
-              key: "valores",
-              title: "Valores",
-            },
-          ].map((item) => (
-            <TouchableOpacity
-              key={item.key}
-              style={[
-                styles.divisionButton,
-                tipoDivisao === item.key &&
-                  styles.divisionActive,
-              ]}
-              onPress={() =>
-                setTipoDivisao(
-                  item.key as TipoDivisao
-                )
-              }
-            >
-              <Text
-                style={[
-                  styles.divisionText,
-                  tipoDivisao === item.key &&
-                    styles.divisionTextActive,
-                ]}
-              >
-                {item.title}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+            <View style={styles.valorContainer}>
+              <Text style={styles.simbolo}>R$</Text>
 
-        <Text style={styles.label}>
-          Descrição
-        </Text>
-
-        <TextInput
-          style={styles.input}
-          placeholder="Ex.: Jantar"
-          placeholderTextColor={Cores.textoSuave}
-          value={descricao}
-          onChangeText={setDescricao}
-        />
-
-        <Text style={styles.label}>
-          Valor
-        </Text>
-
-        <View style={styles.valueContainer}>
-          <Text style={styles.currency}>R$</Text>
-
-          <TextInput
-            style={styles.valueInput}
-            placeholder="0,00"
-            placeholderTextColor={Cores.textoSuave}
-            value={valor}
-            onChangeText={setValor}
-            keyboardType="decimal-pad"
-          />
-        </View>
-
-        <Text style={styles.label}>
-          Pago por
-        </Text>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-        >
-          <View style={styles.horizontalPeople}>
-            {participantes.map((pessoa) => (
-              <TouchableOpacity
-                key={pessoa.id}
-                style={[
-                  styles.payer,
-                  pagoPor === pessoa.id &&
-                    styles.payerActive,
-                ]}
-                onPress={() =>
-                  setPagoPor(pessoa.id)
-                }
-              >
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>
-                    {pessoa.iniciais}
-                  </Text>
-                </View>
-
-                <Text
-                  style={[
-                    styles.payerText,
-                    pagoPor === pessoa.id &&
-                      styles.payerTextActive,
-                  ]}
-                >
-                  {pessoa.nome}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </ScrollView>
-
-        <Text style={styles.label}>
-          Categoria
-        </Text>
-
-        <View style={styles.categories}>
-          {[
-            "Alimentação",
-            "Transporte",
-            "Casa",
-            "Lazer",
-            "Assinatura",
-            "Outros",
-          ].map((item) => (
-            <TouchableOpacity
-              key={item}
-              style={[
-                styles.category,
-                categoria === item &&
-                  styles.categoryActive,
-              ]}
-              onPress={() =>
-                setCategoria(item)
-              }
-            >
-              <Text
-                style={[
-                  styles.categoryText,
-                  categoria === item &&
-                    styles.categoryTextActive,
-                ]}
-              >
-                {item}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={styles.participantsHeader}>
-          <View>
-            <Text style={styles.label}>
-              Participantes
-            </Text>
-
-            <Text style={styles.helper}>
-              Selecione quem participa desta despesa.
-            </Text>
-          </View>
-
-          <Text style={styles.count}>
-            {selecionados.length}
-          </Text>
-        </View>
-
-        {participantes.map((pessoa) => {
-          const ativo = selecionados.includes(
-            pessoa.id
-          );
-
-          const valorIgual =
-            calcularValorIgual();
-
-          return (
-            <View
-              key={pessoa.id}
-              style={styles.participantRow}
-            >
-              <TouchableOpacity
-                style={styles.participantMain}
-                onPress={() =>
-                  alternarParticipante(
-                    pessoa.id
-                  )
-                }
-              >
-                <View
-                  style={[
-                    styles.checkbox,
-                    ativo &&
-                      styles.checkboxActive,
-                  ]}
-                >
-                  {ativo && (
-                    <Text style={styles.check}>
-                      ✓
-                    </Text>
-                  )}
-                </View>
-
-                <Text
-                  style={styles.participantName}
-                >
-                  {pessoa.nome}
-                </Text>
-              </TouchableOpacity>
-
-              {ativo &&
-                tipoDivisao === "igual" && (
-                  <Text
-                    style={styles.previewValue}
-                  >
-                    R$ {valorIgual
-                      .toFixed(2)
-                      .replace(".", ",")}
-                  </Text>
-                )}
-
-              {ativo &&
-                tipoDivisao ===
-                  "porcentagem" && (
-                  <TextInput
-                    style={styles.smallInput}
-                    placeholder="%"
-                    placeholderTextColor={
-                      Cores.textoSuave
-                    }
-                    keyboardType="decimal-pad"
-                    value={
-                      percentuais[pessoa.id] ??
-                      ""
-                    }
-                    onChangeText={(texto) =>
-                      setPercentuais(
-                        (estado) => ({
-                          ...estado,
-                          [pessoa.id]:
-                            texto,
-                        })
-                      )
-                    }
-                  />
-                )}
-
-              {ativo &&
-                tipoDivisao ===
-                  "valores" && (
-                  <TextInput
-                    style={styles.smallInput}
-                    placeholder="R$"
-                    placeholderTextColor={
-                      Cores.textoSuave
-                    }
-                    keyboardType="decimal-pad"
-                    value={
-                      valores[pessoa.id] ??
-                      ""
-                    }
-                    onChangeText={(texto) =>
-                      setValores((estado) => ({
-                        ...estado,
-                        [pessoa.id]:
-                          texto,
-                      }))
-                    }
-                  />
-                )}
+              <TextInput
+                style={styles.inputValor}
+                placeholder="0,00"
+                placeholderTextColor="#8AA69E"
+                value={valor}
+                onChangeText={setValor}
+                keyboardType="decimal-pad"
+              />
             </View>
-          );
-        })}
 
-        <TouchableOpacity
-          style={styles.saveButton}
-          onPress={salvarDespesa}
-        >
-          <Text style={styles.saveButtonText}>
-            Salvar despesa
-          </Text>
-        </TouchableOpacity>
+            {tipoDivisao === "IGUAL" &&
+              valorNumerico > 0 &&
+              participantesSelecionados.length > 0 && (
+                <Text style={styles.ajuda}>
+                  Divisão igual estimada:{" "}
+                  {formatarMoeda(valorPorPessoa)} por pessoa.
+                </Text>
+              )}
+          </View>
 
-        <TouchableOpacity
-          style={styles.cancelButton}
-          onPress={() => router.back()}
-        >
-          <Text style={styles.cancelText}>
-            Cancelar
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
+          {/* DATA */}
+
+          <View style={styles.campo}>
+            <Text style={styles.label}>Data</Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="Ex.: 10/09/2026"
+              placeholderTextColor="#8AA69E"
+              value={data}
+              onChangeText={setData}
+              keyboardType="numbers-and-punctuation"
+              maxLength={10}
+            />
+          </View>
+
+          {/* CATEGORIA */}
+
+          <View style={styles.campo}>
+            <Text style={styles.label}>Categoria</Text>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.categorias}
+            >
+              {CATEGORIAS.map((item) => {
+                const selecionada = categoria === item.nome;
+
+                return (
+                  <TouchableOpacity
+                    key={item.nome}
+                    style={[
+                      styles.categoria,
+                      selecionada && styles.categoriaSelecionada,
+                    ]}
+                    onPress={() => setCategoria(item.nome)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.categoriaIcone}>
+                      {item.icone}
+                    </Text>
+
+                    <Text
+                      style={[
+                        styles.categoriaTexto,
+                        selecionada &&
+                          styles.categoriaTextoSelecionado,
+                      ]}
+                    >
+                      {item.nome}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+
+          {/* QUEM PAGOU */}
+
+          <View style={styles.campo}>
+            <Text style={styles.label}>Quem pagou?</Text>
+
+            <Text style={styles.descricaoSecao}>
+              Selecione quem realizou o pagamento.
+            </Text>
+
+            <View style={styles.listaOpcoes}>
+              {PARTICIPANTES.map((participante) => {
+                const selecionado = pagadorId === participante.id;
+
+                return (
+                  <TouchableOpacity
+                    key={participante.id}
+                    style={[
+                      styles.opcaoPessoa,
+                      selecionado && styles.opcaoPessoaSelecionada,
+                    ]}
+                    onPress={() => setPagadorId(participante.id)}
+                    activeOpacity={0.8}
+                  >
+                    <View
+                      style={[
+                        styles.avatar,
+                        selecionado && styles.avatarSelecionado,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.avatarTexto,
+                          selecionado && styles.avatarTextoSelecionado,
+                        ]}
+                      >
+                        {participante.iniciais}
+                      </Text>
+                    </View>
+
+                    <Text
+                      style={[
+                        styles.nomePessoa,
+                        selecionado && styles.nomePessoaSelecionado,
+                      ]}
+                    >
+                      {participante.nome}
+                    </Text>
+
+                    <View
+                      style={[
+                        styles.radio,
+                        selecionado && styles.radioSelecionado,
+                      ]}
+                    >
+                      {selecionado && (
+                        <View style={styles.radioCentro} />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* PARTICIPANTES DA DIVISÃO */}
+
+          <View style={styles.campo}>
+            <Text style={styles.label}>
+              Quem vai dividir a despesa?
+            </Text>
+
+            <Text style={styles.descricaoSecao}>
+              Toque para incluir ou retirar participantes.
+            </Text>
+
+            <View style={styles.listaOpcoes}>
+              {PARTICIPANTES.map((participante) => {
+                const selecionado =
+                  participantesSelecionados.includes(participante.id);
+
+                return (
+                  <TouchableOpacity
+                    key={participante.id}
+                    style={[
+                      styles.opcaoPessoa,
+                      selecionado && styles.opcaoPessoaSelecionada,
+                    ]}
+                    onPress={() =>
+                      alternarParticipante(participante.id)
+                    }
+                    activeOpacity={0.8}
+                  >
+                    <View
+                      style={[
+                        styles.avatar,
+                        selecionado && styles.avatarSelecionado,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.avatarTexto,
+                          selecionado && styles.avatarTextoSelecionado,
+                        ]}
+                      >
+                        {participante.iniciais}
+                      </Text>
+                    </View>
+
+                    <Text
+                      style={[
+                        styles.nomePessoa,
+                        selecionado && styles.nomePessoaSelecionado,
+                      ]}
+                    >
+                      {participante.nome}
+                    </Text>
+
+                    <View
+                      style={[
+                        styles.checkbox,
+                        selecionado && styles.checkboxSelecionado,
+                      ]}
+                    >
+                      {selecionado && (
+                        <Text style={styles.checkTexto}>✓</Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* TIPO DE DIVISÃO */}
+
+          <View style={styles.campo}>
+            <Text style={styles.label}>Como dividir o valor?</Text>
+
+            <View style={styles.divisoes}>
+              <TouchableOpacity
+                style={[
+                  styles.divisao,
+                  tipoDivisao === "IGUAL" && styles.divisaoSelecionada,
+                ]}
+                onPress={() => setTipoDivisao("IGUAL")}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.divisaoIcone}>⚖️</Text>
+
+                <Text
+                  style={[
+                    styles.divisaoTitulo,
+                    tipoDivisao === "IGUAL" &&
+                      styles.divisaoTituloSelecionado,
+                  ]}
+                >
+                  Igual
+                </Text>
+
+                <Text style={styles.divisaoDescricao}>
+                  Partes iguais
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.divisao,
+                  tipoDivisao === "VALOR" && styles.divisaoSelecionada,
+                ]}
+                onPress={() => setTipoDivisao("VALOR")}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.divisaoIcone}>💵</Text>
+
+                <Text
+                  style={[
+                    styles.divisaoTitulo,
+                    tipoDivisao === "VALOR" &&
+                      styles.divisaoTituloSelecionado,
+                  ]}
+                >
+                  Por valor
+                </Text>
+
+                <Text style={styles.divisaoDescricao}>
+                  Valor por pessoa
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.divisao,
+                  tipoDivisao === "PERCENTUAL" &&
+                    styles.divisaoSelecionada,
+                ]}
+                onPress={() => setTipoDivisao("PERCENTUAL")}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.divisaoIcone}>📊</Text>
+
+                <Text
+                  style={[
+                    styles.divisaoTitulo,
+                    tipoDivisao === "PERCENTUAL" &&
+                      styles.divisaoTituloSelecionado,
+                  ]}
+                >
+                  Por %
+                </Text>
+
+                <Text style={styles.divisaoDescricao}>
+                  Percentual
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* VALORES INDIVIDUAIS */}
+
+            {tipoDivisao === "VALOR" &&
+              participantesSelecionados.length > 0 && (
+                <View style={styles.detalhesDivisao}>
+                  <Text style={styles.detalhesTitulo}>
+                    Valor de cada participante
+                  </Text>
+
+                  {PARTICIPANTES.filter((item) =>
+                    participantesSelecionados.includes(item.id)
+                  ).map((participante) => (
+                    <View
+                      key={participante.id}
+                      style={styles.linhaDivisao}
+                    >
+                      <Text style={styles.nomeLinha}>
+                        {participante.nome}
+                      </Text>
+
+                      <View style={styles.valorIndividual}>
+                        <Text style={styles.simboloPequeno}>R$</Text>
+
+                        <TextInput
+                          style={styles.inputIndividual}
+                          placeholder="0,00"
+                          placeholderTextColor="#8AA69E"
+                          value={
+                            valoresIndividuais[participante.id] ?? ""
+                          }
+                          onChangeText={(texto) =>
+                            setValoresIndividuais((atuais) => ({
+                              ...atuais,
+                              [participante.id]: texto,
+                            }))
+                          }
+                          keyboardType="decimal-pad"
+                        />
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+            {/* PERCENTUAIS INDIVIDUAIS */}
+
+            {tipoDivisao === "PERCENTUAL" &&
+              participantesSelecionados.length > 0 && (
+                <View style={styles.detalhesDivisao}>
+                  <Text style={styles.detalhesTitulo}>
+                    Percentual de cada participante
+                  </Text>
+
+                  {PARTICIPANTES.filter((item) =>
+                    participantesSelecionados.includes(item.id)
+                  ).map((participante) => (
+                    <View
+                      key={participante.id}
+                      style={styles.linhaDivisao}
+                    >
+                      <Text style={styles.nomeLinha}>
+                        {participante.nome}
+                      </Text>
+
+                      <View style={styles.percentualIndividual}>
+                        <TextInput
+                          style={styles.inputPercentual}
+                          placeholder="0"
+                          placeholderTextColor="#8AA69E"
+                          value={
+                            percentuaisIndividuais[participante.id] ?? ""
+                          }
+                          onChangeText={(texto) =>
+                            setPercentuaisIndividuais((atuais) => ({
+                              ...atuais,
+                              [participante.id]: texto,
+                            }))
+                          }
+                          keyboardType="decimal-pad"
+                        />
+
+                        <Text style={styles.simboloPercentual}>%</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+          </View>
+
+          {/* OBSERVAÇÃO */}
+
+          <View style={styles.campo}>
+            <Text style={styles.label}>
+              Observação (opcional)
+            </Text>
+
+            <TextInput
+              style={[styles.input, styles.inputObservacao]}
+              placeholder="Adicione uma informação sobre a despesa..."
+              placeholderTextColor="#8AA69E"
+              value={observacao}
+              onChangeText={setObservacao}
+              multiline
+              textAlignVertical="top"
+              maxLength={500}
+            />
+          </View>
+
+          {/* BOTÕES */}
+
+          <TouchableOpacity
+            style={styles.botaoSalvar}
+            onPress={salvarDespesa}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.botaoSalvarTexto}>
+              Salvar despesa
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.botaoCancelar}
+            onPress={voltarParaTelaAnterior}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.botaoCancelarTexto}>
+              Cancelar
+            </Text>
+          </TouchableOpacity>
+
+          <View style={styles.espacoFinal} />
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
+
   container: {
     flex: 1,
-    backgroundColor: Cores.fundo,
+    backgroundColor: "#F5FBF7",
   },
 
   scroll: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
+    flex: 1,
   },
+
+  conteudo: {
+    paddingHorizontal: 20,
+    paddingBottom: 30,
+  },
+
+  /* CABEÇALHO */
 
   header: {
-    height: 70,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    paddingTop: 12,
+    paddingBottom: 22,
   },
 
-  backButton: {
+  botaoVoltar: {
     width: 42,
     height: 42,
-    borderRadius: 12,
-    backgroundColor: Cores.branco,
+    borderRadius: 21,
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: Cores.borda,
+    borderColor: "#E1EEE8",
     justifyContent: "center",
     alignItems: "center",
+    marginRight: 12,
   },
 
-  backText: {
-    color: Cores.texto,
+  voltar: {
     fontSize: 32,
+    color: "#0B3B33",
+    marginTop: -3,
   },
 
-  headerCenter: {
-    alignItems: "center",
+  headerTexto: {
+    flex: 1,
   },
 
-  headerTitle: {
-    color: Cores.texto,
-    fontSize: 17,
+  titulo: {
+    fontSize: 22,
     fontWeight: "700",
+    color: "#0B3B33",
   },
 
-  headerSubtitle: {
-    color: Cores.textoSuave,
-    fontSize: 11,
-    marginTop: 2,
+  subtitulo: {
+    fontSize: 12,
+    color: "#6B8F86",
+    marginTop: 4,
   },
 
-  headerSpace: {
-    width: 42,
+  /* CARTÃO DE LEITURA DE RECIBO */
+
+  cardIA: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#E8F9F2",
+    borderWidth: 1,
+    borderColor: "#C9EFE1",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 24,
+  },
+
+  iconeIA: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+
+  iconeIAText: {
+    fontSize: 21,
+  },
+
+  iaTexto: {
+    flex: 1,
+  },
+
+  iaTitulo: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0B3B33",
+    marginBottom: 3,
+  },
+
+  iaSubtitulo: {
+    fontSize: 10,
+    color: "#6B8F86",
+    lineHeight: 15,
+  },
+
+  seta: {
+    fontSize: 25,
+    color: "#00A17A",
+    marginLeft: 8,
+  },
+
+  /* CAMPOS */
+
+  campo: {
+    marginBottom: 20,
   },
 
   label: {
-    color: Cores.texto,
     fontSize: 13,
-    fontWeight: "700",
-    marginTop: 18,
+    fontWeight: "600",
+    color: "#0B3B33",
     marginBottom: 8,
   },
 
-  divisionContainer: {
-    flexDirection: "row",
-    backgroundColor: Cores.campo,
-    padding: 3,
-    borderRadius: 12,
-  },
-
-  divisionButton: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: "center",
-    borderRadius: 9,
-  },
-
-  divisionActive: {
-    backgroundColor: Cores.texto,
-  },
-
-  divisionText: {
-    color: Cores.textoSuave,
-    fontWeight: "700",
-  },
-
-  divisionTextActive: {
-    color: Cores.branco,
-  },
-
   input: {
-    height: 52,
-    backgroundColor: Cores.campo,
+    minHeight: 52,
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: Cores.borda,
-    borderRadius: 12,
+    borderColor: "#E1EEE8",
+    borderRadius: 13,
     paddingHorizontal: 15,
-    color: Cores.texto,
+    fontSize: 14,
+    color: "#0B3B33",
   },
 
-  valueContainer: {
+  valorContainer: {
     height: 52,
-    backgroundColor: Cores.campo,
-    borderWidth: 1,
-    borderColor: Cores.borda,
-    borderRadius: 12,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 14,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E1EEE8",
+    borderRadius: 13,
+    paddingHorizontal: 15,
   },
 
-  currency: {
-    color: Cores.texto,
+  simbolo: {
+    fontSize: 14,
     fontWeight: "700",
+    color: "#0B3B33",
     marginRight: 8,
   },
 
-  valueInput: {
+  inputValor: {
     flex: 1,
-    color: Cores.texto,
+    height: "100%",
+    fontSize: 18,
+    color: "#0B3B33",
   },
 
-  horizontalPeople: {
+  ajuda: {
+    fontSize: 11,
+    lineHeight: 17,
+    color: "#6B8F86",
+    marginTop: 7,
+  },
+
+  descricaoSecao: {
+    fontSize: 11,
+    color: "#6B8F86",
+    lineHeight: 17,
+    marginTop: -2,
+    marginBottom: 10,
+  },
+
+  categorias: {
+    gap: 8,
+    paddingRight: 10,
+  },
+
+  categoria: {
     flexDirection: "row",
-    gap: 9,
-  },
-
-  payer: {
     alignItems: "center",
-    padding: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: Cores.borda,
-    backgroundColor: Cores.branco,
-    borderRadius: 14,
+    borderColor: "#E1EEE8",
   },
 
-  payerActive: {
-    borderColor: Cores.principal,
+  categoriaSelecionada: {
+    backgroundColor: "#DDF7EE",
+    borderColor: "#00C896",
+  },
+
+  categoriaIcone: {
+    fontSize: 15,
+    marginRight: 5,
+  },
+
+  categoriaTexto: {
+    fontSize: 11,
+    color: "#6B8F86",
+    fontWeight: "600",
+  },
+
+  categoriaTextoSelecionado: {
+    color: "#0B3B33",
+  },
+
+  /* PAGADOR E PARTICIPANTES */
+
+  listaOpcoes: {
+    gap: 8,
+  },
+
+  opcaoPessoa: {
+    minHeight: 58,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E1EEE8",
+    borderRadius: 13,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+
+  opcaoPessoaSelecionada: {
+    backgroundColor: "#F1FBF7",
+    borderColor: "#00C896",
   },
 
   avatar: {
     width: 36,
     height: 36,
-    borderRadius: 12,
-    backgroundColor: Cores.principal,
+    borderRadius: 18,
+    backgroundColor: "#EAF7F3",
     justifyContent: "center",
     alignItems: "center",
+    marginRight: 11,
   },
 
-  avatarText: {
-    color: Cores.texto,
+  avatarSelecionado: {
+    backgroundColor: "#00C896",
+  },
+
+  avatarTexto: {
     fontSize: 10,
+    fontWeight: "800",
+    color: "#6B8F86",
+  },
+
+  avatarTextoSelecionado: {
+    color: "#0B3B33",
+  },
+
+  nomePessoa: {
+    flex: 1,
+    fontSize: 13,
+    color: "#6B8F86",
+    fontWeight: "500",
+  },
+
+  nomePessoaSelecionado: {
+    color: "#0B3B33",
     fontWeight: "700",
   },
 
-  payerText: {
-    color: Cores.textoSuave,
-    fontSize: 10,
-    marginTop: 5,
-    fontWeight: "600",
+  radio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "#B7CEC5",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
-  payerTextActive: {
-    color: Cores.texto,
+  radioSelecionado: {
+    borderColor: "#00C896",
   },
 
-  categories: {
+  radioCentro: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#00C896",
+  },
+
+  checkbox: {
+    width: 21,
+    height: 21,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: "#B7CEC5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  checkboxSelecionado: {
+    backgroundColor: "#00C896",
+    borderColor: "#00C896",
+  },
+
+  checkTexto: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+
+  /* TIPOS DE DIVISÃO */
+
+  divisoes: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 8,
   },
 
-  category: {
-    paddingHorizontal: 13,
-    paddingVertical: 9,
-    borderRadius: 20,
-    backgroundColor: Cores.campo,
+  divisao: {
+    flex: 1,
+    minHeight: 108,
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: Cores.borda,
-  },
-
-  categoryActive: {
-    backgroundColor: Cores.texto,
-    borderColor: Cores.texto,
-  },
-
-  categoryText: {
-    color: Cores.textoSuave,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-
-  categoryTextActive: {
-    color: Cores.branco,
-  },
-
-  participantsHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+    borderColor: "#E1EEE8",
+    borderRadius: 13,
+    paddingHorizontal: 6,
+    paddingVertical: 12,
     alignItems: "center",
+    justifyContent: "center",
   },
 
-  helper: {
-    color: Cores.textoSuave,
+  divisaoSelecionada: {
+    backgroundColor: "#DDF7EE",
+    borderColor: "#00C896",
+  },
+
+  divisaoIcone: {
+    fontSize: 21,
+    marginBottom: 7,
+  },
+
+  divisaoTitulo: {
     fontSize: 12,
-    marginTop: -3,
-  },
-
-  count: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: Cores.principal,
-    color: Cores.texto,
-    textAlign: "center",
-    lineHeight: 28,
     fontWeight: "700",
+    color: "#6B8F86",
+    textAlign: "center",
   },
 
-  participantRow: {
-    minHeight: 52,
+  divisaoTituloSelecionado: {
+    color: "#0B3B33",
+  },
+
+  divisaoDescricao: {
+    fontSize: 9,
+    color: "#6B8F86",
+    marginTop: 5,
+    textAlign: "center",
+  },
+
+  detalhesDivisao: {
+    marginTop: 14,
+    padding: 13,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E1EEE8",
+    borderRadius: 13,
+  },
+
+  detalhesTitulo: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#0B3B33",
+    marginBottom: 12,
+  },
+
+  linhaDivisao: {
+    minHeight: 46,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     borderBottomWidth: 1,
-    borderBottomColor: Cores.borda,
+    borderBottomColor: "#F0F6F3",
+    paddingVertical: 5,
   },
 
-  participantMain: {
+  nomeLinha: {
+    flex: 1,
+    fontSize: 12,
+    color: "#0B3B33",
+    paddingRight: 8,
+  },
+
+  valorIndividual: {
+    width: 112,
+    height: 39,
     flexDirection: "row",
     alignItems: "center",
-    flex: 1,
-  },
-
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 7,
     borderWidth: 1,
-    borderColor: Cores.borda,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 10,
+    borderColor: "#E1EEE8",
+    borderRadius: 10,
+    paddingHorizontal: 8,
   },
 
-  checkboxActive: {
-    backgroundColor: Cores.principal,
-    borderColor: Cores.principal,
-  },
-
-  check: {
-    color: Cores.texto,
+  simboloPequeno: {
+    color: "#6B8F86",
+    fontSize: 10,
     fontWeight: "700",
+    marginRight: 4,
   },
 
-  participantName: {
-    color: Cores.texto,
+  inputIndividual: {
+    flex: 1,
+    height: "100%",
     fontSize: 13,
-    fontWeight: "600",
+    color: "#0B3B33",
+    textAlign: "right",
   },
 
-  previewValue: {
-    color: Cores.principalEscuro,
+  percentualIndividual: {
+    width: 78,
+    height: 39,
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E1EEE8",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+  },
+
+  inputPercentual: {
+    flex: 1,
+    height: "100%",
+    fontSize: 13,
+    color: "#0B3B33",
+    textAlign: "right",
+  },
+
+  simboloPercentual: {
+    color: "#6B8F86",
     fontSize: 12,
     fontWeight: "700",
+    marginLeft: 4,
   },
 
-  smallInput: {
-    width: 80,
-    height: 38,
-    backgroundColor: Cores.campo,
-    borderWidth: 1,
-    borderColor: Cores.borda,
-    borderRadius: 10,
-    paddingHorizontal: 9,
-    textAlign: "right",
-    color: Cores.texto,
+  /* OBSERVAÇÃO */
+
+  inputObservacao: {
+    minHeight: 100,
+    paddingTop: 14,
+    paddingBottom: 14,
   },
 
-  saveButton: {
+  /* BOTÕES */
+
+  botaoSalvar: {
     height: 52,
-    borderRadius: 12,
-    backgroundColor: Cores.principal,
+    borderRadius: 16,
+    backgroundColor: "#00C896",
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 30,
+    marginTop: 5,
   },
 
-  saveButtonText: {
-    color: Cores.texto,
+  botaoSalvarTexto: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  botaoCancelar: {
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E1EEE8",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 10,
+  },
+
+  botaoCancelarTexto: {
+    color: "#6B8F86",
+    fontSize: 14,
     fontWeight: "700",
   },
 
-  cancelButton: {
-    alignItems: "center",
-    paddingVertical: 15,
-  },
-
-  cancelText: {
-    color: Cores.textoSuave,
-    fontWeight: "600",
+  espacoFinal: {
+    height: 20,
   },
 });

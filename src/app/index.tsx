@@ -8,8 +8,22 @@
  * entre /(auth)/login e /(main)/home com base no estado de autenticação.
  */
 
+import { ActivityIndicator, View } from "react-native";
 import { Redirect } from "expo-router";
+import { useUsuario } from "@/contexts/UsuarioContext";
 
 export default function Index() {
-  return <Redirect href="/(auth)/login" />;
+  const { usuario, carregando } = useUsuario();
+
+  if (carregando) {
+    return (
+      <View
+        style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
+      >
+        <ActivityIndicator color="#00C896" />
+      </View>
+    );
+  }
+
+  return <Redirect href={usuario ? "/(main)/home" : "/(auth)/login"} />;
 }

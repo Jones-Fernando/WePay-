@@ -15,51 +15,52 @@ import {
   Platform,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { router } from "expo-router";
+import { authApi } from "@/services/api";
 
 export default function Cadastro() {
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [confirmarSenha, setConfirmarSenha] = useState("");
-
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [mostrarConfirmacao, setMostrarConfirmacao] = useState(false);
+  const [carregando, setCarregando] = useState(false);
 
-  function criarConta() {
-    if (!nome || !email || !senha || !confirmarSenha) {
-      Alert.alert(
-        "Atenção",
-        "Preencha todos os campos."
-      );
+  async function criarConta() {
+    const nomeLimpo = nome.trim();
+    const emailLimpo = email.trim().toLowerCase();
+
+    if (!nomeLimpo || !emailLimpo || !senha || !confirmarSenha) {
+      Alert.alert("Atenção", "Preencha todos os campos.");
       return;
     }
-
+    if (!/\S+@\S+\.\S+/.test(emailLimpo)) {
+      Alert.alert("Atenção", "Digite um e-mail válido.");
+      return;
+    }
     if (senha !== confirmarSenha) {
-      Alert.alert(
-        "Erro",
-        "As senhas não são iguais."
-      );
+      Alert.alert("Erro", "As senhas não são iguais.");
+      return;
+    }
+    if (senha.length < 6) {
+      Alert.alert("Atenção", "A senha deve ter ao menos 6 caracteres.");
       return;
     }
 
-    console.log({
-      nome,
-      email,
-      senha,
-    });
-
-    Alert.alert(
-      "Conta criada!",
-      "Sua conta foi criada com sucesso.",
-      [
-        {
-          text: "Entrar",
-          onPress: () => router.replace("/(auth)/login"),
-        },
-      ]
-    );
+    setCarregando(true);
+    try {
+      await authApi.register(nomeLimpo, emailLimpo, senha);
+      Alert.alert("Conta criada!", "Sua conta foi criada com sucesso.", [
+        { text: "Entrar", onPress: () => router.replace("/(auth)/login") },
+      ]);
+    } catch (erro: any) {
+      Alert.alert("Erro", erro?.message ?? "Não foi possível criar a conta.");
+    } finally {
+      setCarregando(false);
+    }
   }
 
   return (
@@ -168,10 +169,13 @@ export default function Cadastro() {
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={criarConta}
+              disabled={carregando}
             >
-              <Text style={styles.primaryButtonText}>
-                Criar conta
-              </Text>
+              {carregando ? (
+                <ActivityIndicator color="#0B3B33" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Criar conta</Text>
+              )}
             </TouchableOpacity>
           </View>
 

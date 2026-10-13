@@ -13,16 +13,8 @@ export default function MainLayout() {
   return (
     <UsuarioProvider>
       <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="home" />
-        <Stack.Screen name="group/despesas-grupo" />
-        <Stack.Screen name="group/detalhes-despesa" />
-        <Stack.Screen name="group/nova-despesa" />
-        <Stack.Screen name="group/participantes" />
-        <Stack.Screen name="group/saldos" />
-        <Stack.Screen name="personal/despesas-pessoais" />
-        <Stack.Screen name="personal/nova-despesa-pessoal" />
-        <Stack.Screen name="receipt-reader/ler-recibo" />
-        <Stack.Screen name="gerenciamento-perfil" />
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(main)" />
       </Stack>
     </UsuarioProvider>
   );

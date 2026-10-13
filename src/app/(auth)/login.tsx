@@ -17,37 +17,45 @@ import {
   Platform,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 
 import { router } from "expo-router";
+import { useUsuario } from "@/contexts/UsuarioContext";
 
 export default function Index() {
+  const { login } = useUsuario();
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [mostrarSenha, setMostrarSenha] = useState(false);
+  const [carregando, setCarregando] = useState(false);
 
-  function entrar() {
+  async function entrar() {
     const emailLimpo = email.trim();
-    const senhaLimpa = senha.trim();
+    const senhaDigitada = senha;
 
     if (!emailLimpo) {
       Alert.alert("Atenção", "Digite seu e-mail.");
       return;
     }
-
-    if (!senhaLimpa) {
+    if (!senhaDigitada) {
       Alert.alert("Atenção", "Digite sua senha.");
       return;
     }
-
-    const emailValido = /\S+@\S+\.\S+/.test(emailLimpo);
-
-    if (!emailValido) {
+    if (!/\S+@\S+\.\S+/.test(emailLimpo)) {
       Alert.alert("Atenção", "Digite um e-mail válido.");
       return;
     }
 
-    router.replace("/(main)/home");
+    setCarregando(true);
+    try {
+      await login(emailLimpo, senhaDigitada);
+      router.replace("/(main)/home");
+    } catch (erro: any) {
+      Alert.alert("Erro", erro?.message ?? "Não foi possível fazer login.");
+    } finally {
+      setCarregando(false);
+    }
   }
 
   function criarConta() {
@@ -142,10 +150,13 @@ export default function Index() {
               style={styles.primaryButton}
               onPress={entrar}
               activeOpacity={0.8}
+              disabled={carregando}
             >
-              <Text style={styles.primaryButtonText}>
-                Entrar
-              </Text>
+              {carregando ? (
+                <ActivityIndicator color="#0B3B33" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Entrar</Text>
+              )}
             </TouchableOpacity>
           </View>
 

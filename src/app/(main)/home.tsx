@@ -13,7 +13,7 @@ import {
   SafeAreaView,
   ScrollView,
 } from "react-native";
-import {router} from "expo-router";
+import { Redirect, router } from "expo-router";
 import { useUsuario } from "@/contexts/UsuarioContext";
 
 type Aba = "grupos" | "pessoal";
@@ -21,10 +21,6 @@ type Aba = "grupos" | "pessoal";
 export default function Home() {
   const [abaSelecionada, setAbaSelecionada] = useState<Aba>("pessoal");
   const { usuario } = useUsuario();
-
-  const irParaDespesasGrupo = () => {
-    setAbaSelecionada("grupos");
-  };
 
   const irParaBotaoMais = () => {
     if (abaSelecionada === "pessoal") {
@@ -34,6 +30,10 @@ export default function Home() {
 
     router.push("/(main)/group/despesas-grupo");
   };
+
+  if (!usuario) {
+    return <Redirect href="/(auth)/login" />;
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -146,6 +146,12 @@ export default function Home() {
               <TouchableOpacity
                 style={styles.groupCard}
                 activeOpacity={0.8}
+                onPress={() =>
+                  router.push({
+                    pathname: "/(main)/group/despesas-grupo",
+                    params: { groupId: "1" },
+                  })
+                }
               >
 
                 <View
@@ -179,6 +185,12 @@ export default function Home() {
               <TouchableOpacity
                 style={styles.groupCard}
                 activeOpacity={0.8}
+                onPress={() =>
+                  router.push({
+                    pathname: "/(main)/group/despesas-grupo",
+                    params: { groupId: "2" },
+                  })
+                }
               >
 
                 <View
@@ -241,6 +253,12 @@ export default function Home() {
               <TouchableOpacity
                 style={styles.groupCard}
                 activeOpacity={0.8}
+                onPress={() =>
+                  router.push({
+                    pathname: "/(main)/personal/detalhes-despesa-pessoal",
+                    params: { id: "1" },
+                  })
+                }
               >
 
                 <View
@@ -274,6 +292,12 @@ export default function Home() {
               <TouchableOpacity
                 style={styles.groupCard}
                 activeOpacity={0.8}
+                onPress={() =>
+                  router.push({
+                    pathname: "/(main)/personal/detalhes-despesa-pessoal",
+                    params: { id: "2" },
+                  })
+                }
               >
 
                 <View
@@ -331,6 +355,7 @@ export default function Home() {
           <TouchableOpacity
             style={styles.navItem}
             activeOpacity={0.7}
+            onPress={() => router.replace("/(main)/home")}
           >
             <Text style={styles.navIconActive}>
               ⌂
@@ -344,6 +369,7 @@ export default function Home() {
           <TouchableOpacity
             style={styles.navItem}
             activeOpacity={0.7}
+            onPress={() => router.push("/(main)/group")}
           >
             <Text style={styles.navIcon}>
               👥
@@ -357,7 +383,7 @@ export default function Home() {
           <TouchableOpacity
             style={styles.navItem}
             activeOpacity={0.7}
-            onPress={() => setAbaSelecionada("grupos")}
+            onPress={() => router.push("/(main)/personal/despesas-pessoais")}
           >
             <Text style={styles.navIcon}>
               💳
@@ -371,6 +397,7 @@ export default function Home() {
           <TouchableOpacity
             style={styles.navItem}
             activeOpacity={0.7}
+            onPress={() => router.push("/(main)/gerenciamento-perfil")}
           >
             <Text style={styles.navIcon}>
               👤

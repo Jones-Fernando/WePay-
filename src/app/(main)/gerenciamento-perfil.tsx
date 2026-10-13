@@ -102,7 +102,15 @@ import { useUsuario } from "@/contexts/UsuarioContext";
 ============================================================ */
 
 export default function GerenciamentoPerfilScreen() {
-  const { usuario, atualizarPerfil } = useUsuario();
+  const { usuario, atualizarPerfil, logout } = useUsuario();
+  const usuarioAtual = usuario ?? {
+    id: "",
+    nome: "",
+    email: "",
+    telefone: "",
+    iniciais: "",
+    saldoTotal: 0,
+  };
 
   /**
    * ==========================================================
@@ -116,14 +124,14 @@ export default function GerenciamentoPerfilScreen() {
    * iniciamos o campo com o mesmo usuário utilizado
    * como referência nas telas existentes.
    */
-  const [nome, setNome] = useState(usuario.nome);
+  const [nome, setNome] = useState(usuarioAtual.nome);
 
 
   /**
    * E-mail do usuário.
    */
   const [email, setEmail] =
-    useState(usuario.email);
+    useState(usuarioAtual.email);
 
 
   /**
@@ -132,7 +140,7 @@ export default function GerenciamentoPerfilScreen() {
    * Neste primeiro momento é apenas um dado visual/mock.
    */
   const [telefone, setTelefone] =
-    useState(usuario.telefone);
+    useState(usuarioAtual.telefone);
 
 
   /**
@@ -379,15 +387,14 @@ export default function GerenciamentoPerfilScreen() {
            * await storage.removeToken();
            */
 
-          onPress: () => {
+          onPress: async () => {
 
             /**
              * Depois do logout,
              * retornamos para o login.
              */
-            router.replace(
-              "/(auth)/login"
-            );
+            await logout();
+            router.replace("/(auth)/login");
 
           },
         },
@@ -488,7 +495,7 @@ export default function GerenciamentoPerfilScreen() {
             <View style={styles.profileAvatar}>
 
               <Text style={styles.profileAvatarText}>
-                {usuario.iniciais}
+                {usuarioAtual.iniciais}
               </Text>
 
             </View>
@@ -769,7 +776,7 @@ export default function GerenciamentoPerfilScreen() {
               onPress={() => router.push("/(main)/configuracoes")}
               activeOpacity={0.7}
             >
-              <View style={styles.optionIcon}>
+              <View style={[styles.optionIcon, { backgroundColor: "#00C896" }]}>
                 <Text style={styles.optionIconText}>⚙️</Text>
               </View>
 
