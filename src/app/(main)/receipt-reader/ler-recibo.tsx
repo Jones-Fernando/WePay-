@@ -11,11 +11,18 @@ import {
   View,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 
 import { lerReciboComIa } from "@/services/leitorIaServico";
 
 export default function LerRecibo() {
+  const params = useLocalSearchParams<{
+    origem?: string;
+    modo?: string;
+    groupId?: string;
+    grupoNome?: string;
+    despesaId?: string;
+  }>();
   const [imagem, setImagem] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [analisando, setAnalisando] = useState(false);
 
@@ -27,6 +34,21 @@ export default function LerRecibo() {
     }
 
     const resultado = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: false,
+      quality: 0.8,
+    });
+    if (!resultado.canceled && resultado.assets[0]) setImagem(resultado.assets[0]);
+  }
+
+  async function tirarFoto() {
+    const permissao = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permissao.granted) {
+      Alert.alert("Permissão necessária", "Permita o acesso à câmera para fotografar o recibo.");
+      return;
+    }
+
+    const resultado = await ImagePicker.launchCameraAsync({
       mediaTypes: ["images"],
       allowsEditing: false,
       quality: 0.8,
@@ -47,6 +69,11 @@ export default function LerRecibo() {
           valor: dados.valor_total?.toFixed(2).replace(".", ",") ?? "",
           data: dados.data ?? "",
           categoria: dados.categoria_sugerida ?? "Outros",
+          origem: params.origem ?? "pessoal",
+          modo: params.modo ?? "criar",
+          groupId: params.groupId ?? "",
+          grupoNome: params.grupoNome ?? "",
+          despesaId: params.despesaId ?? "",
         },
       });
     } catch (erro) {
@@ -80,15 +107,25 @@ export default function LerRecibo() {
 
           {imagem ? <Image source={{ uri: imagem.uri }} style={styles.previa} /> : null}
 
-          <TouchableOpacity style={styles.botao} onPress={selecionarImagem} disabled={analisando}>
-            <Text style={styles.botaoTexto}>{imagem ? "Trocar imagem" : "Selecionar imagem"}</Text>
-          </TouchableOpacity>
+          <View style={styles.botoesImagem}>
+            <TouchableOpacity style={[styles.botao, styles.botaoFlex]} onPress={tirarFoto} disabled={analisando}>
+              <Text style={styles.botaoTexto}>📷 Tirar foto</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.botao, styles.botaoFlex, styles.botaoSecundario]} onPress={selecionarImagem} disabled={analisando}>
+              <Text style={styles.botaoTexto}>🖼️ {imagem ? "Trocar" : "Galeria"}</Text>
+            </TouchableOpacity>
+          </View>
+          {analisando && (
+            <Text style={styles.textoAnalisando}>✨ Analisando com IA, aguarde...</Text>
+          )}
           <TouchableOpacity
             style={[styles.botao, styles.botaoAnalisar, (!imagem || analisando) && styles.botaoDesabilitado]}
             onPress={analisarRecibo}
             disabled={!imagem || analisando}
           >
-            {analisando ? <ActivityIndicator color="#0B3B33" /> : <Text style={styles.botaoTexto}>Analisar recibo</Text>}
+            {analisando
+              ? <ActivityIndicator color="#0B3B33" />
+              : <Text style={styles.botaoTexto}>Analisar recibo</Text>}
           </TouchableOpacity>
         </View>
       </View>
@@ -109,8 +146,12 @@ const styles = StyleSheet.create({
   texto: { fontSize: 18, fontWeight: "700", color: "#0B3B33", textAlign: "center" },
   subtexto: { marginTop: 10, fontSize: 13, color: "#6B8F86", textAlign: "center", lineHeight: 20 },
   previa: { width: "100%", height: 180, resizeMode: "contain", marginTop: 20, borderRadius: 12 },
-  botao: { marginTop: 24, backgroundColor: "#00C896", paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12 },
-  botaoAnalisar: { marginTop: 10, backgroundColor: "#BDF3DF" },
+  botoesImagem: { flexDirection: "row", gap: 10, marginTop: 24 },
+  botaoFlex: { flex: 1 },
+  botaoSecundario: { backgroundColor: "#E8F9F2", borderWidth: 1, borderColor: "#00C896" },
+  botao: { backgroundColor: "#00C896", paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, alignItems: "center" },
+  botaoAnalisar: { marginTop: 16, backgroundColor: "#BDF3DF", width: "100%", alignItems: "center" },
+  textoAnalisando: { marginTop: 16, fontSize: 12, color: "#6B8F86", textAlign: "center" },
   botaoDesabilitado: { opacity: 0.5 },
   botaoTexto: { color: "#0B3B33", fontWeight: "700" },
 });

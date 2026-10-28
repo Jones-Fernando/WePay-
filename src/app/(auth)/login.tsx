@@ -20,11 +20,12 @@ import {
   ActivityIndicator,
 } from "react-native";
 
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useUsuario } from "@/contexts/UsuarioContext";
 
 export default function Index() {
   const { login } = useUsuario();
+  const { convite } = useLocalSearchParams<{ convite?: string }>();
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [mostrarSenha, setMostrarSenha] = useState(false);
@@ -50,7 +51,11 @@ export default function Index() {
     setCarregando(true);
     try {
       await login(emailLimpo, senhaDigitada);
-      router.replace("/(main)/home");
+      if (convite) {
+        router.replace(`/convite?token=${encodeURIComponent(convite)}` as never);
+      } else {
+        router.replace("/(main)/home");
+      }
     } catch (erro: any) {
       Alert.alert("Erro", erro?.message ?? "Não foi possível fazer login.");
     } finally {

@@ -31,10 +31,14 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # typescript
 *.tsbuildinfo
+
+# Local Expo Go build
+/Expo-Go-57.0.9.tar.app/
 
 example
 

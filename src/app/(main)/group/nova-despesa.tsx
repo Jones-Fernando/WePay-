@@ -9,7 +9,7 @@
  * A gravação definitiva depende da integração com a API Flask.
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   SafeAreaView,
   View,
@@ -24,6 +24,7 @@ import {
   Platform,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import { despesasGrupoApi, participantesApi } from "@/services/api";
 
 type TipoDivisao = "IGUAL" | "VALOR" | "PERCENTUAL";
 
@@ -40,15 +41,6 @@ const CATEGORIAS = [
   { nome: "Lazer", icone: "🎮" },
   { nome: "Assinatura", icone: "🎬" },
   { nome: "Outros", icone: "📦" },
-];
-
-// Dados temporários para visualizar a tela.
-// Posteriormente, buscar os membros reais do grupo pela API.
-const PARTICIPANTES: Participante[] = [
-  { id: "1", nome: "Você", iniciais: "VC" },
-  { id: "2", nome: "Ana Oliveira", iniciais: "AO" },
-  { id: "3", nome: "Pedro Santos", iniciais: "PS" },
-  { id: "4", nome: "Mariana Costa", iniciais: "MC" },
 ];
 
 function obterParametro(
@@ -160,10 +152,11 @@ export default function NovaDespesaGrupo() {
   const [observacao, setObservacao] = useState("");
 
   // Dados específicos do grupo.
-  const [pagadorId, setPagadorId] = useState("1");
+  const [participantes, setParticipantes] = useState<Participante[]>([]);
+  const [pagadorId, setPagadorId] = useState("");
 
   const [participantesSelecionados, setParticipantesSelecionados] =
-    useState<string[]>(["1", "2", "3", "4"]);
+    useState<string[]>([]);
 
   const [tipoDivisao, setTipoDivisao] =
     useState<TipoDivisao>("IGUAL");
@@ -173,6 +166,24 @@ export default function NovaDespesaGrupo() {
 
   const [percentuaisIndividuais, setPercentuaisIndividuais] =
     useState<Record<string, string>>({});
+  const [salvando, setSalvando] = useState(false);
+
+  useEffect(() => {
+    if (!groupId || !Number.isInteger(Number(groupId))) return;
+    let ativo = true;
+    participantesApi.listar(Number(groupId)).then(({ data }) => {
+      if (!ativo) return;
+      const lista = data.map((item) => ({
+        id: String(item.usuario_id),
+        nome: item.nome || item.email || `Participante ${item.usuario_id}`,
+        iniciais: (item.nome || item.email || "?").split(" ").slice(0, 2).map((nome) => nome[0]).join("").toUpperCase(),
+      }));
+      setParticipantes(lista);
+      setParticipantesSelecionados(lista.map((item) => item.id));
+      setPagadorId((atual) => atual || lista[0]?.id || "");
+    }).catch((erro) => Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível carregar os participantes."));
+    return () => { ativo = false; };
+  }, [groupId]);
 
   // Atualiza o formulário caso o leitor de recibo devolva os dados
   // pelos parâmetros da rota.
@@ -330,7 +341,11 @@ export default function NovaDespesaGrupo() {
     return true;
   }
 
-  function salvarDespesa() {
+  async function salvarDespesa() {
+    if (salvando) {
+      return;
+    }
+
     const descricaoLimpa = descricao.trim();
     const valorNumerico = converterValor(valor);
     const dataLimpa = data.trim();
@@ -428,31 +443,27 @@ export default function NovaDespesaGrupo() {
       );
     }
 
-    // Demonstração local: os dados aparecem no console,
-    // mas ainda não são enviados nem gravados no MySQL.
-    console.log("Nova despesa em grupo:", {
-      grupoId: groupId,
-      descricao: descricaoLimpa,
-      valor: valorNumerico,
-      data: dataLimpa,
-      categoria,
-      pagadorId,
-      participantes: participantesSelecionados,
-      tipoDivisao,
-      divisaoCalculada,
-      observacao: observacao.trim(),
-    });
-
-    Alert.alert(
-      "Formulário validado",
-      "Os dados da despesa estão preenchidos corretamente. A gravação definitiva será habilitada quando o formulário estiver conectado à API Flask.",
-      [
-        {
-          text: "Voltar",
-          onPress: voltarParaTelaAnterior,
-        },
-      ]
-    );
+    const dataIso = `${dataLimpa.slice(6, 10)}-${dataLimpa.slice(3, 5)}-${dataLimpa.slice(0, 2)}`;
+    const tipoApi = tipoDivisao === "IGUAL" ? "igual" : tipoDivisao === "VALOR" ? "valores" : "porcentagem";
+    const valores = Object.fromEntries(divisaoCalculada.map((item) => [item.participanteId, item.valor]));
+    const percentuais = Object.fromEntries(participantesSelecionados.map((id) => [id, Number((percentuaisIndividuais[id] ?? "0").replace(",", "."))]));
+    setSalvando(true);
+    try {
+      await despesasGrupoApi.criar({
+        grupo_id: Number(groupId), descricao: descricaoLimpa, valor: valorNumerico,
+        data_despesa: dataIso, categoria, pagador_id: Number(pagadorId),
+        participantes: participantesSelecionados.map(Number), divisao_tipo: tipoApi,
+        ...(tipoApi === "valores" ? { valores } : {}),
+        ...(tipoApi === "porcentagem" ? { percentuais } : {}),
+      });
+      Alert.alert("Despesa registrada", "A despesa foi dividida e os saldos foram recalculados.", [
+        { text: "OK", onPress: () => router.replace({ pathname: "/(main)/group/despesas-grupo", params: { groupId, grupoNome: nomeGrupo } }) },
+      ]);
+    } catch (erro) {
+      Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível registrar a despesa.");
+    } finally {
+      setSalvando(false);
+    }
   }
 
   const valorNumerico = converterValor(valor);
@@ -636,7 +647,7 @@ export default function NovaDespesaGrupo() {
             </Text>
 
             <View style={styles.listaOpcoes}>
-              {PARTICIPANTES.map((participante) => {
+              {participantes.map((participante) => {
                 const selecionado = pagadorId === participante.id;
 
                 return (
@@ -702,7 +713,7 @@ export default function NovaDespesaGrupo() {
             </Text>
 
             <View style={styles.listaOpcoes}>
-              {PARTICIPANTES.map((participante) => {
+              {participantes.map((participante) => {
                 const selecionado =
                   participantesSelecionados.includes(participante.id);
 
@@ -851,7 +862,7 @@ export default function NovaDespesaGrupo() {
                     Valor de cada participante
                   </Text>
 
-                  {PARTICIPANTES.filter((item) =>
+                  {participantes.filter((item) =>
                     participantesSelecionados.includes(item.id)
                   ).map((participante) => (
                     <View
@@ -895,7 +906,7 @@ export default function NovaDespesaGrupo() {
                     Percentual de cada participante
                   </Text>
 
-                  {PARTICIPANTES.filter((item) =>
+                  {participantes.filter((item) =>
                     participantesSelecionados.includes(item.id)
                   ).map((participante) => (
                     <View

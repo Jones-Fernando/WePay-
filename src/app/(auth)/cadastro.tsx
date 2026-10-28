@@ -3,7 +3,7 @@
  * Migrado do projeto de referência para o grupo (auth).
  * Mantém o mesmo padrão visual, validações e navegação.
  */
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -16,11 +16,13 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Modal,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { authApi } from "@/services/api";
 
 export default function Cadastro() {
+  const { convite } = useLocalSearchParams<{ convite?: string }>();
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
@@ -28,6 +30,17 @@ export default function Cadastro() {
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [mostrarConfirmacao, setMostrarConfirmacao] = useState(false);
   const [carregando, setCarregando] = useState(false);
+  const [contaCriada, setContaCriada] = useState(false);
+
+  useEffect(() => {
+    if (!contaCriada) return;
+
+    const redirecionamento = setTimeout(() => {
+      router.replace(convite ? { pathname: "/(auth)/login", params: { convite } } : "/(auth)/login");
+    }, 2000);
+
+    return () => clearTimeout(redirecionamento);
+  }, [contaCriada, convite]);
 
   async function criarConta() {
     const nomeLimpo = nome.trim();
@@ -53,9 +66,7 @@ export default function Cadastro() {
     setCarregando(true);
     try {
       await authApi.register(nomeLimpo, emailLimpo, senha);
-      Alert.alert("Conta criada!", "Sua conta foi criada com sucesso.", [
-        { text: "Entrar", onPress: () => router.replace("/(auth)/login") },
-      ]);
+      setContaCriada(true);
     } catch (erro: any) {
       Alert.alert("Erro", erro?.message ?? "Não foi possível criar a conta.");
     } finally {
@@ -65,6 +76,23 @@ export default function Cadastro() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <Modal
+        transparent
+        visible={contaCriada}
+        animationType="fade"
+        statusBarTranslucent
+      >
+        <View style={styles.successOverlay}>
+          <View style={styles.successCard}>
+            <View style={styles.successIcon}>
+              <Text style={styles.successIconText}>✓</Text>
+            </View>
+            <Text style={styles.successTitle}>Conta criada com sucesso!</Text>
+            <Text style={styles.successText}>Redirecionando para o login...</Text>
+          </View>
+        </View>
+      </Modal>
+
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -344,5 +372,52 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     marginLeft: 5,
+  },
+
+  successOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(11, 59, 51, 0.35)",
+    padding: 24,
+  },
+
+  successCard: {
+    width: "100%",
+    maxWidth: 340,
+    alignItems: "center",
+    backgroundColor: "#F5FBF7",
+    borderRadius: 16,
+    padding: 28,
+  },
+
+  successIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#00C896",
+    marginBottom: 16,
+  },
+
+  successIconText: {
+    color: "#0B3B33",
+    fontSize: 28,
+    fontWeight: "700",
+  },
+
+  successTitle: {
+    color: "#0B3B33",
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+
+  successText: {
+    color: "#6B8F86",
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: "center",
   },
 });

@@ -26,36 +26,34 @@ export async function lerReciboComIa(imagem: {
 
   const tipo = imagem.mimeType ?? "image/jpeg";
   const extensao = tipo.split("/")[1] ?? "jpg";
-  const corpo = new FormData();
-  corpo.append(
-    "imagem",
-    {
-      uri: imagem.uri,
-      name: imagem.fileName ?? `recibo.${extensao}`,
-      type: tipo,
-    } as unknown as Blob
-  );
+  const nomeArquivo = imagem.fileName ?? `recibo.${extensao}`;
 
-  let resposta: Response;
-  try {
-    resposta = await fetch(`${BASE_URL}/recibos/ler`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: corpo,
-    });
-  } catch {
-    throw new Error("Não foi possível conectar ao servidor.");
-  }
+  return new Promise<DadosRecibo>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE_URL}/recibos/ler`);
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
 
-  const texto = await resposta.text();
-  let json: RespostaRecibo;
-  try {
-    json = JSON.parse(texto) as RespostaRecibo;
-  } catch {
-    throw new Error("O servidor retornou uma resposta inválida.");
-  }
-  if (!resposta.ok) {
-    throw new Error(json.message ?? json.mensagem ?? "Não foi possível ler o recibo.");
-  }
-  return json.data;
+    xhr.onload = () => {
+      let json: RespostaRecibo;
+      try {
+        json = JSON.parse(xhr.responseText) as RespostaRecibo;
+      } catch {
+        reject(new Error("Resposta inválida do servidor: " + xhr.responseText));
+        return;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(json.data);
+      } else {
+        reject(new Error(json.message ?? json.mensagem ?? "Erro " + xhr.status));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("Não foi possível conectar ao servidor."));
+    xhr.ontimeout = () => reject(new Error("Tempo de conexão esgotado."));
+    xhr.timeout = 120000;
+
+    const corpo = new FormData();
+    corpo.append("imagem", { uri: imagem.uri, name: nomeArquivo, type: tipo } as unknown as Blob);
+    xhr.send(corpo);
+  });
 }

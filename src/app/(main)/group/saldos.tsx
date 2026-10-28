@@ -1,1045 +1,133 @@
-/**
- * ============================================================
- * WEPAY - SALDOS DO GRUPO
- * ============================================================
- *
- * Esta tela mostra:
- *
- * - o saldo geral do usuário dentro do grupo;
- * - quem o usuário precisa pagar;
- * - valores individuais;
- * - situação de cada saldo.
- *
- *
- * EXEMPLO:
- *
- * Você deve, no total
- * R$ 45,00
- *
- * Bruno Lima
- * você deve pagar
- * R$ 30,00
- *
- * Laura Nunes
- * você deve pagar
- * R$ 15,00
- *
- * Rafael Dias
- * quitado
- * R$ 0,00
- *
- *
- * Os valores abaixo são MOCKS para o frontend.
- *
- * Futuramente:
- *
- * React Native
- *      ↓
- * services/api.ts
- *      ↓
- * Flask
- *      ↓
- * MySQL
- */
-
-
-/* ============================================================
-   IMPORTS
-============================================================ */
-
-import React from "react";
-
+import React, { useCallback, useState } from "react";
 import {
-  SafeAreaView,
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  StatusBar,
-  Alert,
+  SafeAreaView, ScrollView, View, Text,
+  TouchableOpacity, StyleSheet, StatusBar, Alert,
 } from "react-native";
-
-import { router } from "expo-router";
-
-import { Cores } from "../../../constants/Cores";
-
-
-/* ============================================================
-   COMPONENTE PRINCIPAL
-============================================================ */
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { saldosApi } from "@/services/api";
+import { useUsuario } from "@/contexts/UsuarioContext";
 
 export default function SaldosGrupo() {
+  const params = useLocalSearchParams();
+  const groupId = String(params.groupId ?? "");
+  const grupoNome = String(params.grupoNome ?? "Meu grupo");
+  const { usuario } = useUsuario();
+  const [saldos, setSaldos] = useState<{ id: string; devedorId: string; credorId: string; nome: string; direcao: string; valor: number }[]>([]);
 
-  /**
-   * ==========================================================
-   * DADOS MOCKADOS
-   * ==========================================================
-   *
-   * Estes valores seguem a referência visual do projeto.
-   */
+  useFocusEffect(useCallback(() => {
+    if (!Number.isInteger(Number(groupId)) || !usuario) return;
+    let ativo = true;
+    saldosApi.obter(Number(groupId)).then(({ data }) => {
+      if (!ativo) return;
+      const meuId = Number(usuario.id);
+      setSaldos(data.dividas_simplificadas.filter((item) => item.devedor_id === meuId || item.credor_id === meuId).map((item, indice) => ({
+        id: String(indice), devedorId: String(item.devedor_id), credorId: String(item.credor_id),
+        nome: item.devedor_id === meuId ? item.credor : item.devedor,
+        direcao: item.devedor_id === meuId ? "Você deve para" : "deve para você", valor: Number(item.valor),
+      })));
+    }).catch((erro) => { if (ativo) Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível carregar os saldos."); });
+    return () => { ativo = false; };
+  }, [groupId, usuario]));
 
-  const participantes = [
-    {
-      id: "1",
+  const aReceber = saldos
+    .filter((s) => s.credorId === usuario?.id)
+    .reduce((total, s) => total + s.valor, 0);
 
-      nome: "Bruno Lima",
+  const aPagar = saldos
+    .filter((s) => s.devedorId === usuario?.id)
+    .reduce((total, s) => total + s.valor, 0);
 
-      inicial: "B",
-
-      /**
-       * Valor que o usuário precisa pagar.
-       */
-      valor: 30,
-
-      status: "você deve pagar",
-
-      quitado: false,
-
-      corAvatar: "#4C8DFF",
-    },
-
-    {
-      id: "2",
-
-      nome: "Laura Nunes",
-
-      inicial: "L",
-
-      valor: 15,
-
-      status: "você deve pagar",
-
-      quitado: false,
-
-      corAvatar: "#B18CFF",
-    },
-
-    {
-      id: "3",
-
-      nome: "Rafael Dias",
-
-      inicial: "R",
-
-      valor: 0,
-
-      status: "quitado",
-
-      quitado: true,
-
-      corAvatar: "#FFB454",
-    },
-  ];
-
-
-  /**
-   * ==========================================================
-   * TOTAL A PAGAR
-   * ==========================================================
-   *
-   * Soma somente valores que ainda não foram quitados.
-   *
-   * IMPORTANTE:
-   *
-   * Esse cálculo é apenas para o mock/frontend.
-   *
-   * O saldo oficial deverá ser calculado pelo backend.
-   */
-
-  const totalDevido = participantes
-    .filter(
-      (pessoa) => !pessoa.quitado
-    )
-    .reduce(
-      (total, pessoa) =>
-        total + pessoa.valor,
-      0
-    );
-
-
-  /**
-   * ==========================================================
-   * FORMATAÇÃO DE MOEDA
-   * ==========================================================
-   */
-
-  function formatarMoeda(valor: number) {
-
-    return valor.toLocaleString(
-      "pt-BR",
-      {
-        style: "currency",
-
-        currency: "BRL",
-      }
-    );
-
-  }
-
-
-  /**
-   * ==========================================================
-   * NAVEGAÇÃO ENTRE ABAS
-   * ==========================================================
-   */
-
-  function selecionarAba(aba: string) {
-
-    if (aba === "despesas") {
-
-      router.replace(
-        "/(main)/group/despesas-grupo"
-      );
-
-      return;
-    }
-
-
-    if (aba === "participantes") {
-
-      router.replace(
-        "/(main)/group/participantes"
-      );
-
-      return;
-    }
-
-  }
-
-
-  /**
-   * ==========================================================
-   * DETALHES DE UM SALDO
-   * ==========================================================
-   *
-   * No futuro esta função poderá abrir:
-   *
-   * - histórico;
-   * - comprovante;
-   * - marcar pagamento;
-   * - desfazer pagamento.
-   */
-
-  function abrirSaldo(
-    participanteId: string,
-    nome: string,
-    valor: number,
-    quitado: boolean
-  ) {
-
-    if (quitado) {
-
-      Alert.alert(
-        nome,
-        "Este saldo já está quitado."
-      );
-
-      return;
-    }
-
-
+  function registrarPagamento(item: (typeof saldos)[number]) {
     router.push({
       pathname: "/(main)/group/registrar-pagamento",
       params: {
-        participanteId,
-        participanteNome: nome,
-        valor: String(valor),
-        groupId: "1",
+        groupId,
+        grupoNome,
+        participanteId: item.credorId,
+        participanteNome: item.nome,
+        valor: item.valor.toFixed(2).replace(".", ","),
       },
     });
-
   }
 
-
-  /**
-   * ==========================================================
-   * INTERFACE
-   * ========================================================== */
-
   return (
-
-    <SafeAreaView style={styles.safeArea}>
-
-      {/* ======================================================
-          STATUS BAR
-      ======================================================= */}
-
-      <StatusBar
-        barStyle="dark-content"
-      />
-
-
-      {/* ======================================================
-          CABEÇALHO
-      ======================================================= */}
-
-      <View style={styles.header}>
-
-        {/* Botão voltar */}
-        <TouchableOpacity
-          style={styles.botaoVoltar}
-          onPress={() => router.back()}
-          activeOpacity={0.7}
-        >
-
-          <Text style={styles.iconeVoltar}>
-            ‹
-          </Text>
-
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+      <ScrollView contentContainerStyle={styles.conteudo}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={styles.voltar}>‹  Voltar</Text>
         </TouchableOpacity>
 
-
-        {/* Informações do grupo */}
-        <View style={styles.headerTextos}>
-
-          <Text style={styles.tituloPequeno}>
-            Saldos ·
-          </Text>
-
-          <Text style={styles.titulo}>
-            Apê Rep. 302
-          </Text>
-
-        </View>
-
-
-        {/* Menu */}
-        <TouchableOpacity
-          style={styles.botaoMenu}
-          onPress={() =>
-            Alert.alert(
-              "Opções",
-              "Mais opções dos saldos."
-            )
-          }
-          activeOpacity={0.7}
-        >
-
-          <Text style={styles.menuText}>
-            •••
-          </Text>
-
-        </TouchableOpacity>
-
-      </View>
-
-
-      {/* ======================================================
-          ABAS
-      ======================================================= */}
-
-      <View style={styles.abas}>
-
-        {/* Despesas */}
-        <TouchableOpacity
-          style={styles.aba}
-          onPress={() =>
-            selecionarAba("despesas")
-          }
-          activeOpacity={0.8}
-        >
-
-          <Text style={styles.textoAba}>
-            Despesas
-          </Text>
-
-        </TouchableOpacity>
-
-
-        {/* Participantes */}
-        <TouchableOpacity
-          style={styles.aba}
-          onPress={() =>
-            selecionarAba("participantes")
-          }
-          activeOpacity={0.8}
-        >
-
-          <Text style={styles.textoAba}>
-            Participantes
-          </Text>
-
-        </TouchableOpacity>
-
-
-        {/* Saldos ativo */}
-        <TouchableOpacity
-          style={[
-            styles.aba,
-            styles.abaAtiva,
-          ]}
-          activeOpacity={0.8}
-        >
-
-          <Text
-            style={[
-              styles.textoAba,
-              styles.textoAbaAtiva,
-            ]}
-          >
-            Saldos
-          </Text>
-
-        </TouchableOpacity>
-
-      </View>
-
-
-      {/* ======================================================
-          CONTEÚDO
-      ======================================================= */}
-
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.conteudo}
-        showsVerticalScrollIndicator={false}
-      >
-
-
-        {/* ====================================================
-            CARTÃO PRINCIPAL
-        ===================================================== */}
-
-        <View style={styles.saldoPrincipal}>
-
-          {/* Pequeno texto */}
-          <Text style={styles.saldoPrincipalLabel}>
-            Você deve, no total
-          </Text>
-
-
-          {/* Valor */}
-          <Text style={styles.saldoPrincipalValor}>
-            {formatarMoeda(totalDevido)}
-          </Text>
-
-
-          {/* Descrição */}
-          <Text style={styles.saldoPrincipalDescricao}>
-            Valor pendente neste grupo
-          </Text>
-
-        </View>
-
-
-        {/* ====================================================
-            TÍTULO
-        ===================================================== */}
-
-        <View style={styles.listaHeader}>
-
-          <Text style={styles.listaTitulo}>
-            Saldos por participante
-          </Text>
-
-          <Text style={styles.listaQuantidade}>
-            {participantes.length} pessoas
-          </Text>
-
-        </View>
-
-
-        {/* ====================================================
-            PARTICIPANTES
-        ===================================================== */}
-
-        <View style={styles.lista}>
-
-          {participantes.map(
-            (pessoa, index) => (
-
-              <View key={pessoa.id}>
-
-                <TouchableOpacity
-                  style={styles.cardPessoa}
-                  activeOpacity={0.8}
-                  onPress={() =>
-                    abrirSaldo(
-                      pessoa.id,
-                      pessoa.nome,
-                      pessoa.valor,
-                      pessoa.quitado
-                    )
-                  }
-                >
-
-                  {/* -------------------------------------------
-                      AVATAR
-                  -------------------------------------------- */}
-
-                  <View
-                    style={[
-                      styles.avatar,
-                      {
-                        backgroundColor:
-                          pessoa.corAvatar,
-                      },
-                    ]}
-                  >
-
-                    <Text style={styles.avatarTexto}>
-                      {pessoa.inicial}
-                    </Text>
-
-                  </View>
-
-
-                  {/* -------------------------------------------
-                      INFORMAÇÕES
-                  -------------------------------------------- */}
-
-                  <View style={styles.pessoaInfo}>
-
-                    <Text style={styles.pessoaNome}>
-                      {pessoa.nome}
-                    </Text>
-
-
-                    <Text
-                      style={[
-                        styles.pessoaStatus,
-
-                        pessoa.quitado
-                          ? styles.statusQuitado
-                          : styles.statusPagar,
-                      ]}
-                    >
-                      {pessoa.status}
-                    </Text>
-
-                  </View>
-
-
-                  {/* -------------------------------------------
-                      VALOR
-                  -------------------------------------------- */}
-
-                  <View
-                    style={[
-                      styles.pill,
-
-                      pessoa.quitado
-                        ? styles.pillQuitado
-                        : styles.pillPagar,
-                    ]}
-                  >
-
-                    <Text
-                      style={[
-                        styles.pillTexto,
-
-                        pessoa.quitado
-                          ? styles.pillTextoQuitado
-                          : styles.pillTextoPagar,
-                      ]}
-                    >
-                      {formatarMoeda(
-                        pessoa.valor
-                      )}
-                    </Text>
-
-                  </View>
-
-                </TouchableOpacity>
-
-
-                {/* Divisor */}
-                {index <
-                  participantes.length - 1 && (
-
-                  <View style={styles.divisor} />
-
-                )}
-
-              </View>
-
-            )
-          )}
-
-        </View>
-
-
-        {/* ====================================================
-            EXPLICAÇÃO
-        ===================================================== */}
-
-        <View style={styles.infoCard}>
-
-          <View style={styles.infoIcon}>
-
-            <Text style={styles.infoIconText}>
-              i
+        <Text style={styles.titulo}>Saldos do grupo</Text>
+        <Text style={styles.subtitulo}>{grupoNome}</Text>
+
+        <View style={styles.resumo}>
+          <View style={styles.resumoItem}>
+            <Text style={styles.rotulo}>Você tem a receber</Text>
+            <Text style={styles.positivo}>
+              {aReceber.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
             </Text>
-
           </View>
-
-
-          <Text style={styles.infoTexto}>
-
-            Os saldos representam quanto cada participante
-            deve pagar ou receber após a divisão das despesas
-            do grupo.
-
-          </Text>
-
+          <View style={styles.separador} />
+          <View style={styles.resumoItem}>
+            <Text style={styles.rotulo}>Você tem a pagar</Text>
+            <Text style={styles.negativo}>
+              {aPagar.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+            </Text>
+          </View>
         </View>
 
+        <Text style={styles.secao}>Pendências</Text>
 
-        <View style={styles.espacoFinal} />
+        {saldos.map((item) => (
+          <View key={item.id} style={styles.card}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarTexto}>
+                {item.nome.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+              </Text>
+            </View>
+
+            <View style={styles.dados}>
+              <Text style={styles.nome}>{item.nome}</Text>
+              <Text style={styles.direcao}>{item.direcao}</Text>
+              <Text style={styles.valor}>
+                {item.valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+              </Text>
+            </View>
+
+            {item.devedorId === usuario?.id ? <TouchableOpacity style={styles.botaoPagar}
+              onPress={() => registrarPagamento(item)}>
+              <Text style={styles.botaoPagarTexto}>Registrar</Text>
+            </TouchableOpacity> : null}
+          </View>
+        ))}
 
       </ScrollView>
-
     </SafeAreaView>
   );
 }
 
-
-/* ============================================================
-   ESTILOS
-============================================================ */
-
 const styles = StyleSheet.create({
-
-  /* ==========================================================
-     BASE
-  ========================================================== */
-
-  safeArea: {
-    flex: 1,
-
-    backgroundColor: Cores.fundo,
-  },
-
-
-  scroll: {
-    flex: 1,
-  },
-
-
-  conteudo: {
-    paddingHorizontal: 20,
-
-    paddingBottom: 35,
-  },
-
-
-  /* ==========================================================
-     CABEÇALHO
-  ========================================================== */
-
-  header: {
-    flexDirection: "row",
-
-    alignItems: "center",
-
-    paddingHorizontal: 20,
-
-    paddingTop: 12,
-
-    paddingBottom: 18,
-  },
-
-
-  botaoVoltar: {
-    width: 42,
-
-    height: 42,
-
-    borderRadius: 21,
-
-    backgroundColor: Cores.branco,
-
-    justifyContent: "center",
-
-    alignItems: "center",
-
-    marginRight: 12,
-
-    borderWidth: 1,
-
-    borderColor: Cores.borda,
-  },
-
-
-  iconeVoltar: {
-    fontSize: 32,
-
-    color: Cores.texto,
-
-    lineHeight: 34,
-
-    marginTop: -3,
-  },
-
-
-  headerTextos: {
-    flex: 1,
-  },
-
-
-  tituloPequeno: {
-    fontSize: 13,
-
-    color: Cores.textoSuave,
-
-    marginBottom: 2,
-  },
-
-
-  titulo: {
-    fontSize: 24,
-
-    fontWeight: "700",
-
-    color: Cores.texto,
-  },
-
-
-  botaoMenu: {
-    width: 42,
-
-    height: 42,
-
-    borderRadius: 21,
-
-    justifyContent: "center",
-
-    alignItems: "center",
-  },
-
-
-  menuText: {
-    fontSize: 20,
-
-    fontWeight: "700",
-
-    color: Cores.textoSuave,
-
-    letterSpacing: 2,
-  },
-
-
-  /* ==========================================================
-     ABAS
-  ========================================================== */
-
-  abas: {
-    flexDirection: "row",
-
-    marginHorizontal: 20,
-
-    marginBottom: 18,
-
-    padding: 4,
-
-    borderRadius: 14,
-
-    backgroundColor: "#EAF5F0",
-  },
-
-
-  aba: {
-    flex: 1,
-
-    paddingVertical: 11,
-
-    alignItems: "center",
-
-    justifyContent: "center",
-
-    borderRadius: 11,
-  },
-
-
-  abaAtiva: {
-    backgroundColor: Cores.branco,
-  },
-
-
-  textoAba: {
-    fontSize: 13,
-
-    fontWeight: "600",
-
-    color: Cores.textoSuave,
-  },
-
-
-  textoAbaAtiva: {
-    color: Cores.texto,
-  },
-
-
-  /* ==========================================================
-     SALDO PRINCIPAL
-  ========================================================== */
-
-  saldoPrincipal: {
-    marginTop: 2,
-
-    padding: 18,
-
-    borderRadius: 18,
-
-    backgroundColor: Cores.texto,
-  },
-
-
-  saldoPrincipalLabel: {
-    fontSize: 11,
-
-    color: "#BFE0D6",
-  },
-
-
-  saldoPrincipalValor: {
-    marginTop: 4,
-
-    fontSize: 28,
-
-    fontWeight: "700",
-
-    color: Cores.branco,
-  },
-
-
-  saldoPrincipalDescricao: {
-    marginTop: 7,
-
-    fontSize: 11,
-
-    color: "#BFE0D6",
-  },
-
-
-  /* ==========================================================
-     CABEÇALHO DA LISTA
-  ========================================================== */
-
-  listaHeader: {
-    marginTop: 22,
-
-    marginBottom: 10,
-
-    flexDirection: "row",
-
-    alignItems: "center",
-
-    justifyContent: "space-between",
-  },
-
-
-  listaTitulo: {
-    fontSize: 15,
-
-    fontWeight: "700",
-
-    color: Cores.texto,
-  },
-
-
-  listaQuantidade: {
-    fontSize: 11,
-
-    color: Cores.textoSuave,
-  },
-
-
-  /* ==========================================================
-     LISTA
-  ========================================================== */
-
-  lista: {
-    backgroundColor: Cores.branco,
-
-    borderRadius: 18,
-
-    paddingHorizontal: 16,
-
-    borderWidth: 1,
-
-    borderColor: Cores.borda,
-  },
-
-
-  cardPessoa: {
-    minHeight: 78,
-
-    flexDirection: "row",
-
-    alignItems: "center",
-  },
-
-
-  avatar: {
-    width: 44,
-
-    height: 44,
-
-    borderRadius: 22,
-
-    justifyContent: "center",
-
-    alignItems: "center",
-
-    marginRight: 12,
-  },
-
-
-  avatarTexto: {
-    fontSize: 15,
-
-    fontWeight: "800",
-
-    color: Cores.texto,
-  },
-
-
-  pessoaInfo: {
-    flex: 1,
-  },
-
-
-  pessoaNome: {
-    fontSize: 14,
-
-    fontWeight: "700",
-
-    color: Cores.texto,
-  },
-
-
-  pessoaStatus: {
-    marginTop: 4,
-
-    fontSize: 11,
-  },
-
-
-  statusPagar: {
-    color: Cores.textoSuave,
-  },
-
-
-  statusQuitado: {
-    color: Cores.principalEscuro,
-  },
-
-
-  /* ==========================================================
-     PILLS
-  ========================================================== */
-
-  pill: {
-    paddingHorizontal: 10,
-
-    paddingVertical: 7,
-
-    borderRadius: 20,
-  },
-
-
-  pillPagar: {
-    backgroundColor: "#FFE7E2",
-  },
-
-
-  pillQuitado: {
-    backgroundColor: "#DDF7EE",
-  },
-
-
-  pillTexto: {
-    fontSize: 11,
-
-    fontWeight: "700",
-  },
-
-
-  pillTextoPagar: {
-    color: "#D24A3B",
-  },
-
-
-  pillTextoQuitado: {
-    color: Cores.principalEscuro,
-  },
-
-
-  /* ==========================================================
-     DIVISOR
-  ========================================================== */
-
-  divisor: {
-    height: 1,
-
-    backgroundColor: Cores.borda,
-  },
-
-
-  /* ==========================================================
-     INFORMAÇÃO
-  ========================================================== */
-
-  infoCard: {
-    marginTop: 16,
-
-    padding: 14,
-
-    borderRadius: 14,
-
-    flexDirection: "row",
-
-    alignItems: "flex-start",
-
-    backgroundColor: Cores.fundo,
-
-    borderWidth: 1,
-
-    borderColor: Cores.borda,
-  },
-
-
-  infoIcon: {
-    width: 22,
-
-    height: 22,
-
-    borderRadius: 11,
-
-    alignItems: "center",
-
-    justifyContent: "center",
-
-    backgroundColor: Cores.principal,
-
-    marginRight: 10,
-  },
-
-
-  infoIconText: {
-    fontSize: 12,
-
-    fontWeight: "800",
-
-    color: Cores.texto,
-  },
-
-
-  infoTexto: {
-    flex: 1,
-
-    fontSize: 11,
-
-    lineHeight: 17,
-
-    color: Cores.textoSuave,
-  },
-
-
-  espacoFinal: {
-    height: 30,
-  },
-
+  container: { flex: 1, backgroundColor: "#F5FBF7" },
+  conteudo: { padding: 20, paddingBottom: 35 },
+  voltar: { color: "#0B3B33", fontSize: 14, fontWeight: "700", marginBottom: 20 },
+  titulo: { color: "#0B3B33", fontSize: 24, fontWeight: "800" },
+  subtitulo: { color: "#6B8F86", fontSize: 12, marginTop: 5 },
+  resumo: { backgroundColor: "#0B3B33", borderRadius: 18, padding: 17, marginTop: 22, marginBottom: 26 },
+  resumoItem: { paddingVertical: 8 },
+  rotulo: { color: "#BFE0D6", fontSize: 11 },
+  positivo: { color: "#79E5BB", fontSize: 23, fontWeight: "800", marginTop: 5 },
+  negativo: { color: "#FFAD9F", fontSize: 23, fontWeight: "800", marginTop: 5 },
+  separador: { height: 1, backgroundColor: "#426E63", marginVertical: 8 },
+  secao: { color: "#0B3B33", fontSize: 17, fontWeight: "800", marginBottom: 13 },
+  card: { flexDirection: "row", alignItems: "center", backgroundColor: "#FFFFFF", borderRadius: 15, borderWidth: 1, borderColor: "#E1EEE8", padding: 12, marginBottom: 10 },
+  avatar: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#DDF7EE", alignItems: "center", justifyContent: "center", marginRight: 10 },
+  avatarTexto: { color: "#087F5B", fontSize: 11, fontWeight: "800" },
+  dados: { flex: 1 },
+  nome: { color: "#0B3B33", fontSize: 12, fontWeight: "800" },
+  direcao: { color: "#6B8F86", fontSize: 10, marginTop: 4 },
+  valor: { color: "#0B3B33", fontSize: 13, fontWeight: "800", marginTop: 5 },
+  botaoPagar: { backgroundColor: "#DDF7EE", paddingHorizontal: 10, paddingVertical: 9, borderRadius: 10, marginLeft: 6 },
+  botaoPagarTexto: { color: "#087F5B", fontSize: 10, fontWeight: "800" },
+  aviso: { color: "#6B8F86", fontSize: 10, lineHeight: 16, marginTop: 15, textAlign: "center" },
 });

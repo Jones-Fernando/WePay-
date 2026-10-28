@@ -1,251 +1,84 @@
-/*
- * WEPAY — CONVIDAR PARTICIPANTE
- */
-
 import React, { useState } from "react";
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
-  ScrollView,
-  Alert,
+  SafeAreaView, View, Text, TextInput,
+  TouchableOpacity, StyleSheet, StatusBar, Alert,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-
-import { Cores } from "../../../constants/Cores";
+import { participantesApi } from "@/services/api";
 
 export default function ConviteParticipante() {
-  const { groupId } = useLocalSearchParams<{
-    groupId?: string;
-  }>();
-
-  const [nome, setNome] = useState("");
+  const params = useLocalSearchParams();
+  const groupId = String(params.groupId ?? "");
+  const grupoNome = String(params.grupoNome ?? "Meu grupo");
   const [email, setEmail] = useState("");
-  const [carregando, setCarregando] = useState(false);
+  const [enviando, setEnviando] = useState(false);
 
-  function enviarConvite() {
-    const nomeLimpo = nome.trim();
-    const emailLimpo = email.trim();
+  async function enviarConvite() {
+    const emailLimpo = email.trim().toLowerCase();
 
-    if (!nomeLimpo) {
-      Alert.alert("Atenção", "Digite o nome do participante.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLimpo)) {
+      Alert.alert("E-mail inválido", "Informe um endereço de e-mail válido.");
       return;
     }
 
-    if (!/\S+@\S+\.\S+/.test(emailLimpo)) {
-      Alert.alert("Atenção", "Digite um e-mail válido.");
-      return;
-    }
-
-    setCarregando(true);
-
-    /*
-     * Simulação do envio enquanto a API não existe.
-     */
-    setTimeout(() => {
-      setCarregando(false);
-
-      Alert.alert(
-        "Convite enviado",
-        `O convite foi enviado para ${emailLimpo}.`,
-        [
-          {
-            text: "OK",
-            onPress: () => router.back(),
-          },
-        ]
-      );
-    }, 700);
-
-    console.log("Convite:", {
-      groupId,
-      nome: nomeLimpo,
-      email: emailLimpo,
-    });
+    if (!Number.isInteger(Number(groupId)) || enviando) return;
+    try {
+      setEnviando(true);
+      await participantesApi.convidar(Number(groupId), emailLimpo);
+      Alert.alert("Convite enviado", "O convite foi enviado para o e-mail informado.", [{ text: "OK", onPress: () => router.back() }]);
+    } catch (erro) {
+      Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível enviar o convite.");
+    } finally { setEnviando(false); }
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <Text style={styles.backText}>‹</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.headerTitle}>
-            Convidar participante
-          </Text>
-
-          <View style={styles.headerSpace} />
-        </View>
-
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>
-            Adicionar ao grupo
-          </Text>
-
-          <Text style={styles.infoText}>
-            Informe os dados da pessoa que deseja convidar.
-          </Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.label}>Nome</Text>
-
-          <TextInput
-            style={styles.input}
-            placeholder="Nome completo"
-            placeholderTextColor={Cores.textoSuave}
-            value={nome}
-            onChangeText={setNome}
-            autoCapitalize="words"
-          />
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.label}>E-mail</Text>
-
-          <TextInput
-            style={styles.input}
-            placeholder="exemplo@email.com"
-            placeholderTextColor={Cores.textoSuave}
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-        </View>
-
-        <TouchableOpacity
-          style={[
-            styles.primaryButton,
-            carregando && styles.disabledButton,
-          ]}
-          onPress={enviarConvite}
-          disabled={carregando}
-        >
-          <Text style={styles.primaryButtonText}>
-            {carregando ? "Enviando..." : "Enviar convite"}
-          </Text>
+      <StatusBar barStyle="dark-content" />
+      <View style={styles.conteudo}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={styles.voltar}>‹  Voltar</Text>
         </TouchableOpacity>
-      </ScrollView>
+
+        <View style={styles.icone}>
+          <Text style={{ fontSize: 28 }}>✉️</Text>
+        </View>
+        <Text style={styles.titulo}>Convidar participante</Text>
+        <Text style={styles.subtitulo}>
+          Adicione alguém para compartilhar as despesas de {grupoNome}.
+        </Text>
+
+        <Text style={styles.label}>E-mail do participante</Text>
+        <TextInput
+          style={styles.input}
+          value={email}
+          onChangeText={setEmail}
+          placeholder="pessoa@exemplo.com"
+          placeholderTextColor="#8AA69E"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          maxLength={254}
+        />
+
+        <TouchableOpacity style={styles.botao} onPress={enviarConvite} disabled={enviando}>
+          <Text style={styles.botaoTexto}>{enviando ? "Enviando..." : "Enviar convite"}</Text>
+        </TouchableOpacity>
+
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Cores.fundo,
-  },
-
-  scroll: {
-    paddingHorizontal: 20,
-    paddingBottom: 35,
-  },
-
-  header: {
-    height: 65,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-
-  backButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    backgroundColor: Cores.branco,
-    borderWidth: 1,
-    borderColor: Cores.borda,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  backText: {
-    fontSize: 32,
-    color: Cores.texto,
-  },
-
-  headerTitle: {
-    color: Cores.texto,
-    fontSize: 17,
-    fontWeight: "700",
-  },
-
-  headerSpace: {
-    width: 42,
-  },
-
-  infoCard: {
-    backgroundColor: Cores.campo,
-    borderWidth: 1,
-    borderColor: Cores.borda,
-    borderRadius: 15,
-    padding: 16,
-    marginTop: 20,
-  },
-
-  infoTitle: {
-    color: Cores.texto,
-    fontWeight: "700",
-    fontSize: 15,
-  },
-
-  infoText: {
-    color: Cores.textoSuave,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 5,
-  },
-
-  section: {
-    marginTop: 22,
-  },
-
-  label: {
-    color: Cores.texto,
-    fontSize: 13,
-    fontWeight: "700",
-    marginBottom: 8,
-  },
-
-  input: {
-    height: 52,
-    backgroundColor: Cores.campo,
-    borderWidth: 1,
-    borderColor: Cores.borda,
-    borderRadius: 12,
-    paddingHorizontal: 15,
-    color: Cores.texto,
-  },
-
-  primaryButton: {
-    height: 52,
-    backgroundColor: Cores.principal,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 30,
-  },
-
-  disabledButton: {
-    opacity: 0.6,
-  },
-
-  primaryButtonText: {
-    color: Cores.texto,
-    fontSize: 15,
-    fontWeight: "700",
-  },
+  container: { flex: 1, backgroundColor: "#F5FBF7" },
+  conteudo: { padding: 22, flex: 1 },
+  voltar: { color: "#0B3B33", fontSize: 14, fontWeight: "700" },
+  icone: { width: 64, height: 64, borderRadius: 20, backgroundColor: "#DDF7EE", alignItems: "center", justifyContent: "center", marginTop: 36, marginBottom: 20 },
+  titulo: { color: "#0B3B33", fontSize: 24, fontWeight: "800" },
+  subtitulo: { color: "#6B8F86", fontSize: 13, lineHeight: 20, marginTop: 8, marginBottom: 28 },
+  label: { color: "#0B3B33", fontSize: 13, fontWeight: "700", marginBottom: 8 },
+  input: { height: 53, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 13, paddingHorizontal: 14, color: "#0B3B33", fontSize: 14 },
+  botao: { height: 52, backgroundColor: "#00C896", borderRadius: 15, alignItems: "center", justifyContent: "center", marginTop: 18 },
+  botaoTexto: { color: "#FFFFFF", fontWeight: "800", fontSize: 14 },
+  aviso: { color: "#6B8F86", fontSize: 11, lineHeight: 17, marginTop: 18 },
 });

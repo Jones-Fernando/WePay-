@@ -18,6 +18,7 @@ import {
   Platform,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import { despesasPessoaisApi } from "@/services/api";
 
 const CATEGORIAS = [
   { nome: "Alimentação", icone: "🍽️" },
@@ -28,12 +29,43 @@ const CATEGORIAS = [
   { nome: "Outros", icone: "📦" },
 ];
 
+function converterValor(valor: string): number {
+  const limpo = valor.replace(/R\$/gi, "").replace(/\s/g, "");
+
+  if (limpo.includes(",") && limpo.includes(".")) {
+    return Number(limpo.replace(/\./g, "").replace(",", "."));
+  }
+
+  return Number(limpo.replace(",", "."));
+}
+
+function converterDataParaIso(data: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(data)) return data;
+
+  const brasileira = data.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!brasileira) return null;
+
+  const [, dia, mes, ano] = brasileira;
+  const dataValidada = new Date(Number(ano), Number(mes) - 1, Number(dia));
+  const eValida =
+    dataValidada.getFullYear() === Number(ano) &&
+    dataValidada.getMonth() === Number(mes) - 1 &&
+    dataValidada.getDate() === Number(dia);
+
+  return eValida ? `${ano}-${mes}-${dia}` : null;
+}
+
 export default function ConfirmarRecibo() {
   const params = useLocalSearchParams<{
     descricao: string;
     valor: string;
     data: string;
     categoria: string;
+    origem?: string;
+    modo?: string;
+    groupId?: string;
+    grupoNome?: string;
+    despesaId?: string;
   }>();
 
   const [descricao, setDescricao] = useState(params.descricao ?? "");
@@ -55,7 +87,7 @@ export default function ConfirmarRecibo() {
       Alert.alert("Atenção", "Digite o valor da despesa.");
       return;
     }
-    const valorNumerico = Number(valorLimpo.replace(",", "."));
+    const valorNumerico = converterValor(valorLimpo);
     if (isNaN(valorNumerico) || valorNumerico <= 0) {
       Alert.alert("Atenção", "Digite um valor válido.");
       return;
@@ -65,10 +97,43 @@ export default function ConfirmarRecibo() {
       return;
     }
 
+    const dataIso = converterDataParaIso(dataLimpa);
+    if (!dataIso) {
+      Alert.alert("Atenção", "Digite uma data válida no formato DD/MM/AAAA ou AAAA-MM-DD.");
+      return;
+    }
+
+    // A confirmação apenas revisa a extração. Para uma despesa de grupo,
+    // devolvemos os campos ao formulário, que ainda precisa definir pagador e
+    // divisão antes de persistir.
+    if (params.origem === "grupo") {
+      if (!params.groupId) {
+        Alert.alert("Grupo não identificado", "Volte e selecione um grupo antes de continuar.");
+        return;
+      }
+      router.replace({
+        pathname: "/(main)/group/nova-despesa",
+        params: {
+          groupId: params.groupId,
+          grupoNome: params.grupoNome ?? "",
+          descricao: descricaoLimpa,
+          valor: valorNumerico.toFixed(2).replace(".", ","),
+          data: dataIso,
+          categoria,
+        },
+      });
+      return;
+    }
+
     setSalvando(true);
     try {
-      // TODO: integrar com API quando backend estiver pronto
-      await new Promise((resolve) => setTimeout(resolve, 700));
+      await despesasPessoaisApi.criar({
+        descricao: descricaoLimpa,
+        valor: valorNumerico,
+        categoria,
+        tipo: "despesa",
+        data_despesa: dataIso,
+      });
 
       Alert.alert("Despesa salva", "Sua despesa foi cadastrada com sucesso.", [
         { text: "OK", onPress: () => router.replace("/(main)/personal/despesas-pessoais") },
@@ -194,7 +259,7 @@ export default function ConfirmarRecibo() {
             activeOpacity={0.85}
           >
             <Text style={styles.botaoSalvarTexto}>
-              {salvando ? "Salvando..." : "Salvar despesa"}
+              {salvando ? "Salvando..." : params.origem === "grupo" ? "Continuar despesa em grupo" : "Salvar despesa"}
             </Text>
           </TouchableOpacity>
 

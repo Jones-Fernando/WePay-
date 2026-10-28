@@ -14,6 +14,7 @@ import {
   Alert,
 } from "react-native";
 import { router } from "expo-router";
+import { authApi } from "@/services/api";
 
 import { Cores } from "../../constants/Cores";
 
@@ -26,8 +27,9 @@ export default function AlterarSenha() {
 
   const [confirmacao, setConfirmacao] =
     useState("");
+  const [salvando, setSalvando] = useState(false);
 
-  function salvar() {
+  async function salvar() {
     if (!senhaAtual || !novaSenha || !confirmacao) {
       Alert.alert(
         "Atenção",
@@ -52,16 +54,20 @@ export default function AlterarSenha() {
       return;
     }
 
-    Alert.alert(
-      "Senha alterada",
-      "Sua senha foi alterada com sucesso.",
-      [
-        {
-          text: "OK",
-          onPress: () => router.back(),
-        },
-      ]
-    );
+    setSalvando(true);
+    try {
+      await authApi.alterarSenha(senhaAtual, novaSenha);
+      setSenhaAtual("");
+      setNovaSenha("");
+      setConfirmacao("");
+      Alert.alert("Senha alterada", "Sua senha foi alterada com sucesso.", [
+        { text: "OK", onPress: () => router.back() },
+      ]);
+    } catch (erro) {
+      Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível alterar a senha.");
+    } finally {
+      setSalvando(false);
+    }
   }
 
   return (
@@ -133,11 +139,12 @@ export default function AlterarSenha() {
         />
 
         <TouchableOpacity
-          style={styles.primaryButton}
+          style={[styles.primaryButton, salvando && { opacity: 0.6 }]}
           onPress={salvar}
+          disabled={salvando}
         >
           <Text style={styles.primaryButtonText}>
-            Alterar senha
+            {salvando ? "Salvando..." : "Alterar senha"}
           </Text>
         </TouchableOpacity>
       </ScrollView>

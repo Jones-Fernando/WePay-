@@ -94,6 +94,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
  */
 import { router } from "expo-router";
 import { useUsuario } from "@/contexts/UsuarioContext";
+import { authApi } from "@/services/api";
 
 
 /**
@@ -296,9 +297,11 @@ export default function GerenciamentoPerfilScreen() {
        * o comportamento de uma requisição.
        */
 
-      await new Promise((resolve) =>
-        setTimeout(resolve, 700)
-      );
+      await authApi.atualizarPerfil({
+        nome: nomeLimpo,
+        email: emailLimpo,
+        telefone: telefone.trim(),
+      });
 
       atualizarPerfil({
         nome: nomeLimpo,
