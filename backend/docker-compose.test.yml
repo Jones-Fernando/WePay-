@@ -1,0 +1,16 @@
+services:
+  mysql-test:
+    image: mysql:8.4
+    container_name: wepay-mysql-test
+    environment:
+      MYSQL_DATABASE: wepay_test
+      MYSQL_USER: wepay_test
+      MYSQL_PASSWORD: wepay_test
+      MYSQL_ROOT_PASSWORD: root-test-only
+    ports:
+      - "127.0.0.1:3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot-test-only"]
+      interval: 5s
+      timeout: 5s
+      retries: 20

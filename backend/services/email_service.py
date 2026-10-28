@@ -37,7 +37,7 @@ class EmailService:
 
     @staticmethod
     def enviar_recuperacao_senha(email_destino: str, token: str) -> bool:
-        link = f"{Config.FRONTEND_URL.rstrip('/')}/redefinir-senha?token={token}"
+        link = f"{Config.APP_DEEP_LINK_URL}redefinir-senha?token={token}"
         texto = (
             "Olá!\n\n"
             "Recebemos uma solicitação de recuperação da sua conta WePay.\n\n"
@@ -60,7 +60,7 @@ class EmailService:
 
     @staticmethod
     def enviar_convite(email_destino: str, grupo_nome: str, token: str) -> bool:
-        link = f"{Config.FRONTEND_URL.rstrip('/')}/convite?token={token}"
+        link = f"{Config.APP_DEEP_LINK_URL}convite?token={token}"
         texto = (
             "Olá!\n\n"
             f"Você recebeu um convite para participar do grupo '{grupo_nome}' no WePay.\n\n"

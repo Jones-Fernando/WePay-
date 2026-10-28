@@ -18,6 +18,7 @@ auth_bp.route("/login", methods=["POST"], endpoint="login")(
 )
 auth_bp.route("/refresh", methods=["POST"])(AuthController.refresh)
 auth_bp.route("/esqueci-senha", methods=["POST"])(AuthController.esqueci_senha)
+auth_bp.route("/redefinir-senha", methods=["POST"])(AuthController.redefinir_senha)
 
 
 @auth_bp.route("/logout", methods=["POST"])

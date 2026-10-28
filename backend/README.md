@@ -39,8 +39,15 @@ API base local: `http://127.0.0.1:5000`
 
 ## Testes
 
-Os testes usam exclusivamente MySQL em um banco separado. Configure `DB_NAME=wepay_test` antes de executá-los, para não usar dados de desenvolvimento:
+Os testes usam exclusivamente MySQL em um banco separado. Nunca use o banco de desenvolvimento.
+
+1. Copie `.env.test.example` para `.env` ou exporte as mesmas variáveis no terminal.
+2. Para MySQL local, crie o banco isolado com `python scripts/setup_test_database.py`; alternativamente, inicie `docker compose -f docker-compose.test.yml up -d` e defina `DB_PORT=3307`.
+3. Crie e ative o ambiente Python, então instale as dependências: `python -m venv .venv`, `.venv\\Scripts\\activate`, `pip install -r requirements.txt`.
+4. Execute os testes:
 
 ```bash
 pytest -q
 ```
+
+Para encerrar e remover somente os dados de teste: `docker compose -f docker-compose.test.yml down -v`.

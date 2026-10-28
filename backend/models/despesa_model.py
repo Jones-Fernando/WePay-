@@ -10,8 +10,8 @@ class DespesaModel:
                 cursor.execute(
                     """
                     SELECT d.id, d.grupo_id, d.pagador_id, d.descricao,
-                           d.categoria, d.valor, d.data_despesa AS data,
-                           d.vencimento, u.nome AS pagador
+                           d.categoria, d.valor, d.data_despesa,
+                           d.vencimento, u.nome AS pagador_nome
                     FROM despesas d
                     JOIN usuarios u ON u.id = d.pagador_id
                     WHERE d.grupo_id = ?
@@ -28,11 +28,17 @@ class DespesaModel:
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
-                cursor.execute("SELECT * FROM despesas WHERE id = ?", (despesa_id,))
+                cursor.execute(
+                    "SELECT d.*, u.nome AS pagador_nome FROM despesas d "
+                    "JOIN usuarios u ON u.id = d.pagador_id WHERE d.id = ?",
+                    (despesa_id,),
+                )
                 row = fetch_one(cursor)
                 if row:
                     cursor.execute(
-                        "SELECT usuario_id, tipo, percentual, valor FROM despesa_divisoes WHERE despesa_id = ? ORDER BY usuario_id",
+                        "SELECT dd.usuario_id, dd.tipo, dd.percentual, dd.valor, u.nome "
+                        "FROM despesa_divisoes dd JOIN usuarios u ON u.id = dd.usuario_id "
+                        "WHERE dd.despesa_id = ? ORDER BY u.nome",
                         (despesa_id,),
                     )
                     row["divisoes"] = fetch_all(cursor)

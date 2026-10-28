@@ -98,6 +98,9 @@ def _apply_compatibility_migrations() -> None:
         elif "senha" not in colunas:
             cursor.execute("ALTER TABLE usuarios ADD COLUMN senha VARCHAR(255) NULL")
 
+        if "telefone" not in colunas:
+            cursor.execute("ALTER TABLE usuarios ADD COLUMN telefone VARCHAR(30) NULL")
+
         cursor.execute("SHOW COLUMNS FROM refresh_tokens")
         colunas_refresh = {coluna[0] for coluna in cursor.fetchall()}
 

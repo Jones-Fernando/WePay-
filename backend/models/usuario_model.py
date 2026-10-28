@@ -50,7 +50,7 @@ class UsuarioModel:
             cursor = cursor_for(conn)
             try:
                 cursor.execute(
-                    "SELECT id, nome, email FROM usuarios WHERE id = ?",
+                    "SELECT id, nome, email, telefone FROM usuarios WHERE id = ?",
                     (usuario_id,),
                 )
                 return fetch_one(cursor)
@@ -83,14 +83,14 @@ class UsuarioModel:
                 cursor.close()
 
     @staticmethod
-    def atualizar(usuario_id, nome, email, conn=None):
+    def atualizar(usuario_id, nome, email, telefone=None, conn=None):
         context = nullcontext(conn) if conn is not None else get_connection_context()
         with context as connection:
             cursor = cursor_for(connection)
             try:
                 cursor.execute(
-                    "UPDATE usuarios SET nome = ?, email = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?",
-                    (nome, email, usuario_id),
+                    "UPDATE usuarios SET nome = ?, email = ?, telefone = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?",
+                    (nome, email, telefone, usuario_id),
                 )
                 if conn is None:
                     connection.commit()

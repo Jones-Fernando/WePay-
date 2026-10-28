@@ -129,5 +129,12 @@ class DespesaPessoalController:
             inicio.isoformat(),
             fim.isoformat(),
         )
-        resumo.update({"ano": ano, "mes": mes})
+        # Mantém o contrato público usado pelo aplicativo. Os nomes curtos
+        # continuam disponíveis para compatibilidade com consumidores antigos.
+        resumo.update({
+            "total_despesas": resumo["despesas"],
+            "total_receitas": resumo["receitas"],
+            "ano": ano,
+            "mes": mes,
+        })
         return ResponseUtils.sucesso(dados=resumo)

@@ -1,5 +1,6 @@
 
 import json
+from datetime import datetime
 
 from google import genai
 from google.genai import types
@@ -11,12 +12,51 @@ class GeminiReceiptError(Exception):
     """Erro controlado durante a leitura do recibo."""
 
 
+class GeminiUnavailableError(GeminiReceiptError):
+    """A integração externa não está configurada ou disponível."""
+
+
+CATEGORIAS = {"Alimentação", "Transporte", "Casa", "Lazer", "Assinatura", "Outros"}
+
+
+def normalizar_recibo(dados: dict) -> dict:
+    estabelecimento = dados.get("estabelecimento")
+    categoria = dados.get("categoria_sugerida")
+    data = dados.get("data")
+    valor = dados.get("valor_total")
+    try:
+        texto_valor = str(valor).replace("R$", "").strip()
+        if "," in texto_valor and "." in texto_valor:
+            texto_valor = texto_valor.replace(".", "").replace(",", ".")
+        elif "," in texto_valor:
+            texto_valor = texto_valor.replace(",", ".")
+        valor = float(texto_valor) if valor is not None else None
+    except (TypeError, ValueError):
+        valor = None
+    if valor is not None and valor <= 0:
+        valor = None
+    if isinstance(data, str):
+        try:
+            data = datetime.strptime(data.strip(), "%Y-%m-%d").date().isoformat()
+        except ValueError:
+            data = None
+    else:
+        data = None
+    return {
+        "estabelecimento": estabelecimento.strip() if isinstance(estabelecimento, str) and estabelecimento.strip() else None,
+        "data": data,
+        "valor_total": valor,
+        "moeda": "BRL",
+        "categoria_sugerida": categoria if categoria in CATEGORIAS else "Outros",
+    }
+
+
 def ler_recibo(imagem: bytes, mime_type: str) -> dict:
     api_key = Config.GEMINI_API_KEY
     model = Config.GEMINI_MODEL
 
     if not api_key:
-        raise GeminiReceiptError(
+        raise GeminiUnavailableError(
             "A chave da API do Gemini não está configurada."
         )
 
@@ -80,7 +120,7 @@ def ler_recibo(imagem: bytes, mime_type: str) -> dict:
                 "A resposta da IA está em formato inválido."
             )
 
-        return dados
+        return normalizar_recibo(dados)
 
     except GeminiReceiptError:
         raise
@@ -89,8 +129,6 @@ def ler_recibo(imagem: bytes, mime_type: str) -> dict:
             "Não foi possível interpretar os dados do recibo."
         ) from erro
     except Exception as erro:
-        # Registre detalhes técnicos apenas nos logs internos,
-        # sem expor a chave ou os dados sensíveis ao aplicativo.
         raise GeminiReceiptError(
             "Não foi possível processar o recibo. Tente novamente."
         ) from erro

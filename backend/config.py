@@ -47,6 +47,7 @@ class Config:
     EMAIL_SERVER = os.getenv("EMAIL_SERVER", "smtp.gmail.com")
     EMAIL_PORT = int(os.getenv("EMAIL_PORT", "465"))
     FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8081")
+    APP_DEEP_LINK_URL = os.getenv("APP_DEEP_LINK_URL", "wepay://")
     ALLOW_EMAIL_TEST = os.getenv("ALLOW_EMAIL_TEST", "false").lower() == "true"
 
     if ENVIRONMENT == "production" and RATE_LIMIT_STORAGE_URI == "memory://":

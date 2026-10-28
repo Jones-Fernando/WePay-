@@ -4,6 +4,8 @@ import secrets
 import jwt
 from flask import request
 
+from config import Config
+
 from services.auth_service import AuthService
 from services.email_service import EmailService
 from utils.response_utils import ResponseUtils
@@ -151,6 +153,7 @@ class AuthController:
         data = request.get_json(silent=True) or {}
         nome = (data.get("nome") or "").strip()
         email = (data.get("email") or "").strip().lower()
+        telefone = (data.get("telefone") or "").strip() or None
 
         if not nome or not email:
             return ResponseUtils.erro("Nome e email sao obrigatorios.")
@@ -161,7 +164,7 @@ class AuthController:
         if usuario_existente and int(usuario_existente["id"]) != int(current_user_id):
             return ResponseUtils.erro("Email ja cadastrado por outro usuario.", status=409)
 
-        UsuarioModel.atualizar(current_user_id, nome, email)
+        UsuarioModel.atualizar(current_user_id, nome, email, telefone)
         return ResponseUtils.sucesso(mensagem="Perfil atualizado com sucesso.")
 
     @staticmethod
@@ -201,6 +204,11 @@ class AuthController:
                 cursor = cursor_for(conn)
                 try:
                     cursor.execute(
+                        "UPDATE recuperacao_tokens SET usado_em = CURRENT_TIMESTAMP "
+                        "WHERE usuario_id = ? AND usado_em IS NULL",
+                        (usuario["id"],),
+                    )
+                    cursor.execute(
                         "INSERT INTO recuperacao_tokens (usuario_id, token_hash, expires_at) VALUES (?, ?, ?)",
                         (usuario["id"], token_hash(token), expira_em.replace(tzinfo=None)),
                     )
@@ -208,8 +216,55 @@ class AuthController:
                 finally:
                     cursor.close()
             EmailService.enviar_recuperacao_senha(email, token)
+            dados = {"token_teste": token} if Config.ENVIRONMENT != "production" else None
+            return ResponseUtils.sucesso(
+                dados=dados,
+                mensagem="Se o e-mail estiver cadastrado, voce recebera as instrucoes.",
+            )
 
         return ResponseUtils.sucesso(mensagem="Se o e-mail estiver cadastrado, voce recebera as instrucoes.")
+
+    @staticmethod
+    def redefinir_senha():
+        data = request.get_json(silent=True) or {}
+        token = data.get("token")
+        nova_senha = data.get("nova_senha")
+        if not token or not isinstance(nova_senha, str):
+            return ResponseUtils.erro("Token e nova senha sao obrigatorios.")
+        if len(nova_senha) < 6:
+            return ResponseUtils.erro("A nova senha deve ter ao menos 6 caracteres.")
+
+        with get_connection_context() as conn:
+            cursor = cursor_for(conn)
+            try:
+                cursor.execute(
+                    "SELECT id, usuario_id FROM recuperacao_tokens "
+                    "WHERE token_hash = ? AND usado_em IS NULL AND expires_at > CURRENT_TIMESTAMP",
+                    (token_hash(token),),
+                )
+                recuperacao = fetch_one(cursor)
+                if not recuperacao:
+                    return ResponseUtils.erro("Token invalido, expirado ou ja utilizado.", status=400)
+
+                UsuarioModel.atualizar_senha(
+                    recuperacao["usuario_id"], hash_password(nova_senha), conn
+                )
+                cursor.execute(
+                    "UPDATE recuperacao_tokens SET usado_em = CURRENT_TIMESTAMP WHERE id = ?",
+                    (recuperacao["id"],),
+                )
+                cursor.execute(
+                    "UPDATE refresh_tokens SET revogado_em = CURRENT_TIMESTAMP "
+                    "WHERE usuario_id = ? AND revogado_em IS NULL",
+                    (recuperacao["usuario_id"],),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                cursor.close()
+        return ResponseUtils.sucesso(mensagem="Senha redefinida com sucesso.")
 
     @staticmethod
     def deletar(current_user_id):

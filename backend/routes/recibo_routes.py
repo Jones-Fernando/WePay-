@@ -5,6 +5,8 @@ from middlewares.auth_middleware import token_required
 from services.gemini_service import (
     ler_recibo,
     GeminiReceiptError,
+    GeminiUnavailableError,
+    normalizar_recibo,
 )
 from utils.response_utils import ResponseUtils
 
@@ -58,12 +60,14 @@ def ler(current_user_id):
         )
 
     try:
-        dados = ler_recibo(imagem, arquivo.mimetype)
+        dados = normalizar_recibo(ler_recibo(imagem, arquivo.mimetype))
 
         return ResponseUtils.sucesso(
             dados=dados,
             mensagem="Recibo analisado. Revise os dados antes de confirmar.",
         )
 
+    except GeminiUnavailableError as erro:
+        return ResponseUtils.erro(str(erro), status=503)
     except GeminiReceiptError as erro:
         return ResponseUtils.erro(str(erro), status=502)
