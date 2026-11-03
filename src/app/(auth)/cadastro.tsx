@@ -3,7 +3,7 @@
  * Migrado do projeto de referência para o grupo (auth).
  * Mantém o mesmo padrão visual, validações e navegação.
  */
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ import { authApi } from "@/services/api";
 
 export default function Cadastro() {
   const { convite } = useLocalSearchParams<{ convite?: string }>();
+  const conviteToken = Array.isArray(convite) ? convite[0] : convite;
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
@@ -31,16 +32,9 @@ export default function Cadastro() {
   const [mostrarConfirmacao, setMostrarConfirmacao] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [contaCriada, setContaCriada] = useState(false);
-
-  useEffect(() => {
-    if (!contaCriada) return;
-
-    const redirecionamento = setTimeout(() => {
-      router.replace(convite ? { pathname: "/(auth)/login", params: { convite } } : "/(auth)/login");
-    }, 2000);
-
-    return () => clearTimeout(redirecionamento);
-  }, [contaCriada, convite]);
+  const [emailEnviado, setEmailEnviado] = useState(false);
+  const [reenviando, setReenviando] = useState(false);
+  const [mensagemReenvio, setMensagemReenvio] = useState("");
 
   async function criarConta() {
     const nomeLimpo = nome.trim();
@@ -65,13 +59,42 @@ export default function Cadastro() {
 
     setCarregando(true);
     try {
-      await authApi.register(nomeLimpo, emailLimpo, senha);
+      const resposta = await authApi.register(
+        nomeLimpo,
+        emailLimpo,
+        senha,
+        conviteToken
+      );
+      setEmailEnviado(resposta.data?.email_enviado ?? false);
       setContaCriada(true);
     } catch (erro: any) {
       Alert.alert("Erro", erro?.message ?? "Não foi possível criar a conta.");
     } finally {
       setCarregando(false);
     }
+  }
+
+  async function reenviarConfirmacao() {
+    setReenviando(true);
+    setMensagemReenvio("");
+    try {
+      const resposta = await authApi.reenviarConfirmacao(
+        email.trim().toLowerCase(),
+        conviteToken
+      );
+      setMensagemReenvio(resposta.mensagem ?? "Se a conta estiver pendente, enviaremos um novo link.");
+    } catch (erro: any) {
+      setMensagemReenvio(erro?.message ?? "Não foi possível solicitar o reenvio.");
+    } finally {
+      setReenviando(false);
+    }
+  }
+
+  function irParaLogin() {
+    router.replace({
+      pathname: "/(auth)/login",
+      params: conviteToken ? { convite: conviteToken } : {},
+    });
   }
 
   return (
@@ -87,8 +110,29 @@ export default function Cadastro() {
             <View style={styles.successIcon}>
               <Text style={styles.successIconText}>✓</Text>
             </View>
-            <Text style={styles.successTitle}>Conta criada com sucesso!</Text>
-            <Text style={styles.successText}>Redirecionando para o login...</Text>
+            <Text style={styles.successTitle}>Confirme seu e-mail</Text>
+            <Text style={styles.successText}>
+              {emailEnviado
+                ? `Enviamos um link para ${email.trim().toLowerCase()}. Ele expira em 24 horas.`
+                : "A conta foi criada, mas o envio do e-mail falhou. Você pode solicitar um novo link abaixo."}
+            </Text>
+            {mensagemReenvio ? (
+              <Text style={styles.resendMessage}>{mensagemReenvio}</Text>
+            ) : null}
+            <TouchableOpacity
+              style={[styles.resendButton, reenviando && styles.disabledButton]}
+              onPress={reenviarConfirmacao}
+              disabled={reenviando}
+            >
+              {reenviando ? (
+                <ActivityIndicator color="#00A17A" />
+              ) : (
+                <Text style={styles.resendButtonText}>Reenviar confirmação</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.successLoginButton} onPress={irParaLogin}>
+              <Text style={styles.primaryButtonText}>Ir para o login</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -214,7 +258,7 @@ export default function Cadastro() {
             </Text>
 
             <TouchableOpacity
-              onPress={() => router.replace("/(auth)/login")}
+              onPress={irParaLogin}
             >
               <Text style={styles.loginLink}>
                 Entrar
@@ -419,5 +463,40 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
     textAlign: "center",
+  },
+
+  resendMessage: {
+    color: "#0B3B33",
+    fontSize: 13,
+    marginTop: 14,
+    textAlign: "center",
+  },
+
+  resendButton: {
+    minHeight: 44,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 14,
+    paddingHorizontal: 10,
+  },
+
+  resendButtonText: {
+    color: "#00A17A",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  successLoginButton: {
+    width: "100%",
+    height: 48,
+    backgroundColor: "#00C896",
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 8,
+  },
+
+  disabledButton: {
+    opacity: 0.6,
   },
 });

@@ -24,8 +24,20 @@ export default function ConviteParticipante() {
     if (!Number.isInteger(Number(groupId)) || enviando) return;
     try {
       setEnviando(true);
-      await participantesApi.convidar(Number(groupId), emailLimpo);
-      Alert.alert("Convite enviado", "O convite foi enviado para o e-mail informado.", [{ text: "OK", onPress: () => router.back() }]);
+      const resposta = await participantesApi.convidar(Number(groupId), emailLimpo);
+      if (resposta.data?.email_enviado) {
+        Alert.alert(
+          "Convite enviado",
+          resposta.mensagem ?? "O convite foi enviado para o e-mail informado.",
+          [{ text: "OK", onPress: () => router.back() }]
+        );
+      } else {
+        Alert.alert(
+          "E-mail não enviado",
+          resposta.mensagem ??
+            "O convite foi criado, mas o e-mail não foi enviado. Verifique a configuração SMTP."
+        );
+      }
     } catch (erro) {
       Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível enviar o convite.");
     } finally { setEnviando(false); }

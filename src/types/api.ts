@@ -30,7 +30,9 @@ export interface Grupo {
   nome: string;
   descricao: string | null;
   criado_por: number;
-  criado_em: string;
+  criado_em?: string;
+  saldo?: number;
+  participantes?: number;
 }
 
 export interface Participante {
@@ -62,6 +64,7 @@ export interface DespesaGrupo {
   vencimento: string | null;
   criado_em: string;
   pagador_nome?: string;
+  participantes_count?: number;
   divisoes?: DivisaoDespesa[];
 }
 

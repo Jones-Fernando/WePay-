@@ -24,6 +24,7 @@ import {
   Platform,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { despesasGrupoApi, participantesApi } from "@/services/api";
 
 type TipoDivisao = "IGUAL" | "VALOR" | "PERCENTUAL";
@@ -41,6 +42,16 @@ const CATEGORIAS = [
   { nome: "Lazer", icone: "🎮" },
   { nome: "Assinatura", icone: "🎬" },
   { nome: "Outros", icone: "📦" },
+  { nome: "Mercado", icone: "🛒" },
+  { nome: "Contas da casa", icone: "💡" },
+  { nome: "Internet e telefone", icone: "📶" },
+  { nome: "Limpeza", icone: "🧹" },
+  { nome: "Manutenção e reparos", icone: "🔧" },
+  { nome: "Hospedagem", icone: "🏨" },
+  { nome: "Passagens", icone: "✈️" },
+  { nome: "Combustível", icone: "⛽" },
+  { nome: "Pedágios e estacionamento", icone: "🅿️" },
+  { nome: "Passeios e ingressos", icone: "🎟️" },
 ];
 
 function obterParametro(
@@ -119,6 +130,18 @@ function validarData(data: string): boolean {
   );
 }
 
+function dataBrasileiraParaDate(data: string) {
+  if (!validarData(data)) return new Date();
+  const [dia, mes, ano] = data.split("/").map(Number);
+  return new Date(ano, mes - 1, dia);
+}
+
+function formatarDataBrasileira(data: Date) {
+  const dia = String(data.getDate()).padStart(2, "0");
+  const mes = String(data.getMonth() + 1).padStart(2, "0");
+  return `${dia}/${mes}/${data.getFullYear()}`;
+}
+
 export default function NovaDespesaGrupo() {
   const params = useLocalSearchParams();
 
@@ -167,6 +190,12 @@ export default function NovaDespesaGrupo() {
   const [percentuaisIndividuais, setPercentuaisIndividuais] =
     useState<Record<string, string>>({});
   const [salvando, setSalvando] = useState(false);
+  const [mostrarSeletorData, setMostrarSeletorData] = useState(false);
+
+  function selecionarData(_evento: DateTimePickerEvent, dataSelecionada?: Date) {
+    setMostrarSeletorData(false);
+    if (dataSelecionada) setData(formatarDataBrasileira(dataSelecionada));
+  }
 
   useEffect(() => {
     if (!groupId || !Number.isInteger(Number(groupId))) return;
@@ -583,16 +612,19 @@ export default function NovaDespesaGrupo() {
 
           <View style={styles.campo}>
             <Text style={styles.label}>Data</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="Ex.: 10/09/2026"
-              placeholderTextColor="#8AA69E"
-              value={data}
-              onChangeText={setData}
-              keyboardType="numbers-and-punctuation"
-              maxLength={10}
-            />
+            <TouchableOpacity style={styles.seletorData} onPress={() => setMostrarSeletorData(true)} activeOpacity={0.8}>
+              <Text style={[styles.textoSeletorData, !data && styles.placeholderSeletorData]}>{data || "Escolher data"}</Text>
+            </TouchableOpacity>
+            {mostrarSeletorData && (
+              <DateTimePicker
+                value={dataBrasileiraParaDate(data)}
+                mode="date"
+                display="default"
+                locale="pt-BR"
+                maximumDate={new Date()}
+                onChange={selecionarData}
+              />
+            )}
           </View>
 
           {/* CATEGORIA */}
@@ -964,12 +996,13 @@ export default function NovaDespesaGrupo() {
           {/* BOTÕES */}
 
           <TouchableOpacity
-            style={styles.botaoSalvar}
+            style={[styles.botaoSalvar, salvando && { opacity: 0.6 }]}
             onPress={salvarDespesa}
+            disabled={salvando}
             activeOpacity={0.85}
           >
             <Text style={styles.botaoSalvarTexto}>
-              Salvar despesa
+              {salvando ? "Salvando..." : "Salvar despesa"}
             </Text>
           </TouchableOpacity>
 
@@ -1125,6 +1158,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#0B3B33",
   },
+
+  seletorData: {
+    height: 52,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E1EEE8",
+    borderRadius: 13,
+    paddingHorizontal: 15,
+    justifyContent: "center",
+  },
+
+  textoSeletorData: { fontSize: 14, color: "#0B3B33" },
+  placeholderSeletorData: { color: "#8AA69E" },
 
   valorContainer: {
     height: 52,

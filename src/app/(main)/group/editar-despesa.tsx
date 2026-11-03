@@ -4,8 +4,21 @@ import {
   TouchableOpacity, StyleSheet, StatusBar, Alert,
 } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { despesasGrupoApi } from "@/services/api";
 import type { DespesaGrupo } from "@/types/api";
+
+function dataBrasileiraParaDate(data: string) {
+  const resultado = data.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!resultado) return new Date();
+  return new Date(Number(resultado[3]), Number(resultado[2]) - 1, Number(resultado[1]));
+}
+
+function formatarDataBrasileira(data: Date) {
+  const dia = String(data.getDate()).padStart(2, "0");
+  const mes = String(data.getMonth() + 1).padStart(2, "0");
+  return `${dia}/${mes}/${data.getFullYear()}`;
+}
 
 export default function EditarDespesaGrupo() {
   const params = useLocalSearchParams();
@@ -19,8 +32,19 @@ export default function EditarDespesaGrupo() {
   const [data, setData] = useState("");
   const [categoria, setCategoria] = useState("Alimentação");
   const [observacao, setObservacao] = useState(String(params.observacao ?? ""));
+  const [mostrarSeletorData, setMostrarSeletorData] = useState(false);
 
-  const categorias = ["Alimentação", "Transporte", "Casa", "Lazer", "Assinatura", "Outros"];
+  const categorias = [
+    "Alimentação", "Transporte", "Casa", "Lazer", "Assinatura", "Outros",
+    "Mercado", "Contas da casa", "Internet e telefone", "Limpeza",
+    "Manutenção e reparos", "Hospedagem", "Passagens", "Combustível",
+    "Pedágios e estacionamento", "Passeios e ingressos",
+  ];
+
+  function selecionarData(_evento: DateTimePickerEvent, dataSelecionada?: Date) {
+    setMostrarSeletorData(false);
+    if (dataSelecionada) setData(formatarDataBrasileira(dataSelecionada));
+  }
 
   useFocusEffect(useCallback(() => {
     if (!Number.isInteger(Number(id))) return;
@@ -55,7 +79,7 @@ export default function EditarDespesaGrupo() {
         descricao: descricao.trim(), valor: numero, categoria, pagador_id: despesaOriginal.pagador_id,
         data_despesa: data.slice(6, 10) + "-" + data.slice(3, 5) + "-" + data.slice(0, 2),
         participantes: (despesaOriginal.divisoes || []).map((item) => item.usuario_id),
-        divisao_tipo: despesaOriginal.divisoes?.[0]?.tipo || "igual",
+        divisao_tipo: (despesaOriginal.divisoes?.[0]?.tipo as "igual" | "porcentagem" | "valores") || "igual",
       });
       Alert.alert("Despesa atualizada", "As alterações foram salvas.", [{ text: "OK", onPress: () => router.replace({ pathname: "/(main)/group/detalhes-despesa", params: { id, groupId } }) }]);
     } catch (erro) {
@@ -81,7 +105,19 @@ export default function EditarDespesaGrupo() {
         <TextInput style={styles.input} value={valor} onChangeText={setValor} keyboardType="decimal-pad" placeholder="0,00" />
 
         <Text style={styles.label}>Data</Text>
-        <TextInput style={styles.input} value={data} onChangeText={setData} placeholder="DD/MM/AAAA" />
+        <TouchableOpacity style={styles.seletorData} onPress={() => setMostrarSeletorData(true)} activeOpacity={0.8}>
+          <Text style={[styles.textoSeletorData, !data && styles.placeholderSeletorData]}>{data || "Escolher data"}</Text>
+        </TouchableOpacity>
+        {mostrarSeletorData && (
+          <DateTimePicker
+            value={dataBrasileiraParaDate(data)}
+            mode="date"
+            display="default"
+            locale="pt-BR"
+            maximumDate={new Date()}
+            onChange={selecionarData}
+          />
+        )}
 
         <Text style={styles.label}>Categoria</Text>
         <View style={styles.categorias}>
@@ -119,6 +155,9 @@ const styles = StyleSheet.create({
   subtitulo: { color: "#6B8F86", fontSize: 12, lineHeight: 19, marginTop: 5, marginBottom: 25 },
   label: { color: "#0B3B33", fontSize: 13, fontWeight: "700", marginBottom: 8, marginTop: 5 },
   input: { minHeight: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 13, paddingHorizontal: 14, fontSize: 14, color: "#0B3B33", marginBottom: 18 },
+  seletorData: { height: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 13, paddingHorizontal: 14, justifyContent: "center", marginBottom: 18 },
+  textoSeletorData: { color: "#0B3B33", fontSize: 14 },
+  placeholderSeletorData: { color: "#8AA69E" },
   categorias: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 18 },
   categoria: { paddingHorizontal: 12, paddingVertical: 10, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 12 },
   categoriaAtiva: { backgroundColor: "#DDF7EE", borderColor: "#00C896" },

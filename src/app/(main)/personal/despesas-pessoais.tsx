@@ -1,159 +1,856 @@
-import React, { useCallback, useState } from "react";
+
+import React, { useCallback, useMemo, useState } from "react";
+
 import {
-  SafeAreaView,
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  StatusBar,
   ActivityIndicator,
   Alert,
+  Modal,
+  Pressable,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
-import { router, useFocusEffect } from "expo-router";
-import { despesasPessoaisApi, DespesaPessoal } from "@/services/api";
 
+import { router, useFocusEffect } from "expo-router";
+
+import {
+  despesasPessoaisApi,
+  DespesaPessoal,
+} from "@/services/api";
+
+// Identidade visual oficial do WEPAY
+const CORES = {
+  paper: "#F5FBF7",
+  ink: "#0B3B33",
+  inkSoft: "#12483F",
+  surface: "#FFFFFF",
+  accent: "#00C896",
+  accentDark: "#00A17A",
+  coral: "#FF6B5C",
+  muted: "#6B8F86",
+  line: "#E1EEE8",
+  field: "#F0F8F4",
+};
+
+// Ícones das categorias
 const ICONES: Record<string, string> = {
   Alimentação: "🍽️",
   Transporte: "🚕",
   Casa: "🏠",
+  Moradia: "🏘️",
   Lazer: "🎮",
   Assinatura: "🎬",
+  Assinaturas: "🎬",
+  Saúde: "💊",
+  Educação: "📚",
+  Compras: "🛍️",
+  Pets: "🐾",
+  Viagem: "✈️",
+  Impostos: "🧾",
+  Outros: "📦",
+};
+
+// Cores utilizadas na composição da barra
+const CORES_CATEGORIA: Record<string, string> = {
+  Alimentação: "#00C896",
+  Transporte: "#FF6B5C",
+  Assinatura: "#4C8DFF",
+  Assinaturas: "#4C8DFF",
+  Casa: "#FFB454",
+  Moradia: "#FFB454",
+  Lazer: "#B18CFF",
+  Saúde: "#55BFA4",
+  Educação: "#7C8CFF",
+  Compras: "#6B8F86",
+  Pets: "#F58DAA",
+  Viagem: "#52A7D8",
+  Impostos: "#A86F47",
+  Outros: "#A6BDB5",
 };
 
 function iconeCategoria(categoria: string | null) {
-  return categoria ? (ICONES[categoria] ?? "📦") : "📦";
+  return categoria
+    ? ICONES[categoria] ?? "📦"
+    : "📦";
 }
 
-function formatarData(iso: string) {
-  const [ano, mes, dia] = iso.split("-");
-  const meses = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
-  return `${Number(dia)} ${meses[Number(mes) - 1]} ${ano}`;
+const MESES = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro",
+];
+
+function dataValida(ano: number, mes: number, dia: number) {
+  if (ano < 1 || mes < 1 || mes > 12) return false;
+
+  const diasNoMes = [
+    31,
+    ano % 4 === 0 && (ano % 100 !== 0 || ano % 400 === 0) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+
+  return dia >= 1 && dia <= diasNoMes[mes - 1];
+}
+
+function formatarRegistro(criadoEm: string | null | undefined) {
+  const timestamp = criadoEm?.trim();
+  if (!timestamp) return "";
+
+  const partesSemFuso = timestamp.match(
+    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/
+  );
+
+  if (partesSemFuso) {
+    const [, anoTexto, mesTexto, diaTexto, horaTexto, minutoTexto, segundoTexto] =
+      partesSemFuso;
+    const ano = Number(anoTexto);
+    const mes = Number(mesTexto);
+    const dia = Number(diaTexto);
+    const hora = Number(horaTexto);
+    const minuto = Number(minutoTexto);
+    const segundo = Number(segundoTexto ?? 0);
+
+    if (
+      !dataValida(ano, mes, dia) ||
+      hora > 23 ||
+      minuto > 59 ||
+      segundo > 59
+    ) {
+      return "";
+    }
+
+    return `${dia} de ${MESES[mes - 1]} de ${ano} às ${horaTexto}:${minutoTexto}`;
+  }
+
+  if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp)) return "";
+
+  const normalizado = timestamp
+    .replace(/^(\d{4}-\d{2}-\d{2}) /, "$1T")
+    .replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+  const data = new Date(normalizado);
+
+  if (Number.isNaN(data.getTime())) return "";
+
+  const dataLocal = new Intl.DateTimeFormat("pt-BR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(data);
+  const horarioLocal = new Intl.DateTimeFormat("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(data);
+
+  return `${dataLocal} às ${horarioLocal}`;
 }
 
 function formatarValor(valor: number) {
-  return valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  return Number(valor || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
+function obterMesAtual() {
+  return new Date().toLocaleDateString("pt-BR", {
+    month: "long",
+  });
 }
 
 export default function DespesasPessoais() {
   const [despesas, setDespesas] = useState<DespesaPessoal[]>([]);
   const [carregando, setCarregando] = useState(true);
+  const [atualizando, setAtualizando] = useState(false);
   const [totalMes, setTotalMes] = useState(0);
+  const [modalVisivel, setModalVisivel] = useState(false);
 
-  async function carregarDados() {
-    setCarregando(true);
+  // Carrega os dados reais da API
+  const carregarDados = useCallback(async (mostrarLoading = true) => {
+    if (mostrarLoading) {
+      setCarregando(true);
+    } else {
+      setAtualizando(true);
+    }
+
     try {
       const [listagem, resumo] = await Promise.all([
-        despesasPessoaisApi.listar({ tipo: "despesa" }),
+        despesasPessoaisApi.listar({
+          tipo: "despesa",
+        }),
+
         despesasPessoaisApi.totalMes(),
       ]);
+
       setDespesas(listagem.data as DespesaPessoal[]);
-      setTotalMes(resumo.data.total_despesas ?? 0);
+
+      setTotalMes(
+        Number(resumo.data.total_despesas ?? 0)
+      );
     } catch (e) {
-      Alert.alert("Erro", e instanceof Error ? e.message : "Não foi possível carregar.");
+      Alert.alert(
+        "Erro",
+        e instanceof Error
+          ? e.message
+          : "Não foi possível carregar suas despesas."
+      );
     } finally {
       setCarregando(false);
+      setAtualizando(false);
     }
-  }
+  }, []);
 
+  // Atualiza sempre que a tela receber foco
   useFocusEffect(
     useCallback(() => {
       carregarDados();
-    }, [])
+
+      return undefined;
+    }, [carregarDados])
   );
+
+  // Agrupa as despesas reais por categoria
+  const resumoCategorias = useMemo(() => {
+    const agrupamento: Record<string, number> = {};
+
+    despesas.forEach((despesa) => {
+      const categoria = despesa.categoria ?? "Outros";
+      const valor = Number(despesa.valor) || 0;
+
+      agrupamento[categoria] =
+        (agrupamento[categoria] ?? 0) + valor;
+    });
+
+    return Object.entries(agrupamento)
+      .filter(([, valor]) => valor > 0)
+      .map(([categoria, valor]) => ({
+        categoria,
+        valor,
+        cor: CORES_CATEGORIA[categoria] ?? CORES_CATEGORIA.Outros,
+      }));
+  }, [despesas]);
+
+  // Soma os valores exibidos para calcular as proporções
+  const totalCategorias = resumoCategorias.reduce(
+    (total, item) => total + item.valor,
+    0
+  );
+
+  // Navegação para detalhes
+  function abrirDetalhes(id: number | string) {
+    router.push({
+      pathname: "/(main)/personal/detalhes-despesa-pessoal",
+      params: {
+        id: String(id),
+      },
+    });
+  }
+
+  // Opção 1: cadastro manual
+  function cadastrarManualmente() {
+    setModalVisivel(false);
+
+    router.push(
+      "/(main)/personal/nova-despesa-pessoal"
+    );
+  }
+
+  // Opção 2: leitura do recibo com IA
+  function lerReciboComIA() {
+    setModalVisivel(false);
+
+    router.push(
+      "/(main)/receipt-reader/ler-recibo"
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar
+        barStyle="dark-content"
+      />
 
+      {/* Cabeçalho */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.botaoVoltar} onPress={() => router.replace("/(main)/home")}>
+        <Pressable
+          style={styles.botaoVoltar}
+          onPress={() =>
+            router.replace("/(main)/home")
+          }
+          hitSlop={8}
+        >
           <Text style={styles.iconeVoltar}>‹</Text>
-        </TouchableOpacity>
+        </Pressable>
+
         <View style={styles.headerTextos}>
-          <Text style={styles.titulo}>Despesas pessoais</Text>
-          <Text style={styles.subtitulo}>Fora dos grupos — só seu controle</Text>
+          <Text style={styles.titulo}>
+            Despesas pessoais
+          </Text>
+
+          <Text style={styles.subtitulo}>
+            Fora dos grupos — só seu controle
+          </Text>
         </View>
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.conteudo} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.conteudo}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={atualizando}
+            onRefresh={() => carregarDados(false)}
+            tintColor={CORES.accentDark}
+          />
+        }
+      >
+        {/* Resumo financeiro */}
         <View style={styles.cardResumo}>
-          <Text style={styles.resumoLabel}>Gasto este mês</Text>
-          <Text style={styles.resumoValor}>{formatarValor(totalMes)}</Text>
+          <Text style={styles.resumoLabel}>
+            Gasto em {obterMesAtual()}
+          </Text>
+
+          <Text style={styles.resumoValor}>
+            {formatarValor(totalMes)}
+          </Text>
+
+          {/* Distribuição real das despesas por categoria */}
+          {totalCategorias > 0 && (
+            <View style={styles.barraCategorias}>
+              {resumoCategorias.map((item) => (
+                <View
+                  key={item.categoria}
+                  style={[
+                    styles.segmentoCategoria,
+                    {
+                      flex: item.valor / totalCategorias,
+                      backgroundColor: item.cor,
+                    },
+                  ]}
+                />
+              ))}
+            </View>
+          )}
         </View>
 
-        <View style={styles.listaHeader}>
-          <Text style={styles.listaTitulo}>Seus gastos</Text>
-          <Text style={styles.listaQuantidade}>{despesas.length}</Text>
-        </View>
-
+        {/* Lista de despesas */}
         {carregando ? (
-          <ActivityIndicator color="#00C896" style={{ marginTop: 40 }} />
+          <View style={styles.estado}>
+            <ActivityIndicator
+              size="large"
+              color={CORES.accentDark}
+            />
+
+            <Text style={styles.estadoTexto}>
+              Carregando despesas...
+            </Text>
+          </View>
         ) : despesas.length === 0 ? (
           <View style={styles.vazio}>
-            <Text style={styles.vazioTexto}>Nenhuma despesa registrada.</Text>
+            <Text style={styles.vazioIcone}>🧾</Text>
+
+            <Text style={styles.vazioTitulo}>
+              Nenhuma despesa registrada
+            </Text>
+
+            <Text style={styles.vazioTexto}>
+              Suas despesas pessoais aparecerão aqui.
+              Toque no botão + para adicionar uma nova.
+            </Text>
           </View>
         ) : (
-          despesas.map((d) => (
-            <TouchableOpacity
-              key={d.id}
-              activeOpacity={0.85}
-              style={styles.recibo}
-              onPress={() => router.push({ pathname: "/(main)/personal/detalhes-despesa-pessoal", params: { id: String(d.id) } })}
-            >
-              <View style={styles.reciboConteudo}>
-                <View style={styles.iconeDespesa}>
-                  <Text style={styles.iconeTexto}>{iconeCategoria(d.categoria)}</Text>
+          <View style={styles.listaDespesas}>
+            {despesas.map((despesa) => (
+              <Pressable
+                key={despesa.id}
+                style={({ pressed }) => [
+                  styles.cardDespesa,
+                  pressed && styles.cardDespesaPressionado,
+                ]}
+                onPress={() =>
+                  abrirDetalhes(despesa.id)
+                }
+              >
+                <View style={styles.cardDespesaConteudo}>
+                  <View style={styles.reciboLinha}>
+                    <Text
+                      style={styles.despesaTitulo}
+                      numberOfLines={1}
+                    >
+                      {iconeCategoria(despesa.categoria)}{" "}
+                      {despesa.descricao}
+                    </Text>
+
+                    <Text style={styles.despesaValor}>
+                      {formatarValor(
+                        Number(despesa.valor)
+                      )}
+                    </Text>
+                  </View>
+
+                  <Text style={styles.despesaInfo}>
+                    {despesa.categoria ?? "Outros"}
+                  </Text>
+
+                  {formatarRegistro(despesa.criado_em) ? (
+                    <Text style={styles.despesaRegistro}>
+                      Registrada em {formatarRegistro(despesa.criado_em)}
+                    </Text>
+                  ) : null}
                 </View>
-                <View style={styles.informacoes}>
-                  <Text style={styles.despesaTitulo}>{d.descricao}</Text>
-                  <Text style={styles.despesaInfo}>{d.categoria ?? "Outros"} · {formatarData(d.data_despesa)}</Text>
-                </View>
-                <Text style={styles.despesaValor}>{formatarValor(Number(d.valor))}</Text>
-              </View>
-            </TouchableOpacity>
-          ))
+              </Pressable>
+            ))}
+          </View>
         )}
-        <View style={{ height: 20 }} />
+
+        {atualizando && (
+          <ActivityIndicator
+            color={CORES.accentDark}
+            style={{ marginVertical: 12 }}
+          />
+        )}
+
+        <View style={{ height: 30 }} />
       </ScrollView>
 
-      <TouchableOpacity
-        style={styles.fab}
-        activeOpacity={0.8}
-        onPress={() => router.push("/(main)/personal/nova-despesa-pessoal")}
+      {/* Botão flutuante (+) */}
+      <Pressable
+        style={({ pressed }) => [
+          styles.fab,
+          pressed && styles.fabPressionado,
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel="Adicionar despesa"
+        onPress={() => setModalVisivel(true)}
       >
         <Text style={styles.fabText}>+</Text>
-      </TouchableOpacity>
+      </Pressable>
+
+      {/* Modal de opções de cadastro */}
+      <Modal
+        visible={modalVisivel}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setModalVisivel(false)}
+      >
+        <View style={styles.modalContainer}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setModalVisivel(false)}
+          />
+
+          <View style={styles.bottomSheet}>
+            <View style={styles.sheetHandle} />
+
+            <Text style={styles.sheetTitulo}>
+              Nova despesa
+            </Text>
+
+            <Text style={styles.sheetSubtitulo}>
+              Como deseja registrar sua despesa?
+            </Text>
+
+            {/* Cadastro manual */}
+            <Pressable
+              style={styles.opcao}
+              onPress={cadastrarManualmente}
+            >
+              <View style={styles.opcaoIcone}>
+                <Text style={styles.opcaoEmoji}>
+                  ✍️
+                </Text>
+              </View>
+
+              <View style={styles.opcaoTextos}>
+                <Text style={styles.opcaoTitulo}>
+                  Cadastrar manualmente
+                </Text>
+
+                <Text style={styles.opcaoDescricao}>
+                  Preencha os dados da despesa.
+                </Text>
+              </View>
+
+              <Text style={styles.opcaoSeta}>›</Text>
+            </Pressable>
+
+            {/* Leitura com inteligência artificial */}
+            <Pressable
+              style={styles.opcao}
+              onPress={lerReciboComIA}
+            >
+              <View style={styles.opcaoIcone}>
+                <Text style={styles.opcaoEmoji}>
+                  📷
+                </Text>
+              </View>
+
+              <View style={styles.opcaoTextos}>
+                <Text style={styles.opcaoTitulo}>
+                  Ler recibo com IA
+                </Text>
+
+                <Text style={styles.opcaoDescricao}>
+                  Fotografe ou selecione uma imagem.
+                </Text>
+              </View>
+
+              <Text style={styles.opcaoSeta}>›</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.botaoCancelar}
+              onPress={() => setModalVisivel(false)}
+            >
+              <Text style={styles.textoCancelar}>
+                Cancelar
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#F5FBF7" },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 12, paddingBottom: 18 },
-  botaoVoltar: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#FFFFFF", justifyContent: "center", alignItems: "center", marginRight: 12, borderWidth: 1, borderColor: "#E1EEE8" },
-  iconeVoltar: { fontSize: 32, color: "#0B3B33", lineHeight: 34, marginTop: -3 },
-  headerTextos: { flex: 1 },
-  titulo: { fontSize: 23, fontWeight: "700", color: "#0B3B33" },
-  subtitulo: { fontSize: 12, color: "#6B8F86", marginTop: 4 },
-  scroll: { flex: 1 },
-  conteudo: { paddingHorizontal: 20, paddingBottom: 100 },
-  cardResumo: { backgroundColor: "#F0F8F4", borderRadius: 16, padding: 16, marginBottom: 24 },
-  resumoLabel: { fontSize: 12, color: "#6B8F86" },
-  resumoValor: { marginTop: 8, fontSize: 28, fontWeight: "700", color: "#0B3B33" },
-  listaHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  listaTitulo: { color: "#0B3B33", fontSize: 15, fontWeight: "700" },
-  listaQuantidade: { color: "#6B8F86", fontSize: 12, fontWeight: "700" },
-  recibo: { backgroundColor: "#FFFFFF", borderRadius: 14, borderWidth: 1, borderColor: "#E1EEE8", marginBottom: 12 },
-  reciboConteudo: { flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 12 },
-  iconeDespesa: { width: 40, height: 40, borderRadius: 12, backgroundColor: "#EAF7F3", justifyContent: "center", alignItems: "center" },
-  iconeTexto: { fontSize: 18 },
-  informacoes: { flex: 1, marginLeft: 10 },
-  despesaTitulo: { color: "#0B3B33", fontSize: 13, fontWeight: "700" },
-  despesaInfo: { color: "#6B8F86", fontSize: 10, marginTop: 3 },
-  despesaValor: { color: "#0B3B33", fontSize: 12, fontWeight: "700" },
-  vazio: { paddingTop: 60, alignItems: "center" },
-  vazioTexto: { color: "#6B8F86", fontSize: 14 },
-  fab: { position: "absolute", right: 20, bottom: 82, width: 54, height: 54, borderRadius: 18, backgroundColor: "#00C896", alignItems: "center", justifyContent: "center", elevation: 6 },
-  fabText: { color: "#0B3B33", fontSize: 28, fontWeight: "600", marginTop: -2 },
+  safeArea: {
+    flex: 1,
+    backgroundColor: CORES.paper,
+  },
+
+  // Cabeçalho
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 18,
+  },
+
+  botaoVoltar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: CORES.surface,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: CORES.line,
+  },
+
+  iconeVoltar: {
+    fontSize: 32,
+    color: CORES.ink,
+    lineHeight: 34,
+    marginTop: -3,
+  },
+
+  headerTextos: {
+    flex: 1,
+  },
+
+  titulo: {
+    fontSize: 23,
+    fontWeight: "700",
+    color: CORES.ink,
+  },
+
+  subtitulo: {
+    fontSize: 12,
+    color: CORES.muted,
+    marginTop: 4,
+  },
+
+  // Conteúdo
+  scroll: {
+    flex: 1,
+  },
+
+  conteudo: {
+    paddingHorizontal: 20,
+    paddingBottom: 100,
+  },
+
+  // Resumo financeiro
+  cardResumo: {
+    backgroundColor: CORES.field,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 18,
+  },
+
+  resumoLabel: {
+    fontSize: 11,
+    color: CORES.muted,
+  },
+
+  resumoValor: {
+    marginTop: 5,
+    fontSize: 25,
+    fontWeight: "600",
+    color: CORES.ink,
+  },
+
+  barraCategorias: {
+    flexDirection: "row",
+    height: 6,
+    borderRadius: 4,
+    overflow: "hidden",
+    gap: 2,
+    marginTop: 12,
+  },
+
+  segmentoCategoria: {
+    height: 6,
+    borderRadius: 3,
+  },
+
+  // Lista de despesas
+  listaDespesas: {
+    marginTop: 2,
+  },
+
+  cardDespesa: {
+    minHeight: 68,
+    backgroundColor: CORES.surface,
+    borderWidth: 1,
+    borderColor: CORES.line,
+    borderRadius: 14,
+    marginBottom: 10,
+  },
+
+  cardDespesaPressionado: {
+    opacity: 0.75,
+  },
+
+  cardDespesaConteudo: {
+    padding: 12,
+  },
+
+  reciboLinha: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
+
+  despesaTitulo: {
+    flex: 1,
+    minWidth: 0,
+    color: CORES.ink,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  despesaValor: {
+    flexShrink: 0,
+    color: CORES.ink,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  despesaInfo: {
+    color: CORES.muted,
+    fontSize: 11,
+    marginTop: 4,
+  },
+
+  despesaRegistro: {
+    color: CORES.muted,
+    fontSize: 11,
+    marginTop: 2,
+  },
+
+  // Estados
+  estado: {
+    paddingTop: 60,
+    alignItems: "center",
+  },
+
+  estadoTexto: {
+    color: CORES.muted,
+    fontSize: 12,
+    marginTop: 12,
+  },
+
+  vazio: {
+    paddingTop: 55,
+    paddingHorizontal: 25,
+    alignItems: "center",
+  },
+
+  vazioIcone: {
+    fontSize: 36,
+    marginBottom: 12,
+  },
+
+  vazioTitulo: {
+    color: CORES.ink,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  vazioTexto: {
+    color: CORES.muted,
+    fontSize: 11,
+    textAlign: "center",
+    lineHeight: 17,
+    marginTop: 7,
+  },
+
+  // Botão flutuante
+  fab: {
+    position: "absolute",
+    right: 20,
+    bottom: 82,
+    width: 54,
+    height: 54,
+    borderRadius: 18,
+    backgroundColor: CORES.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 6,
+    shadowColor: CORES.ink,
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 9,
+  },
+
+  fabPressionado: {
+    opacity: 0.75,
+    transform: [{ scale: 0.95 }],
+  },
+
+  fabText: {
+    color: CORES.ink,
+    fontSize: 28,
+    fontWeight: "600",
+    marginTop: -2,
+  },
+
+  // Modal
+  modalContainer: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(11,59,51,0.30)",
+  },
+
+  bottomSheet: {
+    backgroundColor: CORES.surface,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 18,
+    paddingTop: 14,
+    paddingBottom: 28,
+  },
+
+  sheetHandle: {
+    width: 36,
+    height: 4,
+    backgroundColor: CORES.line,
+    borderRadius: 4,
+    alignSelf: "center",
+    marginBottom: 15,
+  },
+
+  sheetTitulo: {
+    color: CORES.ink,
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+
+  sheetSubtitulo: {
+    color: CORES.muted,
+    fontSize: 11,
+    textAlign: "center",
+    marginTop: 5,
+    marginBottom: 13,
+  },
+
+  opcao: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: CORES.line,
+    gap: 10,
+  },
+
+  opcaoIcone: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: CORES.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  opcaoEmoji: {
+    fontSize: 18,
+  },
+
+  opcaoTextos: {
+    flex: 1,
+  },
+
+  opcaoTitulo: {
+    color: CORES.ink,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  opcaoDescricao: {
+    color: CORES.muted,
+    fontSize: 10,
+    marginTop: 4,
+  },
+
+  opcaoSeta: {
+    color: CORES.muted,
+    fontSize: 23,
+  },
+
+  botaoCancelar: {
+    backgroundColor: CORES.field,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 16,
+  },
+
+  textoCancelar: {
+    color: CORES.ink,
+    fontSize: 12,
+    fontWeight: "700",
+  },
 });

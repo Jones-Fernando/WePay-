@@ -1,9 +1,14 @@
 import React, { useCallback, useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { despesasPessoaisApi, DespesaPessoal } from "@/services/api";
 
-const CATEGORIAS = ["Alimentação","Transporte","Casa","Lazer","Assinatura","Outros"];
+const CATEGORIAS = [
+  "Alimentação", "Transporte", "Casa", "Moradia", "Saúde", "Educação",
+  "Lazer", "Assinatura", "Assinaturas", "Compras", "Pets", "Viagem",
+  "Impostos", "Outros",
+];
 
 function isoParaBr(iso: string) {
   const [ano, mes, dia] = iso.split("-");
@@ -20,6 +25,19 @@ function brParaIso(data: string): string | null {
   return `${ano}-${mes}-${dia}`;
 }
 
+function dataBrasileiraParaDate(data: string) {
+  const iso = brParaIso(data);
+  if (!iso) return new Date();
+  const [ano, mes, dia] = iso.split("-").map(Number);
+  return new Date(ano, mes - 1, dia);
+}
+
+function formatarDataBrasileira(data: Date) {
+  const dia = String(data.getDate()).padStart(2, "0");
+  const mes = String(data.getMonth() + 1).padStart(2, "0");
+  return `${dia}/${mes}/${data.getFullYear()}`;
+}
+
 export default function EditarDespesaPessoal() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const [descricao, setDescricao] = useState("");
@@ -29,6 +47,12 @@ export default function EditarDespesaPessoal() {
   const [tipo, setTipo] = useState<"despesa" | "receita">("despesa");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const [mostrarSeletorData, setMostrarSeletorData] = useState(false);
+
+  function selecionarData(_evento: DateTimePickerEvent, dataSelecionada?: Date) {
+    setMostrarSeletorData(false);
+    if (dataSelecionada) setData(formatarDataBrasileira(dataSelecionada));
+  }
 
   useFocusEffect(useCallback(() => {
     if (!id) return;
@@ -63,6 +87,14 @@ export default function EditarDespesaPessoal() {
     if (isNaN(valorNum) || valorNum <= 0) { Alert.alert("Atenção", "Informe um valor válido."); return; }
     const dataIso = brParaIso(data.trim());
     if (!dataIso) { Alert.alert("Atenção", "Informe uma data válida no formato DD/MM/AAAA."); return; }
+    const [ano, mes, dia] = dataIso.split("-").map(Number);
+    const dataInformada = new Date(ano, mes - 1, dia);
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    if (dataInformada > hoje) {
+      Alert.alert("Atenção", "A data da despesa não pode ser futura.");
+      return;
+    }
 
     setSalvando(true);
     try {
@@ -101,7 +133,19 @@ export default function EditarDespesaPessoal() {
           </View>
 
           <Text style={styles.label}>Data</Text>
-          <TextInput style={styles.input} value={data} onChangeText={setData} placeholder="DD/MM/AAAA" placeholderTextColor="#8AA69E" keyboardType="numbers-and-punctuation" />
+          <TouchableOpacity style={styles.seletorData} onPress={() => setMostrarSeletorData(true)} activeOpacity={0.8}>
+            <Text style={[styles.textoSeletorData, !data && styles.placeholderSeletorData]}>{data || "Escolher data"}</Text>
+          </TouchableOpacity>
+          {mostrarSeletorData && (
+            <DateTimePicker
+              value={dataBrasileiraParaDate(data)}
+              mode="date"
+              display="default"
+              locale="pt-BR"
+              maximumDate={new Date()}
+              onChange={selecionarData}
+            />
+          )}
 
           <Text style={styles.label}>Tipo</Text>
           <View style={styles.tipoContainer}>
@@ -139,6 +183,9 @@ const styles = StyleSheet.create({
   headerTitle: { color: "#0B3B33", fontWeight: "700", fontSize: 17 },
   label: { color: "#0B3B33", fontSize: 13, fontWeight: "700", marginTop: 18, marginBottom: 8 },
   input: { height: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 12, paddingHorizontal: 15, color: "#0B3B33", fontSize: 14 },
+  seletorData: { height: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 12, paddingHorizontal: 15, justifyContent: "center" },
+  textoSeletorData: { color: "#0B3B33", fontSize: 14 },
+  placeholderSeletorData: { color: "#8AA69E" },
   valueContainer: { height: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 12, flexDirection: "row", alignItems: "center", paddingHorizontal: 14 },
   currency: { color: "#0B3B33", fontWeight: "700", marginRight: 8 },
   valueInput: { flex: 1, color: "#0B3B33", fontSize: 18 },

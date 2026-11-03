@@ -1,119 +1,682 @@
-import React, { useCallback, useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Alert, ActivityIndicator } from "react-native";
-import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { despesasPessoaisApi, DespesaPessoal } from "@/services/api";
 
-function formatarData(iso: string) {
-  const [ano, mes, dia] = iso.split("-");
-  const meses = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
-  return `${Number(dia)} ${meses[Number(mes) - 1]} ${ano}`;
+import React from "react";
+
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { despesasPessoaisApi } from "@/services/api";
+import type { DespesaPessoal } from "@/types/api";
+
+const WEPAY = {
+  paper: "#F5FBF7",
+  ink: "#0B3B33",
+  inkSoft: "#315D53",
+  accent: "#00C896",
+  accentDark: "#00A17A",
+  softGreen: "#BFE0D6",
+  surface: "#FFFFFF",
+  line: "#E1EEE8",
+  muted: "#6B8F86",
+};
+
+const CATEGORIAS = [
+  { nome: "Alimentação", icone: "🍽️" },
+  { nome: "Transporte", icone: "🚕" },
+  { nome: "Casa", icone: "🏠" },
+  { nome: "Moradia", icone: "🏘️" },
+  { nome: "Saúde", icone: "💊" },
+  { nome: "Educação", icone: "📚" },
+  { nome: "Lazer", icone: "🎮" },
+  { nome: "Assinatura", icone: "🎬" },
+  { nome: "Assinaturas", icone: "🎬" },
+  { nome: "Compras", icone: "🛍️" },
+  { nome: "Pets", icone: "🐾" },
+  { nome: "Viagem", icone: "✈️" },
+  { nome: "Impostos", icone: "🧾" },
+  { nome: "Outros", icone: "📦" },
+];
+
+function formatarData(data: string) {
+  const valor = /^\d{4}-\d{2}-\d{2}$/.test(data)
+    ? new Date(`${data}T12:00:00`)
+    : new Date(data);
+
+  if (Number.isNaN(valor.getTime())) return data;
+
+  return valor.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
 }
 
-export default function DetalhesDespesaPessoal() {
-  const { id } = useLocalSearchParams<{ id?: string }>();
-  const [despesa, setDespesa] = useState<DespesaPessoal | null>(null);
-  const [carregando, setCarregando] = useState(true);
-  const [excluindo, setExcluindo] = useState(false);
+function formatarMoeda(valor: number) {
+  return Number(valor).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
 
-  useFocusEffect(useCallback(() => {
-    if (!id) return;
-    let ativo = true;
-    async function carregarDespesa() {
-      try {
-        const res = await despesasPessoaisApi.buscar(Number(id));
-        if (ativo) setDespesa(res.data as DespesaPessoal);
-      } catch (e) {
-        if (ativo) {
-          Alert.alert("Erro", e instanceof Error ? e.message : "Não foi possível carregar.");
-          router.back();
+export default function DetalhesDespesaPessoalScreen() {
+  const params = useLocalSearchParams<{ id?: string | string[] }>();
+  const id = Array.isArray(params.id) ? params.id[0] : params.id;
+  const idNumerico = id ? Number(id) : NaN;
+  const [despesa, setDespesa] = React.useState<DespesaPessoal | null>(null);
+  const [carregando, setCarregando] = React.useState(true);
+  const [erro, setErro] = React.useState<string | null>(null);
+  const [erroAcao, setErroAcao] = React.useState<string | null>(null);
+  const [excluindo, setExcluindo] = React.useState(false);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      let ativo = true;
+
+      async function carregarDespesa() {
+        setCarregando(true);
+        setErro(null);
+
+        if (!Number.isSafeInteger(idNumerico) || idNumerico <= 0) {
+          setErro("O identificador desta despesa é inválido.");
+          setCarregando(false);
+          return;
         }
-      } finally {
-        if (ativo) setCarregando(false);
-      }
-    }
-    void carregarDespesa();
-    return () => { ativo = false; };
-  }, [id]));
 
-  function confirmarExclusao() {
-    Alert.alert("Excluir despesa", "Deseja realmente excluir esta despesa?", [
-      { text: "Cancelar", style: "cancel" },
-      { text: "Excluir", style: "destructive", onPress: excluir },
-    ]);
+        try {
+          const resposta = await despesasPessoaisApi.buscar(idNumerico);
+          if (ativo) setDespesa(resposta.data);
+        } catch (falha) {
+          if (ativo) {
+            setDespesa(null);
+            setErro(
+              falha instanceof Error
+                ? falha.message
+                : "Não foi possível carregar esta despesa."
+            );
+          }
+        } finally {
+          if (ativo) setCarregando(false);
+        }
+      }
+
+      void carregarDespesa();
+      return () => {
+        ativo = false;
+      };
+    }, [idNumerico])
+  );
+
+  function voltar() {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/(main)/personal/despesas-pessoais");
+    }
   }
 
-  async function excluir() {
+  function editarDespesa() {
+    if (!despesa) return;
+
+    router.push({
+      pathname: "/(main)/personal/editar-despesa-pessoal",
+      params: { id: String(despesa.id) },
+    });
+  }
+
+  async function excluirDespesaAtual() {
+    if (!despesa || excluindo) return;
+
     setExcluindo(true);
+    setErroAcao(null);
+
     try {
-      await despesasPessoaisApi.deletar(Number(id));
+      await despesasPessoaisApi.deletar(despesa.id);
       router.replace("/(main)/personal/despesas-pessoais");
-    } catch (e) {
-      Alert.alert("Erro", e instanceof Error ? e.message : "Não foi possível excluir.");
+    } catch (falha) {
+      setErroAcao(
+        falha instanceof Error
+          ? falha.message
+          : "Não foi possível excluir esta despesa."
+      );
       setExcluindo(false);
     }
   }
 
-  if (carregando) return <SafeAreaView style={styles.container}><ActivityIndicator color="#00C896" style={{ marginTop: 60 }} /></SafeAreaView>;
-  if (!despesa) return null;
+  function confirmarExclusao() {
+    if (!despesa || excluindo) return;
+
+    const mensagem =
+      "Tem certeza de que deseja excluir esta despesa? Essa ação não poderá ser desfeita.";
+
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm(mensagem)) {
+        void excluirDespesaAtual();
+      }
+      return;
+    }
+
+    Alert.alert("Excluir despesa", mensagem, [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Excluir",
+        style: "destructive",
+        onPress: () => void excluirDespesaAtual(),
+      },
+    ]);
+  }
+
+  if (carregando) {
+    return (
+      <View style={[styles.container, styles.loading]}>
+        <StatusBar barStyle="dark-content" />
+        <ActivityIndicator color={WEPAY.accent} />
+      </View>
+    );
+  }
+
+  if (!despesa) {
+    return (
+      <View style={styles.notFound}>
+        <Text style={styles.notFoundIcon}>🧾</Text>
+
+        <Text style={styles.notFoundTitle}>
+          Despesa não encontrada
+        </Text>
+
+        <Text style={styles.notFoundDescription}>
+          {erro ?? "Não foi possível localizar as informações deste lançamento."}
+        </Text>
+
+        <Pressable
+          style={styles.backButton}
+          onPress={() =>
+            router.replace(
+              "/(main)/personal/despesas-pessoais"
+            )
+          }
+        >
+          <Text style={styles.backButtonText}>
+            Voltar para despesas
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  const tipoLabel = despesa.tipo === "receita" ? "Receita pessoal" : "Despesa pessoal";
+  const categoria = CATEGORIAS.find(
+    (item) => item.nome === despesa.categoria
+  );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Cabeçalho */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Text style={styles.backText}>‹</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Detalhes</Text>
-          <TouchableOpacity onPress={() => router.push({ pathname: "/(main)/personal/editar-despesa-pessoal", params: { id: String(despesa.id) } })}>
-            <Text style={styles.editText}>Editar</Text>
-          </TouchableOpacity>
+          <Pressable
+            onPress={voltar}
+            hitSlop={12}
+            style={styles.backArea}
+          >
+            <Text style={styles.backIcon}>‹</Text>
+            <Text style={styles.backText}>Voltar</Text>
+          </Pressable>
+
+          <Text style={styles.headerTitle}>
+            Detalhes da despesa
+          </Text>
+
+          <Text style={styles.headerSubtitle}>
+            Confira as informações deste lançamento.
+          </Text>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.smallLabel}>DESPESA PESSOAL</Text>
-          <Text style={styles.title}>{despesa.descricao}</Text>
-          <Text style={styles.value}>R$ {Number(despesa.valor).toFixed(2).replace(".", ",")}</Text>
+        {/* Cartão principal */}
+        <View style={styles.mainCard}>
+          <View style={styles.receiptHeader}>
+            <View style={styles.receiptIcon}>
+              <Text style={styles.receiptEmoji}>
+                {categoria?.icone ?? "📌"}
+              </Text>
+            </View>
+
+            <View style={styles.originBadge}>
+              <Text style={styles.originBadgeText}>
+                {tipoLabel}
+              </Text>
+            </View>
+          </View>
+
+          <Text style={styles.expenseDescription}>
+            {despesa.descricao}
+          </Text>
+
+          <Text style={styles.expenseValue}>
+            {formatarMoeda(despesa.valor)}
+          </Text>
+
+          <View style={styles.mainCardDivider} />
+
+          <View style={styles.mainCardFooter}>
+            <Text style={styles.mainCardFooterText}>
+              {formatarData(despesa.data_despesa)}
+            </Text>
+
+            <Text style={styles.mainCardFooterText}>
+              {despesa.categoria ?? "Outros"}
+            </Text>
+          </View>
         </View>
 
-        <View style={styles.details}>
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Categoria</Text>
-            <Text style={styles.rowValue}>{despesa.categoria ?? "Outros"}</Text>
+        {/* Informações da despesa */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>
+            Informações da despesa
+          </Text>
+        </View>
+
+        <View style={styles.detailsCard}>
+          <View style={styles.detailRow}>
+            <View style={styles.detailLeft}>
+              <Text style={styles.detailIcon}>📝</Text>
+              <Text style={styles.detailLabel}>
+                Descrição
+              </Text>
+            </View>
+
+            <Text style={styles.detailValue}>
+              {despesa.descricao}
+            </Text>
           </View>
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Data</Text>
-            <Text style={styles.rowValue}>{formatarData(despesa.data_despesa)}</Text>
+
+          <View style={styles.divider} />
+
+          <View style={styles.detailRow}>
+            <View style={styles.detailLeft}>
+              <Text style={styles.detailIcon}>💰</Text>
+              <Text style={styles.detailLabel}>
+                Valor
+              </Text>
+            </View>
+
+            <Text style={styles.detailValue}>
+              {formatarMoeda(despesa.valor)}
+            </Text>
           </View>
-          <View style={[styles.row, { borderBottomWidth: 0 }]}>
-            <Text style={styles.rowLabel}>Tipo</Text>
-            <Text style={styles.rowValue}>{despesa.tipo === "receita" ? "Receita" : "Despesa"}</Text>
+
+          <View style={styles.divider} />
+
+          <View style={styles.detailRow}>
+            <View style={styles.detailLeft}>
+              <Text style={styles.detailIcon}>📅</Text>
+              <Text style={styles.detailLabel}>
+                Data da despesa
+              </Text>
+            </View>
+
+            <Text style={styles.detailValue}>
+              {formatarData(despesa.data_despesa)}
+            </Text>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.detailRow}>
+            <View style={styles.detailLeft}>
+              <Text style={styles.detailIcon}>🏷️</Text>
+              <Text style={styles.detailLabel}>
+                Categoria
+              </Text>
+            </View>
+
+            <Text style={styles.detailValue}>
+              {categoria?.icone ?? "📌"} {despesa.categoria ?? "Outros"}
+            </Text>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.detailRow}>
+            <View style={styles.detailLeft}>
+              <Text style={styles.detailIcon}>📋</Text>
+              <Text style={styles.detailLabel}>
+                Origem do cadastro
+              </Text>
+            </View>
+
+            <Text style={styles.detailValue}>
+              {despesa.tipo === "receita" ? "Receita" : "Despesa"}
+            </Text>
           </View>
         </View>
 
-        <TouchableOpacity style={[styles.deleteButton, excluindo && { opacity: 0.6 }]} onPress={confirmarExclusao} disabled={excluindo}>
-          {excluindo ? <ActivityIndicator color="#FF6B5C" /> : <Text style={styles.deleteText}>Excluir despesa</Text>}
-        </TouchableOpacity>
+        {/* Ações */}
+        <View style={styles.actions}>
+          <Pressable
+            onPress={editarDespesa}
+            disabled={excluindo}
+            style={({ pressed }) => [
+              styles.editButton,
+              (pressed || excluindo) && styles.buttonPressed,
+            ]}
+          >
+            <Text style={styles.editButtonText}>
+              ✎  Editar despesa
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={confirmarExclusao}
+            disabled={excluindo}
+            style={({ pressed }) => [
+              styles.deleteButton,
+              (pressed || excluindo) && styles.buttonPressed,
+            ]}
+          >
+            {excluindo ? (
+              <ActivityIndicator color="#D24A3B" />
+            ) : (
+              <Text style={styles.deleteButtonText}>Excluir despesa</Text>
+            )}
+          </Pressable>
+          {erroAcao ? (
+            <Text accessibilityRole="alert" style={styles.actionError}>
+              {erroAcao}
+            </Text>
+          ) : null}
+        </View>
+
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5FBF7" },
-  scroll: { paddingHorizontal: 20, paddingBottom: 35 },
-  header: { height: 65, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  backButton: { width: 42, height: 42, borderRadius: 12, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", justifyContent: "center", alignItems: "center" },
-  backText: { color: "#0B3B33", fontSize: 32 },
-  headerTitle: { color: "#0B3B33", fontWeight: "700", fontSize: 17 },
-  editText: { color: "#00A17A", fontWeight: "700", fontSize: 13 },
-  card: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 18, padding: 20, marginTop: 15 },
-  smallLabel: { color: "#6B8F86", fontSize: 10, fontWeight: "700" },
-  title: { color: "#0B3B33", fontSize: 22, fontWeight: "700", marginTop: 8 },
-  value: { color: "#00A17A", fontSize: 25, fontWeight: "700", marginTop: 15 },
-  details: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 16, paddingHorizontal: 18, marginTop: 14 },
-  row: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: "#E1EEE8" },
-  rowLabel: { color: "#6B8F86", fontSize: 13 },
-  rowValue: { color: "#0B3B33", fontSize: 13, fontWeight: "600" },
-  deleteButton: { height: 52, borderWidth: 1, borderColor: "#FF6B5C", borderRadius: 12, justifyContent: "center", alignItems: "center", marginTop: 25 },
-  deleteText: { color: "#FF6B5C", fontWeight: "700" },
+  container: {
+    flex: 1,
+    backgroundColor: WEPAY.paper,
+  },
+
+  loading: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  scrollContent: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+
+  header: {
+    marginBottom: 22,
+  },
+
+  backArea: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+
+  backIcon: {
+    color: WEPAY.accentDark,
+    fontSize: 29,
+    lineHeight: 30,
+    marginRight: 5,
+  },
+
+  backText: {
+    color: WEPAY.accentDark,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+
+  headerTitle: {
+    color: WEPAY.ink,
+    fontSize: 22,
+    fontWeight: "700",
+  },
+
+  headerSubtitle: {
+    color: WEPAY.muted,
+    fontSize: 12,
+    marginTop: 5,
+  },
+
+  mainCard: {
+    backgroundColor: WEPAY.ink,
+    borderRadius: 18,
+    padding: 20,
+    overflow: "hidden",
+  },
+
+  receiptHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  receiptIcon: {
+    width: 48,
+    height: 48,
+    backgroundColor: WEPAY.accent,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  receiptEmoji: {
+    fontSize: 23,
+  },
+
+  originBadge: {
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderRadius: 20,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+
+  originBadgeText: {
+    color: WEPAY.softGreen,
+    fontSize: 10,
+    fontWeight: "600",
+  },
+
+  expenseDescription: {
+    color: WEPAY.surface,
+    fontSize: 17,
+    fontWeight: "700",
+    marginTop: 20,
+  },
+
+  expenseValue: {
+    color: WEPAY.accent,
+    fontSize: 30,
+    fontWeight: "700",
+    marginTop: 7,
+  },
+
+  mainCardDivider: {
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    marginVertical: 17,
+  },
+
+  mainCardFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+
+  mainCardFooterText: {
+    color: WEPAY.softGreen,
+    fontSize: 11,
+    fontWeight: "500",
+  },
+
+  sectionHeader: {
+    marginTop: 25,
+    marginBottom: 12,
+  },
+
+  sectionTitle: {
+    color: WEPAY.ink,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
+  detailsCard: {
+    backgroundColor: WEPAY.surface,
+    borderRadius: 16,
+    paddingHorizontal: 15,
+    borderWidth: 1,
+    borderColor: WEPAY.line,
+  },
+
+  detailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    minHeight: 57,
+    gap: 8,
+  },
+
+  detailLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    flex: 1,
+  },
+
+  detailIcon: {
+    fontSize: 15,
+  },
+
+  detailLabel: {
+    color: WEPAY.muted,
+    fontSize: 11,
+  },
+
+  detailValue: {
+    color: WEPAY.ink,
+    fontSize: 11,
+    fontWeight: "600",
+    textAlign: "right",
+    flexShrink: 1,
+  },
+
+  divider: {
+    height: 1,
+    backgroundColor: WEPAY.line,
+  },
+
+  observationCard: {
+    backgroundColor: WEPAY.surface,
+    borderRadius: 14,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: WEPAY.line,
+  },
+
+  observationText: {
+    color: WEPAY.inkSoft,
+    fontSize: 12,
+    lineHeight: 19,
+  },
+
+  actions: {
+    marginTop: 28,
+    gap: 12,
+  },
+
+  editButton: {
+    height: 50,
+    backgroundColor: WEPAY.accent,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  editButtonText: {
+    color: WEPAY.ink,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  deleteButton: {
+    height: 48,
+    backgroundColor: "#FFE7E2",
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  deleteButtonText: {
+    color: "#D24A3B",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  buttonPressed: {
+    opacity: 0.75,
+  },
+
+  actionError: {
+    color: "#D24A3B",
+    fontSize: 12,
+    textAlign: "center",
+  },
+
+  notFound: {
+    flex: 1,
+    backgroundColor: WEPAY.paper,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 25,
+  },
+
+  notFoundIcon: {
+    fontSize: 42,
+    marginBottom: 12,
+  },
+
+  notFoundTitle: {
+    color: WEPAY.ink,
+    fontWeight: "700",
+    fontSize: 17,
+  },
+
+  notFoundDescription: {
+    color: WEPAY.muted,
+    fontSize: 12,
+    textAlign: "center",
+    lineHeight: 18,
+    marginTop: 8,
+    marginBottom: 20,
+  },
+
+  backButton: {
+    backgroundColor: WEPAY.accent,
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+  },
+
+  backButtonText: {
+    color: WEPAY.ink,
+    fontWeight: "700",
+    fontSize: 12,
+  },
 });

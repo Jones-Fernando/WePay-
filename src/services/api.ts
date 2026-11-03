@@ -87,6 +87,10 @@ export interface LoginResponse {
 export interface RegisterResponse {
   status: string;
   mensagem: string;
+  data: {
+    email_enviado: boolean;
+    token_teste?: string;
+  };
 }
 
 export interface PerfilResponse {
@@ -101,11 +105,23 @@ export const authApi = {
       body: JSON.stringify({ email, senha }),
     }),
 
-  register: (nome: string, email: string, senha: string) =>
+  register: (nome: string, email: string, senha: string, convite?: string) =>
     request<RegisterResponse>("/auth/register", {
       method: "POST",
-      body: JSON.stringify({ nome, email, senha }),
+      body: JSON.stringify({ nome, email, senha, convite }),
     }),
+
+  confirmarEmail: (token: string) =>
+    request<{ status: string; mensagem?: string; message?: string }>(
+      "/auth/confirmar-email",
+      { method: "POST", body: JSON.stringify({ token }) }
+    ),
+
+  reenviarConfirmacao: (email: string, convite?: string) =>
+    request<{ status: string; mensagem?: string; message?: string }>(
+      "/auth/reenviar-confirmacao",
+      { method: "POST", body: JSON.stringify({ email, convite }) }
+    ),
 
   me: () => request<PerfilResponse>("/auth/me"),
 
@@ -245,7 +261,12 @@ export const participantesApi = {
     request<{ status: string }>(`/participantes/${id}`, { method: "DELETE" }),
 
   convidar: (grupo_id: number, email: string) =>
-    request<{ status: string; message?: string }>('/participantes/convite', {
+    request<{
+      status: string;
+      message?: string;
+      mensagem?: string;
+      data?: { email_enviado: boolean };
+    }>('/participantes/convite', {
       method: "POST", body: JSON.stringify({ grupo_id, email }),
     }),
 
