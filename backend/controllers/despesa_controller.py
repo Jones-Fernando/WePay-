@@ -1,3 +1,5 @@
+from datetime import date
+
 from flask import request
 
 from database.connection import get_connection_context, cursor_for, fetch_one
@@ -35,6 +37,8 @@ class DespesaController:
         try:
             valor = parse_money(data.get("valor"))
             data_despesa = parse_iso_date(data.get("data_despesa") or data.get("data"), "data_despesa")
+            if data_despesa and date.fromisoformat(data_despesa) > date.today():
+                raise ValueError("Data da despesa nao pode ser futura.")
             vencimento = parse_iso_date(data.get("vencimento"), "vencimento")
         except ValueError as exc:
             return ResponseUtils.erro(str(exc))
@@ -122,6 +126,8 @@ class DespesaController:
                 data.get("data_despesa") or data.get("data") or despesa.get("data_despesa"),
                 "data_despesa",
             )
+            if data_despesa and date.fromisoformat(data_despesa) > date.today():
+                raise ValueError("Data da despesa nao pode ser futura.")
             vencimento = parse_iso_date(data.get("vencimento"), "vencimento")
         except ValueError as exc:
             return ResponseUtils.erro(str(exc))

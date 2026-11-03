@@ -154,12 +154,20 @@ class ParticipanteController:
         if not enviado and Config.ENVIRONMENT == "production":
             return ResponseUtils.erro("Nao foi possivel enviar o convite por email.", status=503)
 
-        data_retorno = {"email": email, "expires_at": expires.isoformat()}
-        if Config.ENVIRONMENT != "production":
+        data_retorno = {
+            "email": email,
+            "expires_at": expires.isoformat(),
+            "email_enviado": enviado,
+        }
+        if Config.ENVIRONMENT == "testing":
             data_retorno["token_teste"] = token
         return ResponseUtils.sucesso(
             dados=data_retorno,
-            mensagem="Convite criado.",
+            mensagem=(
+                "Convite enviado por e-mail."
+                if enviado
+                else "Convite criado, mas o e-mail não foi enviado. Verifique a configuração SMTP."
+            ),
             status=201,
         )
 

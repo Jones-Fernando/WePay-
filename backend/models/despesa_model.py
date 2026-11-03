@@ -11,7 +11,12 @@ class DespesaModel:
                     """
                     SELECT d.id, d.grupo_id, d.pagador_id, d.descricao,
                            d.categoria, d.valor, d.data_despesa,
-                           d.vencimento, u.nome AS pagador_nome
+                           d.vencimento,
+                           CAST(d.criado_em AS CHAR) AS criado_em,
+                           (SELECT COUNT(*)
+                            FROM despesa_divisoes dd
+                            WHERE dd.despesa_id = d.id) AS participantes_count,
+                           u.nome AS pagador_nome
                     FROM despesas d
                     JOIN usuarios u ON u.id = d.pagador_id
                     WHERE d.grupo_id = ?

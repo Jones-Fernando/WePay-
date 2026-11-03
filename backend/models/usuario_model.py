@@ -5,14 +5,15 @@ from database.connection import get_connection_context, cursor_for, fetch_one, f
 
 class UsuarioModel:
     @staticmethod
-    def criar(nome, email, senha_hash, conn=None):
+    def criar(nome, email, senha_hash, conn=None, email_verificado=False):
         context = nullcontext(conn) if conn is not None else get_connection_context()
         with context as connection:
             cursor = cursor_for(connection)
             try:
                 cursor.execute(
-                    "INSERT INTO usuarios (nome, email, senha) VALUES (?, ?, ?)",
-                    (nome, email, senha_hash),
+                    "INSERT INTO usuarios (nome, email, senha, email_verificado) "
+                    "VALUES (?, ?, ?, ?)",
+                    (nome, email, senha_hash, int(email_verificado)),
                 )
                 usuario_id = cursor.lastrowid
                 if conn is None:

@@ -2,12 +2,13 @@ from datetime import datetime, timedelta, timezone
 import secrets
 
 import jwt
-from flask import request
+from flask import current_app, request
 
 from config import Config
 
 from services.auth_service import AuthService
 from services.email_service import EmailService
+from services.email_confirmation_service import EmailConfirmationService
 from utils.response_utils import ResponseUtils
 from models.usuario_model import UsuarioModel
 from utils.password_utils import hash_password, check_password
@@ -32,10 +33,33 @@ class AuthController:
         if not isinstance(senha, str) or len(senha) < 6:
             return ResponseUtils.erro("Senha deve ter ao menos 6 caracteres.")
 
-        _, erro = AuthService.registrar_usuario(nome, email, senha)
+        usuario_id, erro = AuthService.registrar_usuario(nome, email, senha)
         if erro:
             return ResponseUtils.erro(erro, status=409)
-        return ResponseUtils.sucesso(mensagem="Usuario criado com sucesso.", status=201)
+        convite = data.get("convite")
+        try:
+            token_confirmacao, email_enviado = EmailConfirmationService.emitir(
+                usuario_id, email, convite
+            )
+        except Exception:
+            current_app.logger.exception(
+                "Falha ao criar confirmação de e-mail para usuario_id=%s",
+                usuario_id,
+            )
+            return ResponseUtils.erro(
+                "Conta criada, mas nao foi possivel preparar o e-mail de confirmacao. Solicite um novo link.",
+                status=500,
+            )
+
+        mensagem = (
+            "Conta criada. Verifique sua caixa de entrada para confirmar o e-mail."
+            if email_enviado
+            else "Conta criada, mas nao foi possivel enviar o e-mail. Verifique a configuracao SMTP ou solicite um novo link."
+        )
+        dados = {"email_enviado": email_enviado}
+        if Config.ENVIRONMENT == "testing":
+            dados["token_teste"] = token_confirmacao
+        return ResponseUtils.sucesso(dados=dados, mensagem=mensagem, status=201)
 
     @staticmethod
     def login():
@@ -48,14 +72,15 @@ class AuthController:
 
         resultado, erro = AuthService.autenticar_usuario(email, senha)
         if erro:
-            return ResponseUtils.erro(erro, status=401)
+            status = 403 if erro.startswith("Confirme seu e-mail") else 401
+            return ResponseUtils.erro(erro, status=status)
 
         expires_at = datetime.now(timezone.utc) + timedelta(days=30)
         try:
             payload = decode_token(resultado["refresh_token"], expected_type="refresh")
             expires_at = datetime.fromtimestamp(payload["exp"], tz=timezone.utc).replace(tzinfo=None)
         except Exception:
-            pass
+            return ResponseUtils.erro("Nao foi possivel iniciar a sessao.", status=500)
 
         try:
             with get_connection_context() as conn:
@@ -69,9 +94,40 @@ class AuthController:
                 finally:
                     cursor.close()
         except Exception:
-            pass
+            return ResponseUtils.erro("Nao foi possivel iniciar a sessao.", status=500)
 
         return ResponseUtils.sucesso(dados=resultado)
+
+    @staticmethod
+    def confirmar_email():
+        data = request.get_json(silent=True) or {}
+        token = data.get("token")
+        if not isinstance(token, str) or not token:
+            return ResponseUtils.erro("Token de confirmacao invalido ou expirado.", status=400)
+        if not EmailConfirmationService.confirmar(token):
+            return ResponseUtils.erro(
+                "Token de confirmacao invalido, expirado ou ja utilizado.",
+                status=400,
+            )
+        return ResponseUtils.sucesso(mensagem="E-mail confirmado com sucesso.")
+
+    @staticmethod
+    def reenviar_confirmacao_email():
+        data = request.get_json(silent=True) or {}
+        email = data.get("email")
+        if isinstance(email, str) and email.strip():
+            try:
+                EmailConfirmationService.reenviar(email, data.get("convite"))
+            except Exception:
+                current_app.logger.exception(
+                    "Falha ao solicitar reenvio de confirmação de e-mail"
+                )
+        return ResponseUtils.sucesso(
+            mensagem=(
+                "Se houver uma conta pendente para este e-mail, enviaremos "
+                "um novo link de confirmação."
+            )
+        )
 
     @staticmethod
     def logout(current_user_id, access_token):
@@ -216,7 +272,7 @@ class AuthController:
                 finally:
                     cursor.close()
             EmailService.enviar_recuperacao_senha(email, token)
-            dados = {"token_teste": token} if Config.ENVIRONMENT != "production" else None
+            dados = {"token_teste": token} if Config.ENVIRONMENT == "testing" else None
             return ResponseUtils.sucesso(
                 dados=dados,
                 mensagem="Se o e-mail estiver cadastrado, voce recebera as instrucoes.",

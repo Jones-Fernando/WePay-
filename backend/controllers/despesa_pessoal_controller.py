@@ -23,6 +23,8 @@ class DespesaPessoalController:
                 data.get("data_despesa") or data.get("data"),
                 "data_despesa",
             ) or date.today().isoformat()
+            if date.fromisoformat(data_despesa) > date.today():
+                raise ValueError("Data da despesa nao pode ser futura.")
         except ValueError as exc:
             return ResponseUtils.erro(str(exc))
 
@@ -90,6 +92,8 @@ class DespesaPessoalController:
                 data.get("data_despesa") or data.get("data") or item.get("data_despesa"),
                 "data_despesa",
             )
+            if date.fromisoformat(data_despesa) > date.today():
+                raise ValueError("Data da despesa nao pode ser futura.")
         except ValueError as exc:
             return ResponseUtils.erro(str(exc))
 

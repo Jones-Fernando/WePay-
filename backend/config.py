@@ -1,8 +1,14 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent
+
+# O backend pode ser iniciado a partir da raiz do repositório, da pasta
+# `backend` ou por uma IDE. Usar um caminho explícito impede que o processo
+# carregue um `.env` de outra pasta — ou deixe de carregar as credenciais.
+load_dotenv(BASE_DIR / ".env")
 
 
 class Config:
@@ -33,6 +39,8 @@ class Config:
     RATE_LIMIT_STORAGE_URI = os.getenv("RATE_LIMIT_STORAGE_URI", "memory://")
     RATE_LIMIT_LOGIN = os.getenv("RATE_LIMIT_LOGIN", "5 per minute")
     RATE_LIMIT_REGISTER = os.getenv("RATE_LIMIT_REGISTER", "10 per hour")
+    RATE_LIMIT_EMAIL_CONFIRM = os.getenv("RATE_LIMIT_EMAIL_CONFIRM", "10 per hour")
+    RATE_LIMIT_EMAIL_RESEND = os.getenv("RATE_LIMIT_EMAIL_RESEND", "5 per hour")
 
     CORS_ORIGINS = [
         origin.strip()

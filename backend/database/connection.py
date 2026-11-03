@@ -4,9 +4,11 @@ from contextlib import contextmanager
 from collections.abc import Generator, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from config import Config
+from database.legacy_finance_migrations import apply_legacy_finance_migrations
+from database.legacy_invite_migrations import apply_legacy_invitation_migration
 
 mysql_connector: Any = None
 try:
@@ -16,6 +18,15 @@ except ImportError:  # pragma: no cover - dependência obrigatória em runtime
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SCHEMA_FILE = BASE_DIR / "database" / "wepay.sql"
+SCHEMA_VERSION = "2026-11-02_email_confirmation"
+
+
+class _MigrationCursor(Protocol):
+    def execute(self, operation: str, params: Any = None) -> Any: ...
+
+    def fetchall(self) -> list[Any]: ...
+
+    def fetchone(self) -> Any: ...
 
 
 def adapt_query(query: str) -> str:
@@ -69,12 +80,437 @@ def _ensure_schema() -> None:
             if statement:
                 try:
                     cursor.execute(statement)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    raise RuntimeError(
+                        "Falha ao aplicar o schema inicial do banco de dados. "
+                        f"Comando: {statement[:120]!r}"
+                    ) from exc
         connection.commit()
         cursor.close()
     finally:
         connection.close()
+
+
+def _record_schema_version() -> None:
+    """Registra a versão aplicada para tornar migrações auditáveis."""
+    connection = _connect_mysql(Config.DB_NAME)
+    try:
+        cursor = connection.cursor()
+        try:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version VARCHAR(100) NOT NULL PRIMARY KEY,
+                    applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+            cursor.execute(
+                "INSERT IGNORE INTO schema_migrations (version) VALUES (%s)",
+                (SCHEMA_VERSION,),
+            )
+            connection.commit()
+        finally:
+            cursor.close()
+    finally:
+        connection.close()
+
+
+def _column_metadata(cursor: _MigrationCursor, table: str) -> dict[str, str]:
+    cursor.execute(f"SHOW COLUMNS FROM `{table}`")
+    return {str(column[0]): str(column[1]) for column in cursor.fetchall()}
+
+
+def _index_metadata(
+    cursor: _MigrationCursor, table: str
+) -> dict[str, tuple[bool, tuple[str, ...]]]:
+    cursor.execute(f"SHOW INDEX FROM `{table}`")
+    indexes: dict[str, tuple[bool, list[str]]] = {}
+    for row in cursor.fetchall():
+        name = str(row[2])
+        if name not in indexes:
+            indexes[name] = (not bool(row[1]), [])
+        indexes[name][1].append(str(row[4]))
+    return {
+        name: (unique, tuple(columns))
+        for name, (unique, columns) in indexes.items()
+    }
+
+
+def _drop_indexes_for_columns(
+    cursor: _MigrationCursor, table: str, column_names: set[str]
+) -> None:
+    for name, (_, columns) in _index_metadata(cursor, table).items():
+        if name != "PRIMARY" and column_names.intersection(columns):
+            escaped_name = name.replace("`", "``")
+            cursor.execute(f"ALTER TABLE `{table}` DROP INDEX `{escaped_name}`")
+
+
+def _foreign_keys_for_column(
+    cursor: _MigrationCursor, table: str, column: str
+) -> list[str]:
+    cursor.execute(
+        """
+        SELECT DISTINCT CONSTRAINT_NAME
+        FROM information_schema.KEY_COLUMN_USAGE
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = %s
+          AND COLUMN_NAME = %s
+          AND REFERENCED_TABLE_NAME IS NOT NULL
+        """,
+        (table, column),
+    )
+    return [str(row[0]) for row in cursor.fetchall()]
+
+
+def _apply_email_confirmation_migration(cursor: _MigrationCursor) -> None:
+    cursor.execute("SHOW COLUMNS FROM `usuarios`")
+    columns = {str(column[0]): column for column in cursor.fetchall()}
+    if "email_verificado" not in columns:
+        cursor.execute(
+            "ALTER TABLE usuarios ADD COLUMN email_verificado "
+            "TINYINT(1) NOT NULL DEFAULT 1"
+        )
+        default = "1"
+    else:
+        default = str(columns["email_verificado"][4])
+
+    if default != "0":
+        cursor.execute(
+            "ALTER TABLE usuarios MODIFY COLUMN email_verificado "
+            "TINYINT(1) NOT NULL DEFAULT 0"
+        )
+
+    cursor.execute(
+        """
+        UPDATE usuarios AS u
+        SET u.email_verificado = 1
+        WHERE u.email_verificado = 0
+          AND NOT EXISTS (
+              SELECT 1
+              FROM email_verification_tokens AS t
+              WHERE t.usuario_id = u.id
+          )
+        """
+    )
+
+
+def _apply_participantes_migration(cursor: _MigrationCursor) -> None:
+    columns = _column_metadata(cursor, "participantes")
+    legacy_columns = {
+        name
+        for name in ("status", "data_entrada", "data_saida")
+        if name in columns
+    }
+    papel_type = columns.get("papel", "").lower()
+    target_papel = "'admin'" in papel_type and "'participante'" in papel_type
+    if (
+        {"ativo", "criado_em", "removido_em"}.issubset(columns)
+        and not legacy_columns
+        and target_papel
+    ):
+        return
+
+    if "status" in columns:
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM participantes
+            WHERE status IS NULL
+               OR UPPER(CAST(status AS CHAR)) NOT IN ('ATIVO', 'REMOVIDO')
+            """
+        )
+        if int(cursor.fetchone()[0]):
+            raise RuntimeError(
+                "Migração de participantes interrompida: status legado desconhecido."
+            )
+    if papel_type and not target_papel:
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM participantes
+            WHERE papel IS NULL
+               OR UPPER(CAST(papel AS CHAR)) NOT IN (
+                   'ADMIN', 'MEMBRO', 'PARTICIPANTE'
+               )
+            """
+        )
+        if int(cursor.fetchone()[0]):
+            raise RuntimeError(
+                "Migração de participantes interrompida: papel legado desconhecido."
+            )
+
+    if "ativo" not in columns:
+        cursor.execute("ALTER TABLE participantes ADD COLUMN ativo TINYINT(1) NULL")
+    if "criado_em" not in columns:
+        cursor.execute(
+            "ALTER TABLE participantes ADD COLUMN criado_em DATETIME NULL"
+        )
+    if "removido_em" not in columns:
+        cursor.execute(
+            "ALTER TABLE participantes ADD COLUMN removido_em DATETIME NULL"
+        )
+
+    if "status" in columns:
+        cursor.execute(
+            """
+            UPDATE participantes
+            SET ativo = CASE UPPER(CAST(status AS CHAR))
+                WHEN 'ATIVO' THEN 1
+                WHEN 'REMOVIDO' THEN 0
+                ELSE NULL
+            END
+            """
+        )
+    else:
+        cursor.execute(
+            "UPDATE participantes SET ativo = 1 WHERE ativo IS NULL"
+        )
+
+    if "data_entrada" in columns:
+        cursor.execute(
+            "UPDATE participantes SET criado_em = data_entrada "
+            "WHERE data_entrada IS NOT NULL"
+        )
+    cursor.execute(
+        "UPDATE participantes SET criado_em = CURRENT_TIMESTAMP "
+        "WHERE criado_em IS NULL"
+    )
+    if "data_saida" in columns:
+        cursor.execute(
+            "UPDATE participantes SET removido_em = data_saida "
+            "WHERE data_saida IS NOT NULL"
+        )
+
+    if papel_type and not target_papel:
+        cursor.execute(
+            "ALTER TABLE participantes MODIFY COLUMN papel VARCHAR(30) NULL"
+        )
+        cursor.execute(
+            """
+            UPDATE participantes
+            SET papel = CASE UPPER(CAST(papel AS CHAR))
+                WHEN 'ADMIN' THEN 'admin'
+                WHEN 'MEMBRO' THEN 'participante'
+                WHEN 'PARTICIPANTE' THEN 'participante'
+                ELSE NULL
+            END
+            """
+        )
+        cursor.execute(
+            "ALTER TABLE participantes MODIFY COLUMN papel "
+            "ENUM('admin', 'participante') NOT NULL DEFAULT 'participante'"
+        )
+
+    cursor.execute(
+        "ALTER TABLE participantes MODIFY COLUMN ativo "
+        "TINYINT(1) NOT NULL DEFAULT 1"
+    )
+    cursor.execute(
+        "ALTER TABLE participantes MODIFY COLUMN criado_em "
+        "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+    )
+    cursor.execute(
+        "ALTER TABLE participantes MODIFY COLUMN removido_em DATETIME NULL"
+    )
+
+    if legacy_columns:
+        _drop_indexes_for_columns(cursor, "participantes", legacy_columns)
+        drop_clauses = ", ".join(
+            f"DROP COLUMN `{name}`" for name in sorted(legacy_columns)
+        )
+        cursor.execute(f"ALTER TABLE participantes {drop_clauses}")
+
+    indexes = _index_metadata(cursor, "participantes")
+    if not any(columns == ("grupo_id", "ativo") for _, columns in indexes.values()):
+        cursor.execute(
+            "ALTER TABLE participantes ADD INDEX "
+            "idx_participantes_grupo_ativo (grupo_id, ativo)"
+        )
+
+
+def _apply_saldos_migration(cursor: _MigrationCursor) -> None:
+    columns = _column_metadata(cursor, "saldos")
+    legacy_columns = {
+        name
+        for name in ("participante_id", "valor_saldo", "updated_at")
+        if name in columns
+    }
+    migration_required = (
+        not {"usuario_id", "saldo", "criado_em", "atualizado_em"}.issubset(
+            columns
+        )
+        or bool(legacy_columns)
+    )
+
+    if migration_required:
+        if "participante_id" in columns:
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM saldos s
+                LEFT JOIN participantes p
+                  ON p.id = s.participante_id AND p.grupo_id = s.grupo_id
+                WHERE p.id IS NULL
+                """
+            )
+            if int(cursor.fetchone()[0]):
+                raise RuntimeError(
+                    "Migração de saldos interrompida: participante legado inexistente."
+                )
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM (
+                    SELECT s.grupo_id, p.usuario_id
+                    FROM saldos s
+                    JOIN participantes p
+                      ON p.id = s.participante_id AND p.grupo_id = s.grupo_id
+                    GROUP BY s.grupo_id, p.usuario_id
+                    HAVING COUNT(*) > 1
+                ) duplicados
+                """
+            )
+            if int(cursor.fetchone()[0]):
+                raise RuntimeError(
+                    "Migração de saldos interrompida: há saldos duplicados por grupo e usuário."
+                )
+        elif "usuario_id" in columns:
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM (
+                    SELECT grupo_id, usuario_id
+                    FROM saldos
+                    GROUP BY grupo_id, usuario_id
+                    HAVING COUNT(*) > 1
+                ) duplicados
+                """
+            )
+            if int(cursor.fetchone()[0]):
+                raise RuntimeError(
+                    "Migração de saldos interrompida: há saldos duplicados por grupo e usuário."
+                )
+        else:
+            cursor.execute("SELECT COUNT(*) FROM saldos")
+            if int(cursor.fetchone()[0]):
+                raise RuntimeError(
+                    "Migração de saldos interrompida: não há usuário para migrar."
+                )
+
+        if "valor_saldo" not in columns and "saldo" not in columns:
+            cursor.execute("SELECT COUNT(*) FROM saldos")
+            if int(cursor.fetchone()[0]):
+                raise RuntimeError(
+                    "Migração de saldos interrompida: não há valor para migrar."
+                )
+
+    if "usuario_id" not in columns:
+        cursor.execute("ALTER TABLE saldos ADD COLUMN usuario_id BIGINT UNSIGNED NULL")
+    if "saldo" not in columns:
+        cursor.execute("ALTER TABLE saldos ADD COLUMN saldo DECIMAL(12,2) NULL")
+    if "criado_em" not in columns:
+        cursor.execute("ALTER TABLE saldos ADD COLUMN criado_em DATETIME NULL")
+    if "atualizado_em" not in columns:
+        cursor.execute(
+            "ALTER TABLE saldos ADD COLUMN atualizado_em DATETIME NULL"
+        )
+
+    if migration_required:
+        if "participante_id" in columns:
+            if "valor_saldo" in columns:
+                cursor.execute(
+                    """
+                    UPDATE saldos s
+                    JOIN participantes p
+                      ON p.id = s.participante_id AND p.grupo_id = s.grupo_id
+                    SET s.usuario_id = p.usuario_id, s.saldo = s.valor_saldo
+                    """
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE saldos s
+                    JOIN participantes p
+                      ON p.id = s.participante_id AND p.grupo_id = s.grupo_id
+                    SET s.usuario_id = p.usuario_id
+                    """
+                )
+        elif "valor_saldo" in columns:
+            cursor.execute("UPDATE saldos SET saldo = valor_saldo")
+
+        if "updated_at" in columns:
+            cursor.execute(
+                "UPDATE saldos SET atualizado_em = updated_at "
+                "WHERE updated_at IS NOT NULL"
+            )
+        cursor.execute(
+            "UPDATE saldos SET criado_em = CURRENT_TIMESTAMP "
+            "WHERE criado_em IS NULL"
+        )
+        cursor.execute(
+            "UPDATE saldos SET atualizado_em = CURRENT_TIMESTAMP "
+            "WHERE atualizado_em IS NULL"
+        )
+        cursor.execute(
+            "SELECT COUNT(*) FROM saldos WHERE usuario_id IS NULL OR saldo IS NULL"
+        )
+        if int(cursor.fetchone()[0]):
+            raise RuntimeError(
+                "Migração de saldos interrompida: saldo ou usuário sem correspondência."
+            )
+
+        cursor.execute(
+            "ALTER TABLE saldos MODIFY COLUMN usuario_id BIGINT UNSIGNED NOT NULL"
+        )
+        cursor.execute(
+            "ALTER TABLE saldos MODIFY COLUMN saldo "
+            "DECIMAL(12,2) NOT NULL DEFAULT 0.00"
+        )
+        cursor.execute(
+            "ALTER TABLE saldos MODIFY COLUMN criado_em "
+            "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+        )
+        cursor.execute(
+            "ALTER TABLE saldos MODIFY COLUMN atualizado_em "
+            "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+        )
+
+    indexes = _index_metadata(cursor, "saldos")
+    if not any(
+        unique and columns == ("grupo_id", "usuario_id")
+        for unique, columns in indexes.values()
+    ):
+        cursor.execute(
+            "ALTER TABLE saldos ADD CONSTRAINT uq_saldo "
+            "UNIQUE (grupo_id, usuario_id)"
+        )
+    if not any(columns == ("grupo_id",) for _, columns in indexes.values()):
+        cursor.execute(
+            "ALTER TABLE saldos ADD INDEX idx_saldos_grupo (grupo_id)"
+        )
+
+    foreign_keys = _foreign_keys_for_column(cursor, "saldos", "usuario_id")
+    if not foreign_keys:
+        cursor.execute(
+            "ALTER TABLE saldos ADD CONSTRAINT fk_saldo_usuario "
+            "FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE"
+        )
+
+    if legacy_columns:
+        if "participante_id" in legacy_columns:
+            for name in _foreign_keys_for_column(
+                cursor, "saldos", "participante_id"
+            ):
+                escaped_name = name.replace("`", "``")
+                cursor.execute(
+                    f"ALTER TABLE saldos DROP FOREIGN KEY `{escaped_name}`"
+                )
+        _drop_indexes_for_columns(cursor, "saldos", legacy_columns)
+        drop_clauses = ", ".join(
+            f"DROP COLUMN `{name}`" for name in sorted(legacy_columns)
+        )
+        cursor.execute(f"ALTER TABLE saldos {drop_clauses}")
 
 
 def _apply_compatibility_migrations() -> None:
@@ -101,6 +537,8 @@ def _apply_compatibility_migrations() -> None:
         if "telefone" not in colunas:
             cursor.execute("ALTER TABLE usuarios ADD COLUMN telefone VARCHAR(30) NULL")
 
+        _apply_email_confirmation_migration(cursor)
+
         cursor.execute("SHOW COLUMNS FROM refresh_tokens")
         colunas_refresh = {coluna[0] for coluna in cursor.fetchall()}
 
@@ -124,6 +562,11 @@ def _apply_compatibility_migrations() -> None:
                 "ALTER TABLE refresh_tokens ADD COLUMN revogado_em DATETIME NULL"
             )
 
+        _apply_participantes_migration(cursor)
+        _apply_saldos_migration(cursor)
+        apply_legacy_finance_migrations(cursor)
+        apply_legacy_invitation_migration(cursor)
+
         connection.commit()
 
         cursor.close()
@@ -135,6 +578,7 @@ def initialize_database() -> None:
     """Cria o banco e as tabelas quando a aplicação é iniciada."""
     _ensure_schema()
     _apply_compatibility_migrations()
+    _record_schema_version()
 
 
 @contextmanager

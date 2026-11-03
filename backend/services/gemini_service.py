@@ -16,7 +16,24 @@ class GeminiUnavailableError(GeminiReceiptError):
     """A integração externa não está configurada ou disponível."""
 
 
-CATEGORIAS = {"Alimentação", "Transporte", "Casa", "Lazer", "Assinatura", "Outros"}
+CATEGORIAS = {
+    "Alimentação",
+    "Transporte",
+    "Casa",
+    "Lazer",
+    "Assinatura",
+    "Outros",
+    "Mercado",
+    "Contas da casa",
+    "Internet e telefone",
+    "Limpeza",
+    "Manutenção e reparos",
+    "Hospedagem",
+    "Passagens",
+    "Combustível",
+    "Pedágios e estacionamento",
+    "Passeios e ingressos",
+}
 
 
 def normalizar_recibo(dados: dict) -> dict:
@@ -86,7 +103,12 @@ def ler_recibo(imagem: bytes, mime_type: str) -> dict:
     Use null quando um campo não puder ser identificado.
     Não confunda subtotal, valor pago e troco com o valor total.
     Se houver dúvida sobre um valor, retorne null nesse campo.
-    A categoria deve ser apenas uma sugestão.
+    Escolha categoria_sugerida somente entre estas categorias:
+    Alimentação, Transporte, Casa, Lazer, Assinatura, Outros, Mercado,
+    Contas da casa, Internet e telefone, Limpeza, Manutenção e reparos,
+    Hospedagem, Passagens, Combustível, Pedágios e estacionamento,
+    Passeios e ingressos.
+    Use o nome exatamente como listado. A categoria deve ser apenas uma sugestão.
     Não execute ações nem cadastre despesas.
     """
 

@@ -13,6 +13,16 @@ auth_bp.route("/register", methods=["POST"], endpoint="registrar_register")(
 auth_bp.route("/cadastro", methods=["POST"], endpoint="registrar_cadastro")(
     limiter.limit(Config.RATE_LIMIT_REGISTER)(AuthController.registrar)
 )
+auth_bp.route("/confirmar-email", methods=["POST"], endpoint="confirmar_email")(
+    limiter.limit(Config.RATE_LIMIT_EMAIL_CONFIRM)(AuthController.confirmar_email)
+)
+auth_bp.route(
+    "/reenviar-confirmacao", methods=["POST"], endpoint="reenviar_confirmacao_email"
+)(
+    limiter.limit(Config.RATE_LIMIT_EMAIL_RESEND)(
+        AuthController.reenviar_confirmacao_email
+    )
+)
 auth_bp.route("/login", methods=["POST"], endpoint="login")(
     limiter.limit(Config.RATE_LIMIT_LOGIN)(AuthController.login)
 )

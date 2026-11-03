@@ -4,7 +4,7 @@ from flask import Flask
 from flask_cors import CORS
 
 from config import Config
-from database.connection import initialize_database
+from database.connection import get_connection_context, initialize_database
 from utils.rate_limiter import limiter
 from utils.response_utils import ResponseUtils
 
@@ -71,6 +71,24 @@ def internal_error(error):
 @app.route("/", methods=["GET"])
 def index():
     return {"status": "Online", "projeto": "wepay"}, 200
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    """Verifica se a API e o banco estão disponíveis sem expor credenciais."""
+    try:
+        with get_connection_context() as connection:
+            cursor = connection.cursor()
+            try:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+            finally:
+                cursor.close()
+    except Exception:
+        app.logger.exception("Health check do banco falhou")
+        return {"status": "indisponivel", "database": "erro"}, 503
+
+    return {"status": "Online", "database": "Online"}, 200
 
 
 if __name__ == "__main__":

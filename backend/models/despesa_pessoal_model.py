@@ -32,7 +32,9 @@ class DespesaPessoalModel:
             try:
                 query = (
                     "SELECT id, usuario_id, descricao, valor, categoria, tipo, "
-                    "data_despesa FROM despesas_pessoais WHERE usuario_id = ?"
+                    "CAST(data_despesa AS CHAR) AS data_despesa, "
+                    "CAST(criado_em AS CHAR) AS criado_em "
+                    "FROM despesas_pessoais WHERE usuario_id = ?"
                 )
                 params = [usuario_id]
                 if categoria:

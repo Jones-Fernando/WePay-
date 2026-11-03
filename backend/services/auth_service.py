@@ -19,6 +19,8 @@ class AuthService:
         usuario = UsuarioModel.buscar_por_email(email_normalizado)
         if not usuario or not check_password(senha, usuario["senha"]):
             return None, "Credenciais invalidas."
+        if not usuario.get("email_verificado", 1):
+            return None, "Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada ou solicite um novo link."
 
         token = generate_token(usuario["id"])
         refresh_token = generate_refresh_token(usuario["id"])
