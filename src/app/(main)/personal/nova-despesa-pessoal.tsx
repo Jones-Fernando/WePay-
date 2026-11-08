@@ -6,55 +6,17 @@ import {
 import { router } from "expo-router";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { despesasPessoaisApi } from "@/services/api";
-
-const CATEGORIAS = [
-  { nome: "Alimentação", icone: "🍽️" },
-  { nome: "Transporte", icone: "🚕" },
-  { nome: "Casa", icone: "🏠" },
-  { nome: "Moradia", icone: "🏘️" },
-  { nome: "Saúde", icone: "💊" },
-  { nome: "Educação", icone: "📚" },
-  { nome: "Lazer", icone: "🎮" },
-  { nome: "Assinatura", icone: "🎬" },
-  { nome: "Assinaturas", icone: "🎬" },
-  { nome: "Compras", icone: "🛍️" },
-  { nome: "Pets", icone: "🐾" },
-  { nome: "Viagem", icone: "✈️" },
-  { nome: "Impostos", icone: "🧾" },
-  { nome: "Outros", icone: "📦" },
-];
-
-function converterValor(v: string) {
-  const limpo = v.replace(/R\$/gi, "").replace(/\s/g, "");
-  if (limpo.includes(",") && limpo.includes("."))
-    return Number(limpo.replace(/\./g, "").replace(",", "."));
-  return Number(limpo.replace(",", "."));
-}
-
-function converterDataParaIso(data: string): string | null {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(data)) return data;
-  const m = data.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (!m) return null;
-  const [, dia, mes, ano] = m;
-  const d = new Date(Number(ano), Number(mes) - 1, Number(dia));
-  if (d.getFullYear() !== Number(ano) || d.getMonth() !== Number(mes) - 1 || d.getDate() !== Number(dia)) return null;
-  return `${ano}-${mes}-${dia}`;
-}
-
-function formatarDataBrasileira(data: Date) {
-  const dia = String(data.getDate()).padStart(2, "0");
-  const mes = String(data.getMonth() + 1).padStart(2, "0");
-  return `${dia}/${mes}/${data.getFullYear()}`;
-}
-
-function dataBrasileiraParaDate(data: string) {
-  const iso = converterDataParaIso(data);
-  if (!iso) return new Date();
-  const [ano, mes, dia] = iso.split("-").map(Number);
-  return new Date(ano, mes - 1, dia);
-}
+import {
+  formatDateForInput,
+  parseCurrencyInput,
+  parseDateInputToDate,
+  parseDateInputToIso,
+} from "@/utils/financeInput";
+import { CATEGORIAS_PESSOAIS as CATEGORIAS } from "@/constants/financeCategories";
+import { useCategoriasFinanceiras } from "@/hooks/useCategoriasFinanceiras";
 
 export default function NovaDespesaPessoal() {
+  const { categorias, erro: erroCategorias } = useCategoriasFinanceiras("pessoal", CATEGORIAS);
   const [descricao, setDescricao] = useState("");
   const [valor, setValor] = useState("");
   const [data, setData] = useState("");
@@ -64,15 +26,15 @@ export default function NovaDespesaPessoal() {
 
   function selecionarData(_evento: DateTimePickerEvent, dataSelecionada?: Date) {
     setMostrarSeletorData(false);
-    if (dataSelecionada) setData(formatarDataBrasileira(dataSelecionada));
+    if (dataSelecionada) setData(formatDateForInput(dataSelecionada));
   }
 
   async function salvarDespesa() {
     const desc = descricao.trim();
     if (!desc) { Alert.alert("Atenção", "Digite a descrição."); return; }
-    const valorNum = converterValor(valor);
+    const valorNum = parseCurrencyInput(valor);
     if (isNaN(valorNum) || valorNum <= 0) { Alert.alert("Atenção", "Digite um valor válido."); return; }
-    const dataIso = converterDataParaIso(data.trim());
+    const dataIso = parseDateInputToIso(data.trim());
     if (!dataIso) { Alert.alert("Atenção", "Digite uma data válida no formato DD/MM/AAAA."); return; }
     const [ano, mes, dia] = dataIso.split("-").map(Number);
     const dataInformada = new Date(ano, mes - 1, dia);
@@ -140,7 +102,7 @@ export default function NovaDespesaPessoal() {
             </TouchableOpacity>
             {mostrarSeletorData && (
               <DateTimePicker
-                value={dataBrasileiraParaDate(data)}
+                value={parseDateInputToDate(data) ?? new Date()}
                 mode="date"
                 display="default"
                 locale="pt-BR"
@@ -153,13 +115,14 @@ export default function NovaDespesaPessoal() {
           <View style={styles.campo}>
             <Text style={styles.label}>Categoria</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 10 }}>
-              {CATEGORIAS.map((item) => (
+              {categorias.map((item) => (
                 <TouchableOpacity key={item.nome} style={[styles.categoria, categoria === item.nome && styles.categoriaSelecionada]} onPress={() => setCategoria(item.nome)} activeOpacity={0.8}>
                   <Text style={{ fontSize: 15, marginRight: 5 }}>{item.icone}</Text>
                   <Text style={[styles.categoriaTexto, categoria === item.nome && { color: "#0B3B33" }]}>{item.nome}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
+            {erroCategorias && <Text style={styles.erroCategorias}>{erroCategorias}</Text>}
           </View>
 
           <TouchableOpacity style={[styles.botaoSalvar, salvando && { opacity: 0.6 }]} onPress={salvarDespesa} disabled={salvando} activeOpacity={0.85}>
@@ -198,6 +161,7 @@ const styles = StyleSheet.create({
   simbolo: { fontSize: 14, fontWeight: "700", color: "#0B3B33", marginRight: 8 },
   inputValor: { flex: 1, height: "100%", fontSize: 18, color: "#0B3B33" },
   categoria: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8" },
+  erroCategorias: { color: "#D64545", fontSize: 12, marginTop: 6 },
   categoriaSelecionada: { backgroundColor: "#DDF7EE", borderColor: "#00C896" },
   categoriaTexto: { fontSize: 11, color: "#6B8F86", fontWeight: "600" },
   botaoSalvar: { height: 54, backgroundColor: "#00C896", borderRadius: 15, justifyContent: "center", alignItems: "center", marginTop: 4 },

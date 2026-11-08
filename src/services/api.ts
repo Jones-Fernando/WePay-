@@ -1,4 +1,11 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  expireSession,
+  getAccessToken,
+  getRefreshToken,
+  refreshAccessToken,
+} from "@/services/authSession";
+import { API_BASE_URL } from "@/services/apiConfig";
+import { Platform } from "react-native";
 import type {
   DespesaGrupo,
   DespesaPessoal,
@@ -6,8 +13,12 @@ import type {
   PagamentoGrupo,
   Grupo,
   Participante,
+  Paginacao,
+  PaginacaoLista,
   ResumoPessoal,
   ResumoSaldosGrupo,
+  Categoria,
+  Notificacao,
 } from "@/types/api";
 
 export type {
@@ -22,39 +33,84 @@ export type {
   Dashboard,
   DividaSimplificada,
   PagamentoGrupo,
+  Paginacao,
+  PaginacaoLista,
+  Categoria,
+  Notificacao,
 } from "@/types/api";
 
-const BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ?? "http://127.0.0.1:5000/api";
+const ROTAS_SEM_RENOVACAO = [
+  "/auth/login",
+  "/auth/register",
+  "/auth/cadastro",
+  "/auth/esqueci-senha",
+  "/auth/redefinir-senha",
+  "/auth/refresh",
+  "/usuarios/recover",
+  "/usuarios/recuperar-senha",
+  "/usuarios/recuperar-senha/confirmar",
+];
 
-async function getToken(): Promise<string | null> {
-  return AsyncStorage.getItem("@wepay:token");
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
 }
 
 async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = await getToken();
+  const token = await getAccessToken();
+  const logoutPushToken =
+    path === "/auth/logout" && typeof options.body === "string"
+      ? (JSON.parse(options.body) as { expo_push_token?: string })
+          .expo_push_token
+      : undefined;
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   };
 
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
+  const send = async (accessToken: string | null) => {
+    const requestHeaders = { ...headers };
+    if (accessToken) {
+      requestHeaders["Authorization"] = `Bearer ${accessToken}`;
+    }
+    const requestOptions =
+      path === "/auth/logout" && accessToken !== token && accessToken
+        ? {
+            ...options,
+            body: JSON.stringify({
+              refresh_token: await getRefreshToken(),
+              ...(logoutPushToken ? { expo_push_token: logoutPushToken } : {}),
+            }),
+          }
+        : options;
 
-  let response: Response;
+    try {
+      return await fetch(`${API_BASE_URL}${path}`, {
+        ...requestOptions,
+        credentials: Platform.OS === "web" ? "include" : requestOptions.credentials,
+        headers: requestHeaders,
+      });
+    } catch {
+      throw new Error("Não foi possível conectar ao servidor.");
+    }
+  };
 
-  try {
-    response = await fetch(`${BASE_URL}${path}`, {
-      ...options,
-      headers,
-    });
-  } catch {
-    throw new Error("Não foi possível conectar ao servidor.");
+  let response = await send(token);
+  const shouldRefresh = !ROTAS_SEM_RENOVACAO.some((route) =>
+    path.startsWith(route)
+  );
+  if (response.status === 401 && shouldRefresh) {
+    const renewedToken = await refreshAccessToken();
+    if (renewedToken) {
+      response = await send(renewedToken);
+      if (response.status === 401) await expireSession();
+    }
   }
 
   const texto = await response.text();
@@ -67,7 +123,7 @@ async function request<T>(
   }
 
   if (!response.ok) {
-    throw new Error(json.message || "Erro na requisição.");
+    throw new ApiError(json.message || "Erro na requisição.", response.status);
   }
 
   return json;
@@ -79,30 +135,33 @@ export interface LoginResponse {
   status: string;
   data: {
     token: string;
-    refresh_token: string;
-    user: { id: number; nome: string; email: string };
+    refresh_token?: string;
+    user: { id: number; nome: string; email: string; saldo_total: number };
   };
 }
 
 export interface RegisterResponse {
   status: string;
-  mensagem: string;
-  data: {
-    email_enviado: boolean;
-    token_teste?: string;
-  };
+  mensagem?: string;
+  message?: string;
 }
 
 export interface PerfilResponse {
   status: string;
-  data: { id: number; nome: string; email: string; telefone?: string };
+  data: {
+    id: number;
+    nome: string;
+    email: string;
+    telefone?: string;
+    saldo_total: number;
+  };
 }
 
 export const authApi = {
   login: (email: string, senha: string) =>
     request<LoginResponse>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email, senha }),
+      body: JSON.stringify({ email, senha, ...(Platform.OS === "web" ? { web: true } : {}) }),
     }),
 
   register: (nome: string, email: string, senha: string, convite?: string) =>
@@ -111,24 +170,21 @@ export const authApi = {
       body: JSON.stringify({ nome, email, senha, convite }),
     }),
 
-  confirmarEmail: (token: string) =>
-    request<{ status: string; mensagem?: string; message?: string }>(
-      "/auth/confirmar-email",
-      { method: "POST", body: JSON.stringify({ token }) }
-    ),
-
-  reenviarConfirmacao: (email: string, convite?: string) =>
-    request<{ status: string; mensagem?: string; message?: string }>(
-      "/auth/reenviar-confirmacao",
-      { method: "POST", body: JSON.stringify({ email, convite }) }
-    ),
-
   me: () => request<PerfilResponse>("/auth/me"),
 
-  logout: (refresh_token: string) =>
+  excluirConta: (senha_atual: string) =>
+    request<{ status: string; message?: string }>("/auth/delete", {
+      method: "DELETE",
+      body: JSON.stringify({ senha_atual }),
+    }),
+
+  logout: (refresh_token: string | null, expo_push_token?: string | null) =>
     request("/auth/logout", {
       method: "POST",
-      body: JSON.stringify({ refresh_token }),
+      body: JSON.stringify({
+        ...(refresh_token ? { refresh_token } : {}),
+        ...(expo_push_token ? { expo_push_token } : {}),
+      }),
     }),
 
   refresh: (refresh_token: string) =>
@@ -162,6 +218,70 @@ export const authApi = {
     }),
 };
 
+export const categoriasApi = {
+  listar: (tipo?: "pessoal" | "grupo" | "ambos") => {
+    const query = tipo ? `?tipo=${encodeURIComponent(tipo)}` : "";
+    return request<{ status: string; data: Categoria[] }>(`/categorias${query}`);
+  },
+
+  criar: (nome: string, tipo: "pessoal" | "grupo" | "ambos" = "ambos") =>
+    request<{ status: string; data: { id: number } }>("/categorias", {
+      method: "POST",
+      body: JSON.stringify({ nome, tipo }),
+    }),
+
+  atualizar: (
+    id: number,
+    nome: string,
+    tipo: "pessoal" | "grupo" | "ambos" = "ambos",
+  ) =>
+    request<{ status: string }>(`/categorias/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ nome, tipo }),
+    }),
+
+  deletar: (id: number) =>
+    request<{ status: string }>(`/categorias/${id}`, { method: "DELETE" }),
+};
+
+export const notificacoesApi = {
+  listar: (somenteNaoLidas = false) => {
+    const query = somenteNaoLidas ? "?nao_lidas=true" : "";
+    return request<{ status: string; data: Notificacao[] }>(
+      `/notificacoes${query}`,
+    );
+  },
+
+  marcarLida: (id: number) =>
+    request<{ status: string }>(`/notificacoes/${id}/ler`, {
+      method: "PUT",
+    }),
+
+  obterPreferencias: () =>
+    request<{
+      status: string;
+      data: { notificacoes: boolean; sons: boolean };
+    }>("/notificacoes/preferencias"),
+
+  atualizarPreferencias: (notificacoes: boolean, sons: boolean) =>
+    request("/notificacoes/preferencias", {
+      method: "PUT",
+      body: JSON.stringify({ notificacoes, sons }),
+    }),
+
+  registrarDispositivo: (token: string, plataforma: "ios" | "android") =>
+    request("/notificacoes/dispositivos", {
+      method: "POST",
+      body: JSON.stringify({ token, plataforma }),
+    }),
+
+  removerDispositivo: (token: string) =>
+    request("/notificacoes/dispositivos", {
+      method: "DELETE",
+      body: JSON.stringify({ token }),
+    }),
+};
+
 // ─── Despesas Pessoais ────────────────────────────────────────────────────────
 
 export interface DespesaPessoalResponse {
@@ -170,14 +290,27 @@ export interface DespesaPessoalResponse {
 }
 
 export const despesasPessoaisApi = {
-  listar: (params?: { categoria?: string; tipo?: string; data_inicio?: string; data_fim?: string }) => {
+  listar: (params?: {
+    categoria?: string;
+    tipo?: string;
+    data_inicio?: string;
+    data_fim?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
     const query = new URLSearchParams();
     if (params?.categoria) query.append("categoria", params.categoria);
     if (params?.tipo) query.append("tipo", params.tipo);
     if (params?.data_inicio) query.append("data_inicio", params.data_inicio);
     if (params?.data_fim) query.append("data_fim", params.data_fim);
+    if (params?.limit !== undefined) query.append("limit", String(params.limit));
+    if (params?.offset !== undefined) query.append("offset", String(params.offset));
     const qs = query.toString();
-    return request<{ status: string; data: DespesaPessoal[] }>(`/despesas-pessoais${qs ? "?" + qs : ""}`);
+    return request<{
+      status: string;
+      data: DespesaPessoal[];
+      paginacao: PaginacaoLista;
+    }>(`/despesas-pessoais${qs ? "?" + qs : ""}`);
   },
 
   buscar: (id: number) =>
@@ -252,7 +385,12 @@ export const participantesApi = {
     request<{ status: string; data: Participante[] }>(`/participantes/grupo/${grupoId}`),
 
   buscar: (id: number) =>
-    request<{ status: string; data: Participante & { usuario?: { nome: string; email: string } } }>(`/participantes/${id}`),
+    request<{
+      status: string;
+      data: Participante & {
+        usuario?: { nome: string; email: string | null };
+      };
+    }>(`/participantes/${id}`),
 
   atualizar: (id: number, papel: "admin" | "participante") =>
     request<{ status: string }>(`/participantes/${id}`, { method: "PUT", body: JSON.stringify({ papel }) }),
@@ -279,8 +417,17 @@ export const participantesApi = {
 // ─── Despesas de Grupo ────────────────────────────────────────────────────────
 
 export const despesasGrupoApi = {
-  listar: (grupoId: number) =>
-    request<{ status: string; data: DespesaGrupo[] }>(`/despesas/grupo/${grupoId}`),
+  listar: (grupoId: number, params?: { limit?: number; offset?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.limit !== undefined) query.append("limit", String(params.limit));
+    if (params?.offset !== undefined) query.append("offset", String(params.offset));
+    const qs = query.toString();
+    return request<{
+      status: string;
+      data: DespesaGrupo[];
+      paginacao: PaginacaoLista;
+    }>(`/despesas/grupo/${grupoId}${qs ? `?${qs}` : ""}`);
+  },
 
   buscar: (id: number) =>
     request<{ status: string; data: DespesaGrupo }>(`/despesas/${id}`),
@@ -291,6 +438,7 @@ export const despesasGrupoApi = {
     valor: number;
     data_despesa: string;
     categoria?: string;
+    observacao?: string;
     pagador_id: number;
     participantes?: number[];
     divisao_tipo?: "igual" | "porcentagem" | "valores";
@@ -307,6 +455,7 @@ export const despesasGrupoApi = {
     valor: number;
     data_despesa: string;
     categoria?: string;
+    observacao?: string | null;
     pagador_id: number;
     participantes?: number[];
     divisao_tipo?: "igual" | "porcentagem" | "valores";
@@ -332,8 +481,17 @@ export const saldosApi = {
 };
 
 export const pagamentosApi = {
-  listar: (grupoId: number) =>
-    request<{ status: string; data: PagamentoGrupo[] }>(`/pagamentos/grupo/${grupoId}`),
+  listar: (grupoId: number, params?: { limit?: number; offset?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.limit !== undefined) query.append("limit", String(params.limit));
+    if (params?.offset !== undefined) query.append("offset", String(params.offset));
+    const qs = query.toString();
+    return request<{
+      status: string;
+      data: PagamentoGrupo[];
+      paginacao: Paginacao;
+    }>(`/pagamentos/grupo/${grupoId}${qs ? `?${qs}` : ""}`);
+  },
   criar: (dados: {
     grupo_id: number;
     recebedor_id: number;

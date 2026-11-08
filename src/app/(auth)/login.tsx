@@ -22,7 +22,6 @@ import {
 
 import { router, useLocalSearchParams } from "expo-router";
 import { useUsuario } from "@/contexts/UsuarioContext";
-import { authApi } from "@/services/api";
 
 export default function Index() {
   const { login } = useUsuario();
@@ -32,7 +31,6 @@ export default function Index() {
   const [senha, setSenha] = useState("");
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [carregando, setCarregando] = useState(false);
-  const [reenviando, setReenviando] = useState(false);
 
   async function entrar() {
     const emailLimpo = email.trim();
@@ -55,12 +53,15 @@ export default function Index() {
     try {
       await login(emailLimpo, senhaDigitada);
       if (conviteToken) {
-        router.replace(`/convite?token=${encodeURIComponent(conviteToken)}` as never);
+        router.replace({ pathname: "/convite", params: { token: conviteToken } });
       } else {
         router.replace("/(main)/home");
       }
-    } catch (erro: any) {
-      Alert.alert("Erro", erro?.message ?? "Não foi possível fazer login.");
+    } catch (erro) {
+      Alert.alert(
+        "Erro",
+        erro instanceof Error ? erro.message : "Não foi possível fazer login."
+      );
     } finally {
       setCarregando(false);
     }
@@ -75,27 +76,6 @@ export default function Index() {
 
   function esqueciSenha() {
     router.push("/(auth)/esqueci-senha");
-  }
-
-  async function reenviarConfirmacao() {
-    const emailLimpo = email.trim().toLowerCase();
-    if (!/\S+@\S+\.\S+/.test(emailLimpo)) {
-      Alert.alert("Atenção", "Digite seu e-mail para solicitar um novo link.");
-      return;
-    }
-
-    setReenviando(true);
-    try {
-      const resposta = await authApi.reenviarConfirmacao(
-        emailLimpo,
-        conviteToken
-      );
-      Alert.alert("Solicitação recebida", resposta.mensagem ?? "Se a conta estiver pendente, enviaremos um novo link.");
-    } catch (erro: any) {
-      Alert.alert("Erro", erro?.message ?? "Não foi possível solicitar o reenvio.");
-    } finally {
-      setReenviando(false);
-    }
   }
 
   return (
@@ -174,17 +154,6 @@ export default function Index() {
             >
               <Text style={styles.forgot}>
                 Esqueci minha senha
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.resendContainer}
-              onPress={reenviarConfirmacao}
-              disabled={reenviando}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.resendLink}>
-                {reenviando ? "Solicitando novo link..." : "Não recebeu o e-mail? Reenviar confirmação"}
               </Text>
             </TouchableOpacity>
 
@@ -339,18 +308,6 @@ const styles = StyleSheet.create({
     color: "#00A17A",
     fontSize: 12,
     fontWeight: "600",
-  },
-
-  resendContainer: {
-    alignItems: "flex-end",
-    marginTop: 10,
-  },
-
-  resendLink: {
-    color: "#6B8F86",
-    fontSize: 12,
-    fontWeight: "600",
-    textAlign: "right",
   },
 
   // Botão entrar

@@ -1,6 +1,8 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://127.0.0.1:5000/api";
+import {
+  getAccessToken,
+  refreshAccessToken,
+} from "@/services/authSession";
+import { API_BASE_URL } from "@/services/apiConfig";
 
 export type DadosRecibo = {
   estabelecimento?: string | null;
@@ -16,44 +18,63 @@ type RespostaRecibo = {
   mensagem?: string;
 };
 
+type ResultadoUpload = {
+  status: number;
+  texto: string;
+};
+
 export async function lerReciboComIa(imagem: {
   uri: string;
   fileName?: string | null;
   mimeType?: string | null;
 }): Promise<DadosRecibo> {
-  const token = await AsyncStorage.getItem("@wepay:token");
+  let token = await getAccessToken();
   if (!token) throw new Error("Faça login para ler um recibo.");
 
   const tipo = imagem.mimeType ?? "image/jpeg";
   const extensao = tipo.split("/")[1] ?? "jpg";
   const nomeArquivo = imagem.fileName ?? `recibo.${extensao}`;
 
-  return new Promise<DadosRecibo>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${BASE_URL}/recibos/ler`);
-    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+  const enviar = (accessToken: string) => new Promise<ResultadoUpload>(
+    (resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_BASE_URL}/recibos/ler`);
+      xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
+      xhr.onload = () => resolve({
+        status: xhr.status,
+        texto: xhr.responseText,
+      });
+      xhr.onerror = () =>
+        reject(new Error("Não foi possível conectar ao servidor."));
+      xhr.ontimeout = () => reject(new Error("Tempo de conexão esgotado."));
+      xhr.timeout = 120000;
 
-    xhr.onload = () => {
-      let json: RespostaRecibo;
-      try {
-        json = JSON.parse(xhr.responseText) as RespostaRecibo;
-      } catch {
-        reject(new Error("Resposta inválida do servidor: " + xhr.responseText));
-        return;
-      }
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(json.data);
-      } else {
-        reject(new Error(json.message ?? json.mensagem ?? "Erro " + xhr.status));
-      }
-    };
+      const corpo = new FormData();
+      corpo.append(
+        "imagem",
+        { uri: imagem.uri, name: nomeArquivo, type: tipo } as unknown as Blob,
+      );
+      xhr.send(corpo);
+    },
+  );
 
-    xhr.onerror = () => reject(new Error("Não foi possível conectar ao servidor."));
-    xhr.ontimeout = () => reject(new Error("Tempo de conexão esgotado."));
-    xhr.timeout = 120000;
+  let resposta = await enviar(token);
+  if (resposta.status === 401) {
+    const tokenRenovado = await refreshAccessToken();
+    if (tokenRenovado) {
+      token = tokenRenovado;
+      resposta = await enviar(token);
+    }
+  }
 
-    const corpo = new FormData();
-    corpo.append("imagem", { uri: imagem.uri, name: nomeArquivo, type: tipo } as unknown as Blob);
-    xhr.send(corpo);
-  });
+  let json: RespostaRecibo;
+  try {
+    json = JSON.parse(resposta.texto) as RespostaRecibo;
+  } catch {
+    throw new Error("Resposta inválida do servidor.");
+  }
+  if (resposta.status < 200 || resposta.status >= 300) {
+    throw new Error(json.message ?? json.mensagem ?? "Erro " + resposta.status);
+  }
+  return json.data;
 }

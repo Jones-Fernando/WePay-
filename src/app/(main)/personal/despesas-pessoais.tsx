@@ -21,6 +21,8 @@ import {
   despesasPessoaisApi,
   DespesaPessoal,
 } from "@/services/api";
+import type { PaginacaoLista } from "@/types/api";
+import { formatCurrencyBRL } from "@/utils/financeFormat";
 
 // Identidade visual oficial do WEPAY
 const CORES = {
@@ -38,7 +40,7 @@ const CORES = {
 
 // Ícones das categorias
 const ICONES: Record<string, string> = {
-  Alimentação: "🍽️",
+  Alimentação: "🛒",
   Transporte: "🚕",
   Casa: "🏠",
   Moradia: "🏘️",
@@ -72,26 +74,13 @@ const CORES_CATEGORIA: Record<string, string> = {
   Outros: "#A6BDB5",
 };
 
+const TAMANHO_PAGINA = 50;
+
 function iconeCategoria(categoria: string | null) {
   return categoria
     ? ICONES[categoria] ?? "📦"
     : "📦";
 }
-
-const MESES = [
-  "janeiro",
-  "fevereiro",
-  "março",
-  "abril",
-  "maio",
-  "junho",
-  "julho",
-  "agosto",
-  "setembro",
-  "outubro",
-  "novembro",
-  "dezembro",
-];
 
 function dataValida(ano: number, mes: number, dia: number) {
   if (ano < 1 || mes < 1 || mes > 12) return false;
@@ -141,7 +130,7 @@ function formatarRegistro(criadoEm: string | null | undefined) {
       return "";
     }
 
-    return `${dia} de ${MESES[mes - 1]} de ${ano} às ${horaTexto}:${minutoTexto}`;
+    return `${diaTexto}/${mesTexto}/${anoTexto.slice(-2)} ${horaTexto}:${minutoTexto}`;
   }
 
   if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp)) return "";
@@ -154,9 +143,9 @@ function formatarRegistro(criadoEm: string | null | undefined) {
   if (Number.isNaN(data.getTime())) return "";
 
   const dataLocal = new Intl.DateTimeFormat("pt-BR", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
   }).format(data);
   const horarioLocal = new Intl.DateTimeFormat("pt-BR", {
     hour: "2-digit",
@@ -164,14 +153,7 @@ function formatarRegistro(criadoEm: string | null | undefined) {
     hourCycle: "h23",
   }).format(data);
 
-  return `${dataLocal} às ${horarioLocal}`;
-}
-
-function formatarValor(valor: number) {
-  return Number(valor || 0).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  });
+  return `${dataLocal} ${horarioLocal}`;
 }
 
 function obterMesAtual() {
@@ -183,8 +165,13 @@ function obterMesAtual() {
 export default function DespesasPessoais() {
   const [despesas, setDespesas] = useState<DespesaPessoal[]>([]);
   const [carregando, setCarregando] = useState(true);
+  const [carregandoMais, setCarregandoMais] = useState(false);
   const [atualizando, setAtualizando] = useState(false);
   const [totalMes, setTotalMes] = useState(0);
+  const [paginacao, setPaginacao] = useState<PaginacaoLista | null>(null);
+  const [categoriasResumo, setCategoriasResumo] = useState<
+    { categoria: string | null; valor: number }[]
+  >([]);
   const [modalVisivel, setModalVisivel] = useState(false);
 
   // Carrega os dados reais da API
@@ -199,12 +186,16 @@ export default function DespesasPessoais() {
       const [listagem, resumo] = await Promise.all([
         despesasPessoaisApi.listar({
           tipo: "despesa",
+          limit: TAMANHO_PAGINA,
+          offset: 0,
         }),
 
         despesasPessoaisApi.totalMes(),
       ]);
 
-      setDespesas(listagem.data as DespesaPessoal[]);
+      setDespesas(listagem.data);
+      setPaginacao(listagem.paginacao);
+      setCategoriasResumo(listagem.paginacao.categorias);
 
       setTotalMes(
         Number(resumo.data.total_despesas ?? 0)
@@ -222,6 +213,29 @@ export default function DespesasPessoais() {
     }
   }, []);
 
+  const carregarMais = useCallback(async () => {
+    if (!paginacao?.has_more || carregandoMais) return;
+    setCarregandoMais(true);
+    try {
+      const resposta = await despesasPessoaisApi.listar({
+        tipo: "despesa",
+        limit: TAMANHO_PAGINA,
+        offset: despesas.length,
+      });
+      setDespesas((atuais) => [...atuais, ...resposta.data]);
+      setPaginacao(resposta.paginacao);
+    } catch (erro) {
+      Alert.alert(
+        "Erro",
+        erro instanceof Error
+          ? erro.message
+          : "Não foi possível carregar mais despesas."
+      );
+    } finally {
+      setCarregandoMais(false);
+    }
+  }, [carregandoMais, despesas.length, paginacao]);
+
   // Atualiza sempre que a tela receber foco
   useFocusEffect(
     useCallback(() => {
@@ -232,25 +246,20 @@ export default function DespesasPessoais() {
   );
 
   // Agrupa as despesas reais por categoria
-  const resumoCategorias = useMemo(() => {
-    const agrupamento: Record<string, number> = {};
-
-    despesas.forEach((despesa) => {
-      const categoria = despesa.categoria ?? "Outros";
-      const valor = Number(despesa.valor) || 0;
-
-      agrupamento[categoria] =
-        (agrupamento[categoria] ?? 0) + valor;
-    });
-
-    return Object.entries(agrupamento)
-      .filter(([, valor]) => valor > 0)
-      .map(([categoria, valor]) => ({
-        categoria,
-        valor,
-        cor: CORES_CATEGORIA[categoria] ?? CORES_CATEGORIA.Outros,
-      }));
-  }, [despesas]);
+  const resumoCategorias = useMemo(
+    () =>
+      categoriasResumo
+        .filter((item) => Number(item.valor) > 0)
+        .map((item) => {
+          const categoria = item.categoria ?? "Outros";
+          return {
+            categoria,
+            valor: Number(item.valor),
+            cor: CORES_CATEGORIA[categoria] ?? CORES_CATEGORIA.Outros,
+          };
+        }),
+    [categoriasResumo]
+  );
 
   // Soma os valores exibidos para calcular as proporções
   const totalCategorias = resumoCategorias.reduce(
@@ -334,7 +343,7 @@ export default function DespesasPessoais() {
           </Text>
 
           <Text style={styles.resumoValor}>
-            {formatarValor(totalMes)}
+            {formatCurrencyBRL(totalMes)}
           </Text>
 
           {/* Distribuição real das despesas por categoria */}
@@ -383,47 +392,69 @@ export default function DespesasPessoais() {
           </View>
         ) : (
           <View style={styles.listaDespesas}>
-            {despesas.map((despesa) => (
-              <Pressable
-                key={despesa.id}
-                style={({ pressed }) => [
-                  styles.cardDespesa,
-                  pressed && styles.cardDespesaPressionado,
-                ]}
-                onPress={() =>
-                  abrirDetalhes(despesa.id)
-                }
-              >
-                <View style={styles.cardDespesaConteudo}>
-                  <View style={styles.reciboLinha}>
+            {despesas.map((despesa) => {
+              const registro = formatarRegistro(despesa.criado_em);
+
+              return (
+                <Pressable
+                  key={despesa.id}
+                  style={({ pressed }) => [
+                    styles.cardDespesa,
+                    pressed && styles.cardDespesaPressionado,
+                  ]}
+                  onPress={() =>
+                    abrirDetalhes(despesa.id)
+                  }
+                >
+                  <View style={styles.iconeDespesa}>
+                    <Text
+                      style={styles.iconeDespesaEmoji}
+                      accessible={false}
+                    >
+                      {iconeCategoria(despesa.categoria)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.cardDespesaConteudo}>
                     <Text
                       style={styles.despesaTitulo}
                       numberOfLines={1}
                     >
-                      {iconeCategoria(despesa.categoria)}{" "}
                       {despesa.descricao}
                     </Text>
 
-                    <Text style={styles.despesaValor}>
-                      {formatarValor(
-                        Number(despesa.valor)
-                      )}
+                    <Text
+                      style={styles.despesaInfo}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {despesa.categoria ?? "Outros"}
+                      {registro ? ` · ${registro}` : ""}
                     </Text>
                   </View>
 
-                  <Text style={styles.despesaInfo}>
-                    {despesa.categoria ?? "Outros"}
+                  <Text style={styles.despesaValor} numberOfLines={1}>
+                    {formatCurrencyBRL(Number(despesa.valor))}
                   </Text>
-
-                  {formatarRegistro(despesa.criado_em) ? (
-                    <Text style={styles.despesaRegistro}>
-                      Registrada em {formatarRegistro(despesa.criado_em)}
-                    </Text>
-                  ) : null}
-                </View>
-              </Pressable>
-            ))}
+                </Pressable>
+              );
+            })}
           </View>
+        )}
+
+        {!carregando && paginacao?.has_more && (
+          <Pressable
+            style={styles.botaoCarregarMais}
+            onPress={() => void carregarMais()}
+            disabled={carregandoMais}
+            accessibilityRole="button"
+          >
+            {carregandoMais ? (
+              <ActivityIndicator color={CORES.accentDark} />
+            ) : (
+              <Text style={styles.textoCarregarMais}>Carregar mais despesas</Text>
+            )}
+          </Pressable>
         )}
 
         {atualizando && (
@@ -444,7 +475,9 @@ export default function DespesasPessoais() {
         ]}
         accessibilityRole="button"
         accessibilityLabel="Adicionar despesa"
-        onPress={() => setModalVisivel(true)}
+        onPress={() =>
+          router.push("/(main)/personal/nova-despesa-pessoal")
+        }
       >
         <Text style={styles.fabText}>+</Text>
       </Pressable>
@@ -642,6 +675,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: CORES.line,
     borderRadius: 14,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: 10,
   },
 
@@ -649,22 +685,29 @@ const styles = StyleSheet.create({
     opacity: 0.75,
   },
 
-  cardDespesaConteudo: {
-    padding: 12,
+  botaoCarregarMais: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2,
+    marginBottom: 10,
   },
 
-  reciboLinha: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 8,
+  textoCarregarMais: {
+    color: CORES.accentDark,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  cardDespesaConteudo: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: 10,
   },
 
   despesaTitulo: {
-    flex: 1,
-    minWidth: 0,
     color: CORES.ink,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "700",
   },
 
@@ -673,18 +716,28 @@ const styles = StyleSheet.create({
     color: CORES.ink,
     fontSize: 12,
     fontWeight: "700",
+    marginLeft: 8,
   },
 
   despesaInfo: {
     color: CORES.muted,
     fontSize: 11,
-    marginTop: 4,
+    marginTop: 3,
   },
 
-  despesaRegistro: {
-    color: CORES.muted,
-    fontSize: 11,
-    marginTop: 2,
+  iconeDespesa: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    backgroundColor: CORES.field,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  iconeDespesaEmoji: {
+    fontSize: 23,
+    lineHeight: 28,
+    textAlign: "center",
   },
 
   // Estados

@@ -15,7 +15,10 @@ import {
 
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { despesasPessoaisApi } from "@/services/api";
+import { CATEGORIAS_PESSOAIS as CATEGORIAS } from "@/constants/financeCategories";
 import type { DespesaPessoal } from "@/types/api";
+import { formatDateForDisplay } from "@/utils/financeInput";
+import { formatCurrencyBRL } from "@/utils/financeFormat";
 
 const WEPAY = {
   paper: "#F5FBF7",
@@ -28,44 +31,6 @@ const WEPAY = {
   line: "#E1EEE8",
   muted: "#6B8F86",
 };
-
-const CATEGORIAS = [
-  { nome: "Alimentação", icone: "🍽️" },
-  { nome: "Transporte", icone: "🚕" },
-  { nome: "Casa", icone: "🏠" },
-  { nome: "Moradia", icone: "🏘️" },
-  { nome: "Saúde", icone: "💊" },
-  { nome: "Educação", icone: "📚" },
-  { nome: "Lazer", icone: "🎮" },
-  { nome: "Assinatura", icone: "🎬" },
-  { nome: "Assinaturas", icone: "🎬" },
-  { nome: "Compras", icone: "🛍️" },
-  { nome: "Pets", icone: "🐾" },
-  { nome: "Viagem", icone: "✈️" },
-  { nome: "Impostos", icone: "🧾" },
-  { nome: "Outros", icone: "📦" },
-];
-
-function formatarData(data: string) {
-  const valor = /^\d{4}-\d{2}-\d{2}$/.test(data)
-    ? new Date(`${data}T12:00:00`)
-    : new Date(data);
-
-  if (Number.isNaN(valor.getTime())) return data;
-
-  return valor.toLocaleDateString("pt-BR", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
-}
-
-function formatarMoeda(valor: number) {
-  return Number(valor).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  });
-}
 
 export default function DetalhesDespesaPessoalScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>();
@@ -266,14 +231,18 @@ export default function DetalhesDespesaPessoalScreen() {
           </Text>
 
           <Text style={styles.expenseValue}>
-            {formatarMoeda(despesa.valor)}
+            {formatCurrencyBRL(despesa.valor)}
           </Text>
 
           <View style={styles.mainCardDivider} />
 
           <View style={styles.mainCardFooter}>
             <Text style={styles.mainCardFooterText}>
-              {formatarData(despesa.data_despesa)}
+              {formatDateForDisplay(despesa.data_despesa, {
+                day: "2-digit",
+                month: "long",
+                year: "numeric",
+              })}
             </Text>
 
             <Text style={styles.mainCardFooterText}>
@@ -314,7 +283,7 @@ export default function DetalhesDespesaPessoalScreen() {
             </View>
 
             <Text style={styles.detailValue}>
-              {formatarMoeda(despesa.valor)}
+              {formatCurrencyBRL(despesa.valor)}
             </Text>
           </View>
 
@@ -329,7 +298,11 @@ export default function DetalhesDespesaPessoalScreen() {
             </View>
 
             <Text style={styles.detailValue}>
-              {formatarData(despesa.data_despesa)}
+              {formatDateForDisplay(despesa.data_despesa, {
+                day: "2-digit",
+                month: "long",
+                year: "numeric",
+              })}
             </Text>
           </View>
 

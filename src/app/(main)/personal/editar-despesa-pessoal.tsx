@@ -2,44 +2,22 @@ import React, { useCallback, useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
-import { despesasPessoaisApi, DespesaPessoal } from "@/services/api";
+import { despesasPessoaisApi } from "@/services/api";
+import { CATEGORIAS_PESSOAIS } from "@/constants/financeCategories";
+import { useCategoriasFinanceiras } from "@/hooks/useCategoriasFinanceiras";
+import {
+  formatDateForInput,
+  normalizeDateInput,
+  parseCurrencyInput,
+  parseDateInputToDate,
+  parseDateInputToIso,
+} from "@/utils/financeInput";
 
-const CATEGORIAS = [
-  "Alimentação", "Transporte", "Casa", "Moradia", "Saúde", "Educação",
-  "Lazer", "Assinatura", "Assinaturas", "Compras", "Pets", "Viagem",
-  "Impostos", "Outros",
-];
-
-function isoParaBr(iso: string) {
-  const [ano, mes, dia] = iso.split("-");
-  return `${dia}/${mes}/${ano}`;
-}
-
-function brParaIso(data: string): string | null {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(data)) return data;
-  const m = data.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (!m) return null;
-  const [, dia, mes, ano] = m;
-  const d = new Date(Number(ano), Number(mes) - 1, Number(dia));
-  if (d.getFullYear() !== Number(ano) || d.getMonth() !== Number(mes) - 1 || d.getDate() !== Number(dia)) return null;
-  return `${ano}-${mes}-${dia}`;
-}
-
-function dataBrasileiraParaDate(data: string) {
-  const iso = brParaIso(data);
-  if (!iso) return new Date();
-  const [ano, mes, dia] = iso.split("-").map(Number);
-  return new Date(ano, mes - 1, dia);
-}
-
-function formatarDataBrasileira(data: Date) {
-  const dia = String(data.getDate()).padStart(2, "0");
-  const mes = String(data.getMonth() + 1).padStart(2, "0");
-  return `${dia}/${mes}/${data.getFullYear()}`;
-}
+type CampoFormulario = "descricao" | "valor" | "data";
 
 export default function EditarDespesaPessoal() {
   const { id } = useLocalSearchParams<{ id?: string }>();
+  const { categorias, erro: erroCategorias } = useCategoriasFinanceiras("pessoal", CATEGORIAS_PESSOAIS);
   const [descricao, setDescricao] = useState("");
   const [valor, setValor] = useState("");
   const [data, setData] = useState("");
@@ -48,10 +26,56 @@ export default function EditarDespesaPessoal() {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [mostrarSeletorData, setMostrarSeletorData] = useState(false);
+  const [camposVisitados, setCamposVisitados] = useState<Record<CampoFormulario, boolean>>({
+    descricao: false,
+    valor: false,
+    data: false,
+  });
+  const [erros, setErros] = useState<Record<CampoFormulario, string | null>>({
+    descricao: null,
+    valor: null,
+    data: null,
+  });
 
   function selecionarData(_evento: DateTimePickerEvent, dataSelecionada?: Date) {
     setMostrarSeletorData(false);
-    if (dataSelecionada) setData(formatarDataBrasileira(dataSelecionada));
+    if (dataSelecionada) {
+      const novaData = formatDateForInput(dataSelecionada);
+      setData(novaData);
+      setCamposVisitados((atuais) => ({ ...atuais, data: true }));
+      setErros((atuais) => ({ ...atuais, data: validarCampo("data", novaData) }));
+    }
+  }
+
+  function validarCampo(campo: CampoFormulario, valorCampo: string): string | null {
+    if (campo === "descricao") {
+      return valorCampo.trim() ? null : "Informe a descrição.";
+    }
+    if (campo === "valor") {
+      const numero = parseCurrencyInput(valorCampo);
+      return Number.isFinite(numero) && numero > 0 ? null : "Informe um valor maior que zero.";
+    }
+    const dataIso = parseDateInputToIso(valorCampo.trim());
+    if (!dataIso) return "Informe uma data válida no formato DD/MM/AAAA.";
+    const [ano, mes, dia] = dataIso.split("-").map(Number);
+    const dataInformada = new Date(ano, mes - 1, dia);
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    return dataInformada > hoje ? "A data não pode ser futura." : null;
+  }
+
+  function atualizarCampo(campo: CampoFormulario, valorCampo: string) {
+    if (campo === "descricao") setDescricao(valorCampo);
+    if (campo === "valor") setValor(valorCampo);
+    if (campo === "data") setData(valorCampo);
+    if (camposVisitados[campo]) {
+      setErros((atuais) => ({ ...atuais, [campo]: validarCampo(campo, valorCampo) }));
+    }
+  }
+
+  function visitarCampo(campo: CampoFormulario, valorCampo: string) {
+    setCamposVisitados((atuais) => ({ ...atuais, [campo]: true }));
+    setErros((atuais) => ({ ...atuais, [campo]: validarCampo(campo, valorCampo) }));
   }
 
   useFocusEffect(useCallback(() => {
@@ -60,11 +84,13 @@ export default function EditarDespesaPessoal() {
     async function carregar() {
       try {
         const res = await despesasPessoaisApi.buscar(Number(id));
-        const d = res.data as DespesaPessoal;
+        const d = res.data;
         if (!ativo) return;
+        setCamposVisitados({ descricao: false, valor: false, data: false });
+        setErros({ descricao: null, valor: null, data: null });
         setDescricao(d.descricao);
         setValor(Number(d.valor).toFixed(2).replace(".", ","));
-        setData(isoParaBr(d.data_despesa));
+        setData(normalizeDateInput(d.data_despesa));
         setCategoria(d.categoria ?? "Outros");
         setTipo(d.tipo);
       } catch (e) {
@@ -82,17 +108,16 @@ export default function EditarDespesaPessoal() {
 
   async function salvar() {
     const desc = descricao.trim();
-    if (!desc) { Alert.alert("Atenção", "Informe a descrição."); return; }
-    const valorNum = Number(valor.replace(",", "."));
-    if (isNaN(valorNum) || valorNum <= 0) { Alert.alert("Atenção", "Informe um valor válido."); return; }
-    const dataIso = brParaIso(data.trim());
-    if (!dataIso) { Alert.alert("Atenção", "Informe uma data válida no formato DD/MM/AAAA."); return; }
-    const [ano, mes, dia] = dataIso.split("-").map(Number);
-    const dataInformada = new Date(ano, mes - 1, dia);
-    const hoje = new Date();
-    hoje.setHours(0, 0, 0, 0);
-    if (dataInformada > hoje) {
-      Alert.alert("Atenção", "A data da despesa não pode ser futura.");
+    const valorNum = parseCurrencyInput(valor);
+    const dataIso = parseDateInputToIso(data.trim());
+    const novosErros = {
+      descricao: validarCampo("descricao", descricao),
+      valor: validarCampo("valor", valor),
+      data: validarCampo("data", data),
+    };
+    setCamposVisitados({ descricao: true, valor: true, data: true });
+    setErros(novosErros);
+    if (Object.values(novosErros).some(Boolean) || !dataIso) {
       return;
     }
 
@@ -124,21 +149,29 @@ export default function EditarDespesaPessoal() {
           </View>
 
           <Text style={styles.label}>Descrição</Text>
-          <TextInput style={styles.input} value={descricao} onChangeText={setDescricao} autoCapitalize="sentences" />
+          <TextInput style={[styles.input, erros.descricao && styles.inputComErro]}
+            value={descricao} onChangeText={(texto) => atualizarCampo("descricao", texto)}
+            onBlur={() => visitarCampo("descricao", descricao)} autoCapitalize="sentences" />
+          {erros.descricao && <Text style={styles.erroCampo}>{erros.descricao}</Text>}
 
           <Text style={styles.label}>Valor</Text>
           <View style={styles.valueContainer}>
             <Text style={styles.currency}>R$</Text>
-            <TextInput style={styles.valueInput} value={valor} onChangeText={setValor} keyboardType="decimal-pad" />
+            <TextInput style={styles.valueInput} value={valor}
+              onChangeText={(texto) => atualizarCampo("valor", texto)}
+              onBlur={() => visitarCampo("valor", valor)} keyboardType="decimal-pad" />
           </View>
+          {erros.valor && <Text style={styles.erroCampo}>{erros.valor}</Text>}
 
           <Text style={styles.label}>Data</Text>
-          <TouchableOpacity style={styles.seletorData} onPress={() => setMostrarSeletorData(true)} activeOpacity={0.8}>
+          <TouchableOpacity style={[styles.seletorData, erros.data && styles.inputComErro]}
+            onPress={() => setMostrarSeletorData(true)} activeOpacity={0.8}>
             <Text style={[styles.textoSeletorData, !data && styles.placeholderSeletorData]}>{data || "Escolher data"}</Text>
           </TouchableOpacity>
+          {erros.data && <Text style={styles.erroCampo}>{erros.data}</Text>}
           {mostrarSeletorData && (
             <DateTimePicker
-              value={dataBrasileiraParaDate(data)}
+              value={parseDateInputToDate(data) ?? new Date()}
               mode="date"
               display="default"
               locale="pt-BR"
@@ -158,12 +191,13 @@ export default function EditarDespesaPessoal() {
 
           <Text style={styles.label}>Categoria</Text>
           <View style={styles.categories}>
-            {CATEGORIAS.map((item) => (
-              <TouchableOpacity key={item} style={[styles.category, categoria === item && styles.categoryActive]} onPress={() => setCategoria(item)}>
-                <Text style={[styles.categoryText, categoria === item && styles.categoryTextActive]}>{item}</Text>
+            {categorias.map(({ nome }) => (
+              <TouchableOpacity key={nome} style={[styles.category, categoria === nome && styles.categoryActive]} onPress={() => setCategoria(nome)}>
+                <Text style={[styles.categoryText, categoria === nome && styles.categoryTextActive]}>{nome}</Text>
               </TouchableOpacity>
             ))}
           </View>
+          {erroCategorias && <Text style={styles.erroCampo}>{erroCategorias}</Text>}
 
           <TouchableOpacity style={[styles.saveButton, salvando && { opacity: 0.6 }]} onPress={salvar} disabled={salvando}>
             {salvando ? <ActivityIndicator color="#0B3B33" /> : <Text style={styles.saveButtonText}>Salvar alterações</Text>}
@@ -183,6 +217,8 @@ const styles = StyleSheet.create({
   headerTitle: { color: "#0B3B33", fontWeight: "700", fontSize: 17 },
   label: { color: "#0B3B33", fontSize: 13, fontWeight: "700", marginTop: 18, marginBottom: 8 },
   input: { height: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 12, paddingHorizontal: 15, color: "#0B3B33", fontSize: 14 },
+  inputComErro: { borderColor: "#D64545" },
+  erroCampo: { color: "#D64545", fontSize: 12, marginTop: 5 },
   seletorData: { height: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 12, paddingHorizontal: 15, justifyContent: "center" },
   textoSeletorData: { color: "#0B3B33", fontSize: 14 },
   placeholderSeletorData: { color: "#8AA69E" },

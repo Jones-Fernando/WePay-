@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from "react";
 import {
-  SafeAreaView, ScrollView, View, Text,
+  ActivityIndicator, SafeAreaView, ScrollView, View, Text,
   TouchableOpacity, StyleSheet, StatusBar, Alert,
 } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -11,17 +11,30 @@ export default function ParticipantesGrupo() {
   const groupId = String(params.groupId ?? "");
   const grupoNome = String(params.grupoNome ?? "Meu grupo");
   const [participantes, setParticipantes] = useState<{ id: string; nome: string; email: string; papel: string; iniciais: string }[]>([]);
+  const [carregando, setCarregando] = useState(true);
 
   useFocusEffect(useCallback(() => {
-    if (!Number.isInteger(Number(groupId))) return;
+    setCarregando(true);
+    if (!groupId || Number(groupId) <= 0) {
+      setParticipantes([]);
+      setCarregando(false);
+      return;
+    }
     let ativo = true;
-    participantesApi.listar(Number(groupId)).then(({ data }) => {
-      if (!ativo) return;
-      setParticipantes(data.map((item) => {
-        const nome = item.nome || item.email || "Participante";
-        return { id: String(item.id), nome, email: item.email || "", papel: item.papel === "admin" ? "Administrador" : "Participante", iniciais: nome.split(" ").slice(0, 2).map((parte) => parte[0]).join("").toUpperCase() };
-      }));
-    }).catch((erro) => { if (ativo) Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível carregar os participantes."); });
+    void (async () => {
+      try {
+        const { data } = await participantesApi.listar(Number(groupId));
+        if (!ativo) return;
+        setParticipantes(data.map((item) => {
+          const nome = item.nome || item.email || "Participante";
+          return { id: String(item.id), nome, email: item.email || "", papel: item.papel === "admin" ? "Administrador" : "Participante", iniciais: nome.split(" ").slice(0, 2).map((parte) => parte[0]).join("").toUpperCase() };
+        }));
+      } catch (erro) {
+        if (ativo) Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível carregar os participantes.");
+      } finally {
+        if (ativo) setCarregando(false);
+      }
+    })();
     return () => { ativo = false; };
   }, [groupId]));
 
@@ -49,7 +62,11 @@ export default function ParticipantesGrupo() {
           <Text style={styles.convidarTexto}>＋  Convidar participante</Text>
         </TouchableOpacity>
 
-        {participantes.map((pessoa) => (
+        {carregando ? (
+          <ActivityIndicator color="#00A17A" style={styles.estado} />
+        ) : participantes.length === 0 ? (
+          <Text style={styles.vazio}>Nenhum participante encontrado.</Text>
+        ) : participantes.map((pessoa) => (
           <TouchableOpacity key={pessoa.id} style={styles.card} onPress={() => router.push({ pathname: "/(main)/group/participante/[id]", params: { id: pessoa.id, groupId, grupoNome } })}>
             <View style={styles.avatar}>
               <Text style={styles.avatarTexto}>{pessoa.iniciais}</Text>
@@ -87,5 +104,7 @@ const styles = StyleSheet.create({
   email: { color: "#6B8F86", fontSize: 10, marginTop: 4 },
   papel: { color: "#087F5B", fontSize: 10, marginTop: 4, fontWeight: "700" },
   chevron: { color: "#00A17A", fontSize: 24 },
+  estado: { marginTop: 32 },
+  vazio: { color: "#6B8F86", textAlign: "center", paddingVertical: 28 },
   aviso: { color: "#6B8F86", fontSize: 10, textAlign: "center", lineHeight: 16, marginTop: 14 },
 });

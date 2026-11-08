@@ -5,8 +5,7 @@
  * Mesmo padrão visual de nova-despesa-pessoal.tsx,
  * com campos específicos para despesas compartilhadas.
  *
- * Observação: o formulário ainda utiliza participantes de demonstração.
- * A gravação definitiva depende da integração com a API Flask.
+ * Os participantes são carregados da API do grupo.
  */
 
 import React, { useEffect, useState } from "react";
@@ -26,6 +25,16 @@ import {
 import { router, useLocalSearchParams } from "expo-router";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { despesasGrupoApi, participantesApi } from "@/services/api";
+import {
+  formatDateForInput,
+  normalizeDateInput,
+  parseCurrencyInput,
+  parseDateInputToDate,
+  parseDateInputToIso,
+} from "@/utils/financeInput";
+import { formatCurrencyBRL } from "@/utils/financeFormat";
+import { CATEGORIAS_GRUPO as CATEGORIAS } from "@/constants/financeCategories";
+import { useCategoriasFinanceiras } from "@/hooks/useCategoriasFinanceiras";
 
 type TipoDivisao = "IGUAL" | "VALOR" | "PERCENTUAL";
 
@@ -34,25 +43,6 @@ type Participante = {
   nome: string;
   iniciais: string;
 };
-
-const CATEGORIAS = [
-  { nome: "Alimentação", icone: "🍽️" },
-  { nome: "Transporte", icone: "🚕" },
-  { nome: "Casa", icone: "🏠" },
-  { nome: "Lazer", icone: "🎮" },
-  { nome: "Assinatura", icone: "🎬" },
-  { nome: "Outros", icone: "📦" },
-  { nome: "Mercado", icone: "🛒" },
-  { nome: "Contas da casa", icone: "💡" },
-  { nome: "Internet e telefone", icone: "📶" },
-  { nome: "Limpeza", icone: "🧹" },
-  { nome: "Manutenção e reparos", icone: "🔧" },
-  { nome: "Hospedagem", icone: "🏨" },
-  { nome: "Passagens", icone: "✈️" },
-  { nome: "Combustível", icone: "⛽" },
-  { nome: "Pedágios e estacionamento", icone: "🅿️" },
-  { nome: "Passeios e ingressos", icone: "🎟️" },
-];
 
 function obterParametro(
   parametro: string | string[] | undefined
@@ -64,86 +54,9 @@ function obterParametro(
   return parametro ?? "";
 }
 
-function normalizarDataRecebida(data: string): string {
-  // Converte AAAA-MM-DD para DD/MM/AAAA quando a data
-  // chega preenchida pela leitura do recibo.
-  const iso = data.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-
-  if (iso) {
-    return `${iso[3]}/${iso[2]}/${iso[1]}`;
-  }
-
-  return data;
-}
-
-function converterValor(valor: string): number {
-  const limpo = valor
-    .trim()
-    .replace(/R\$/gi, "")
-    .replace(/\s/g, "");
-
-  if (!limpo) {
-    return NaN;
-  }
-
-  let normalizado = limpo;
-
-  // Exemplos:
-  // 1.234,56 -> 1234.56
-  // 123,45   -> 123.45
-  // 123.45   -> 123.45
-  if (limpo.includes(",") && limpo.includes(".")) {
-    normalizado = limpo.replace(/\./g, "").replace(",", ".");
-  } else if (limpo.includes(",")) {
-    normalizado = limpo.replace(",", ".");
-  }
-
-  return Number(normalizado);
-}
-
-function formatarMoeda(valor: number): string {
-  return valor.toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  });
-}
-
-function validarData(data: string): boolean {
-  const resultado = data.match(
-    /^(\d{2})\/(\d{2})\/(\d{4})$/
-  );
-
-  if (!resultado) {
-    return false;
-  }
-
-  const dia = Number(resultado[1]);
-  const mes = Number(resultado[2]);
-  const ano = Number(resultado[3]);
-
-  const dataValidada = new Date(ano, mes - 1, dia);
-
-  return (
-    dataValidada.getFullYear() === ano &&
-    dataValidada.getMonth() === mes - 1 &&
-    dataValidada.getDate() === dia
-  );
-}
-
-function dataBrasileiraParaDate(data: string) {
-  if (!validarData(data)) return new Date();
-  const [dia, mes, ano] = data.split("/").map(Number);
-  return new Date(ano, mes - 1, dia);
-}
-
-function formatarDataBrasileira(data: Date) {
-  const dia = String(data.getDate()).padStart(2, "0");
-  const mes = String(data.getMonth() + 1).padStart(2, "0");
-  return `${dia}/${mes}/${data.getFullYear()}`;
-}
-
 export default function NovaDespesaGrupo() {
   const params = useLocalSearchParams();
+  const { categorias, erro: erroCategorias } = useCategoriasFinanceiras("grupo", CATEGORIAS);
 
   const groupId = obterParametro(params.groupId);
   const nomeGrupo =
@@ -159,13 +72,13 @@ export default function NovaDespesaGrupo() {
   );
 
   const [data, setData] = useState(() =>
-    normalizarDataRecebida(obterParametro(params.data))
+    normalizeDateInput(obterParametro(params.data))
   );
 
   const [categoria, setCategoria] = useState(() => {
     const categoriaRecebida = obterParametro(params.categoria);
 
-    return CATEGORIAS.some(
+    return categorias.some(
       (item) => item.nome === categoriaRecebida
     )
       ? categoriaRecebida
@@ -192,9 +105,36 @@ export default function NovaDespesaGrupo() {
   const [salvando, setSalvando] = useState(false);
   const [mostrarSeletorData, setMostrarSeletorData] = useState(false);
 
+  const descricaoLimpa = descricao.trim();
+  const valorNumerico = parseCurrencyInput(valor);
+  const dataLimpa = data.trim();
+  const dataValida = !!dataLimpa && !!parseDateInputToIso(dataLimpa);
+  const erroDescricao =
+    descricao === ""
+      ? "Digite a descrição da despesa."
+      : descricaoLimpa.length < 2
+        ? "A descrição deve ter pelo menos 2 caracteres."
+        : "";
+  const erroValor =
+    valor === ""
+      ? "Digite um valor válido para a despesa."
+      : !Number.isFinite(valorNumerico) || valorNumerico <= 0
+        ? "Digite um valor maior que zero."
+        : "";
+  const erroData =
+    data === ""
+      ? "Informe a data da despesa."
+      : !dataValida
+        ? "Informe uma data válida no formato DD/MM/AAAA."
+        : "";
+  const erroParticipantes =
+    participantesSelecionados.length === 0
+      ? "Selecione pelo menos um participante para dividir a despesa."
+      : "";
+
   function selecionarData(_evento: DateTimePickerEvent, dataSelecionada?: Date) {
     setMostrarSeletorData(false);
-    if (dataSelecionada) setData(formatarDataBrasileira(dataSelecionada));
+    if (dataSelecionada) setData(formatDateForInput(dataSelecionada));
   }
 
   useEffect(() => {
@@ -202,7 +142,7 @@ export default function NovaDespesaGrupo() {
     let ativo = true;
     participantesApi.listar(Number(groupId)).then(({ data }) => {
       if (!ativo) return;
-      const lista = data.map((item) => ({
+      const lista = data.filter((item) => item.ativo).map((item) => ({
         id: String(item.usuario_id),
         nome: item.nome || item.email || `Participante ${item.usuario_id}`,
         iniciais: (item.nome || item.email || "?").split(" ").slice(0, 2).map((nome) => nome[0]).join("").toUpperCase(),
@@ -305,7 +245,7 @@ export default function NovaDespesaGrupo() {
 
     if (tipoDivisao === "VALOR") {
       const valores = participantesSelecionados.map((id) =>
-        converterValor(valoresIndividuais[id] ?? "")
+        parseCurrencyInput(valoresIndividuais[id] ?? "")
       );
 
       if (valores.some((item) => !Number.isFinite(item) || item < 0)) {
@@ -375,10 +315,6 @@ export default function NovaDespesaGrupo() {
       return;
     }
 
-    const descricaoLimpa = descricao.trim();
-    const valorNumerico = converterValor(valor);
-    const dataLimpa = data.trim();
-
     if (!groupId) {
       Alert.alert(
         "Grupo não identificado",
@@ -410,7 +346,8 @@ export default function NovaDespesaGrupo() {
       return;
     }
 
-    if (!validarData(dataLimpa)) {
+    const dataIso = parseDateInputToIso(dataLimpa);
+    if (!dataIso) {
       Alert.alert(
         "Data inválida",
         "Informe uma data válida no formato DD/MM/AAAA."
@@ -446,7 +383,7 @@ export default function NovaDespesaGrupo() {
       divisaoCalculada = participantesSelecionados.map(
         (participanteId) => ({
           participanteId,
-          valor: converterValor(
+          valor: parseCurrencyInput(
             valoresIndividuais[participanteId] ?? ""
           ),
         })
@@ -472,7 +409,6 @@ export default function NovaDespesaGrupo() {
       );
     }
 
-    const dataIso = `${dataLimpa.slice(6, 10)}-${dataLimpa.slice(3, 5)}-${dataLimpa.slice(0, 2)}`;
     const tipoApi = tipoDivisao === "IGUAL" ? "igual" : tipoDivisao === "VALOR" ? "valores" : "porcentagem";
     const valores = Object.fromEntries(divisaoCalculada.map((item) => [item.participanteId, item.valor]));
     const percentuais = Object.fromEntries(participantesSelecionados.map((id) => [id, Number((percentuaisIndividuais[id] ?? "0").replace(",", "."))]));
@@ -480,7 +416,8 @@ export default function NovaDespesaGrupo() {
     try {
       await despesasGrupoApi.criar({
         grupo_id: Number(groupId), descricao: descricaoLimpa, valor: valorNumerico,
-        data_despesa: dataIso, categoria, pagador_id: Number(pagadorId),
+        data_despesa: dataIso, categoria, observacao: observacao.trim(),
+        pagador_id: Number(pagadorId),
         participantes: participantesSelecionados.map(Number), divisao_tipo: tipoApi,
         ...(tipoApi === "valores" ? { valores } : {}),
         ...(tipoApi === "porcentagem" ? { percentuais } : {}),
@@ -494,8 +431,6 @@ export default function NovaDespesaGrupo() {
       setSalvando(false);
     }
   }
-
-  const valorNumerico = converterValor(valor);
 
   const valorPorPessoa =
     Number.isFinite(valorNumerico) &&
@@ -570,7 +505,7 @@ export default function NovaDespesaGrupo() {
             <Text style={styles.label}>Descrição</Text>
 
             <TextInput
-              style={styles.input}
+              style={[styles.input, erroDescricao ? styles.inputErro : null]}
               placeholder="Ex.: Mercado, jantar, hospedagem"
               placeholderTextColor="#8AA69E"
               value={descricao}
@@ -578,6 +513,7 @@ export default function NovaDespesaGrupo() {
               autoCapitalize="sentences"
               maxLength={120}
             />
+            {erroDescricao ? <Text style={styles.erroTexto}>{erroDescricao}</Text> : null}
           </View>
 
           {/* VALOR */}
@@ -589,7 +525,7 @@ export default function NovaDespesaGrupo() {
               <Text style={styles.simbolo}>R$</Text>
 
               <TextInput
-                style={styles.inputValor}
+                style={[styles.inputValor, erroValor ? styles.inputErro : null]}
                 placeholder="0,00"
                 placeholderTextColor="#8AA69E"
                 value={valor}
@@ -597,13 +533,14 @@ export default function NovaDespesaGrupo() {
                 keyboardType="decimal-pad"
               />
             </View>
+            {erroValor ? <Text style={styles.erroTexto}>{erroValor}</Text> : null}
 
             {tipoDivisao === "IGUAL" &&
               valorNumerico > 0 &&
               participantesSelecionados.length > 0 && (
                 <Text style={styles.ajuda}>
                   Divisão igual estimada:{" "}
-                  {formatarMoeda(valorPorPessoa)} por pessoa.
+                  {formatCurrencyBRL(valorPorPessoa)} por pessoa.
                 </Text>
               )}
           </View>
@@ -612,12 +549,13 @@ export default function NovaDespesaGrupo() {
 
           <View style={styles.campo}>
             <Text style={styles.label}>Data</Text>
-            <TouchableOpacity style={styles.seletorData} onPress={() => setMostrarSeletorData(true)} activeOpacity={0.8}>
+            <TouchableOpacity style={[styles.seletorData, erroData ? styles.inputErro : null]} onPress={() => setMostrarSeletorData(true)} activeOpacity={0.8}>
               <Text style={[styles.textoSeletorData, !data && styles.placeholderSeletorData]}>{data || "Escolher data"}</Text>
             </TouchableOpacity>
+            {erroData ? <Text style={styles.erroTexto}>{erroData}</Text> : null}
             {mostrarSeletorData && (
               <DateTimePicker
-                value={dataBrasileiraParaDate(data)}
+                value={parseDateInputToDate(data) ?? new Date()}
                 mode="date"
                 display="default"
                 locale="pt-BR"
@@ -637,7 +575,7 @@ export default function NovaDespesaGrupo() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.categorias}
             >
-              {CATEGORIAS.map((item) => {
+              {categorias.map((item) => {
                 const selecionada = categoria === item.nome;
 
                 return (
@@ -667,6 +605,7 @@ export default function NovaDespesaGrupo() {
                 );
               })}
             </ScrollView>
+            {erroCategorias && <Text style={styles.erroCategorias}>{erroCategorias}</Text>}
           </View>
 
           {/* QUEM PAGOU */}
@@ -744,7 +683,7 @@ export default function NovaDespesaGrupo() {
               Toque para incluir ou retirar participantes.
             </Text>
 
-            <View style={styles.listaOpcoes}>
+            <View style={[styles.listaOpcoes, erroParticipantes ? styles.blocoErro : null]}>
               {participantes.map((participante) => {
                 const selecionado =
                   participantesSelecionados.includes(participante.id);
@@ -800,6 +739,7 @@ export default function NovaDespesaGrupo() {
                 );
               })}
             </View>
+            {erroParticipantes ? <Text style={styles.erroTexto}>{erroParticipantes}</Text> : null}
           </View>
 
           {/* TIPO DE DIVISÃO */}
@@ -1158,7 +1098,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#0B3B33",
   },
-
+  inputErro: {
+    borderColor: "#D92D20",
+  },
+  erroTexto: {
+    marginTop: 6,
+    color: "#B42318",
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  blocoErro: {
+    borderColor: "#D92D20",
+  },
   seletorData: {
     height: 52,
     backgroundColor: "#FFFFFF",
@@ -1216,6 +1167,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingRight: 10,
   },
+  erroCategorias: { color: "#D64545", fontSize: 12, marginTop: 6 },
 
   categoria: {
     flexDirection: "row",

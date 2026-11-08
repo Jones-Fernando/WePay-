@@ -12,12 +12,8 @@ import {
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { despesasGrupoApi } from "@/services/api";
 import type { DespesaGrupo } from "@/types/api";
-
-const moeda = (valor: number | string) =>
-  Number(valor).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-
-const dataFormatada = (data: string) =>
-  new Date(`${data.slice(0, 10)}T12:00:00`).toLocaleDateString("pt-BR");
+import { formatDateForDisplay } from "@/utils/financeInput";
+import { formatCurrencyBRL } from "@/utils/financeFormat";
 
 const nomesDivisao = {
   igual: "Divisão igual",
@@ -144,9 +140,12 @@ export default function DetalhesDespesa() {
 
         <View style={styles.resumo}>
           <Text style={styles.descricao}>{despesa.descricao}</Text>
-          <Text style={styles.valor}>{moeda(valorTotal)}</Text>
+          <Text style={styles.valor}>{formatCurrencyBRL(valorTotal)}</Text>
           <Text style={styles.categoria}>{despesa.categoria || "Sem categoria"}</Text>
-          <Text style={styles.textoAjuda}>{dataFormatada(despesa.data_despesa)}</Text>
+          <Text style={styles.textoAjuda}>{formatDateForDisplay(despesa.data_despesa)}</Text>
+          {!!despesa.observacao && (
+            <Text style={styles.observacao}>{despesa.observacao}</Text>
+          )}
         </View>
 
         <View style={styles.cartao}>
@@ -178,7 +177,7 @@ export default function DetalhesDespesa() {
                         : nomesDivisao[divisao.tipo]}
                     </Text>
                   </View>
-                  <Text style={styles.valorParticipante}>{moeda(valorDivisao)}</Text>
+                  <Text style={styles.valorParticipante}>{formatCurrencyBRL(valorDivisao)}</Text>
                 </View>
                 {indice < divisoes.length - 1 && <View style={styles.linha} />}
               </View>
@@ -214,6 +213,7 @@ const styles = StyleSheet.create({
   descricao: { color: "#0B3B33", fontSize: 24, fontWeight: "700", textAlign: "center" },
   valor: { color: "#0B3B33", fontSize: 30, fontWeight: "800", marginVertical: 10 },
   categoria: { color: "#00A17A", backgroundColor: "#E9F9F3", overflow: "hidden", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 5, fontWeight: "700" },
+  observacao: { color: "#45675F", fontSize: 14, marginTop: 12, textAlign: "center" },
   cartao: { marginTop: 18, backgroundColor: "#FFF", borderRadius: 16, padding: 16, borderWidth: 1, borderColor: "#E1EEE8" },
   rotulo: { color: "#6B8F86", fontSize: 12, marginBottom: 4 },
   destaque: { color: "#0B3B33", fontSize: 16, fontWeight: "700" },

@@ -10,6 +10,7 @@
 
 import React, { useState } from "react";
 import {
+  ActivityIndicator,
   View,
   Text,
   TouchableOpacity,
@@ -18,25 +19,33 @@ import {
   ScrollView,
   Switch,
   Alert,
+  Modal,
+  TextInput,
 } from "react-native";
 import { router } from "expo-router";
 
 import { Cores } from "../../constants/Cores";
+import { useUsuario } from "@/contexts/UsuarioContext";
+import { usePreferencias } from "@/contexts/PreferenciasContext";
+import { authApi } from "@/services/api";
 
 export default function Configuracoes() {
-  const [notificacoes, setNotificacoes] =
-    useState(true);
+  const { logout } = useUsuario();
+  const {
+    preferencias,
+    carregando: carregandoPreferencias,
+    atualizar: atualizarPreferencias,
+  } = usePreferencias();
 
-  const [som, setSom] =
-    useState(true);
-
-  const [tema, setTema] =
-    useState("Sistema");
+  const [modalExclusao, setModalExclusao] = useState(false);
+  const [senhaAtual, setSenhaAtual] = useState("");
+  const [erroExclusao, setErroExclusao] = useState("");
+  const [excluindo, setExcluindo] = useState(false);
 
   function excluirConta() {
     Alert.alert(
       "Excluir conta",
-      "Esta ação será permanente quando integrada ao backend.",
+      "Seus dados pessoais e gastos pessoais serão removidos. Grupos sem outros participantes também serão apagados. O histórico de grupos com outras pessoas será preservado com sua identidade anonimizada; a administração será transferida quando houver outro membro ativo. Descrições e observações desses registros permanecem.",
       [
         {
           text: "Cancelar",
@@ -45,9 +54,42 @@ export default function Configuracoes() {
         {
           text: "Continuar",
           style: "destructive",
+          onPress: () => {
+            setSenhaAtual("");
+            setErroExclusao("");
+            setModalExclusao(true);
+          },
         },
       ]
     );
+  }
+
+  async function confirmarExclusao() {
+    if (!senhaAtual) {
+      setErroExclusao("Digite sua senha atual para confirmar.");
+      return;
+    }
+
+    setExcluindo(true);
+    setErroExclusao("");
+    try {
+      await authApi.excluirConta(senhaAtual);
+      setModalExclusao(false);
+      await logout(false);
+      router.replace("/(auth)/login");
+      Alert.alert(
+        "Conta excluída",
+        "Seus dados pessoais foram removidos e o histórico compartilhado foi preservado de forma anonimizada."
+      );
+    } catch (erro) {
+      setErroExclusao(
+        erro instanceof Error
+          ? erro.message
+          : "Não foi possível excluir a conta."
+      );
+    } finally {
+      setExcluindo(false);
+    }
   }
 
   function selecionarTema() {
@@ -57,15 +99,15 @@ export default function Configuracoes() {
       [
         {
           text: "Sistema",
-          onPress: () => setTema("Sistema"),
+          onPress: () => void atualizarPreferencias({ tema: "Sistema" }),
         },
         {
           text: "Claro",
-          onPress: () => setTema("Claro"),
+          onPress: () => void atualizarPreferencias({ tema: "Claro" }),
         },
         {
           text: "Escuro",
-          onPress: () => setTema("Escuro"),
+          onPress: () => void atualizarPreferencias({ tema: "Escuro" }),
         },
         {
           text: "Cancelar",
@@ -105,13 +147,16 @@ export default function Configuracoes() {
               </Text>
 
               <Text style={styles.rowDescription}>
-                Receber alertas importantes do aplicativo.
+                Receber alertas de novas despesas em grupos.
               </Text>
             </View>
 
             <Switch
-              value={notificacoes}
-              onValueChange={setNotificacoes}
+              value={preferencias.notificacoes}
+              onValueChange={(notificacoes) =>
+                void atualizarPreferencias({ notificacoes })
+              }
+              disabled={carregandoPreferencias}
               trackColor={{
                 false: Cores.borda,
                 true: Cores.principal,
@@ -129,13 +174,14 @@ export default function Configuracoes() {
               </Text>
 
               <Text style={styles.rowDescription}>
-                Ativar sons das notificações.
+                Ativar sons das notificações push.
               </Text>
             </View>
 
             <Switch
-              value={som}
-              onValueChange={setSom}
+              value={preferencias.som}
+              onValueChange={(som) => void atualizarPreferencias({ som })}
+              disabled={carregandoPreferencias}
               trackColor={{
                 false: Cores.borda,
                 true: Cores.principal,
@@ -144,6 +190,25 @@ export default function Configuracoes() {
             />
           </View>
         </View>
+
+        <Text style={styles.sectionTitle}>
+          Organização
+        </Text>
+
+        <TouchableOpacity
+          style={styles.optionCard}
+          onPress={() => router.push("/(main)/categorias")}
+        >
+          <View>
+            <Text style={styles.rowTitle}>
+              Categorias
+            </Text>
+            <Text style={styles.rowDescription}>
+              Gerencie as categorias de despesas pessoais e em grupo.
+            </Text>
+          </View>
+          <Text style={styles.arrow}>›</Text>
+        </TouchableOpacity>
 
         <Text style={styles.sectionTitle}>
           Aparência
@@ -159,7 +224,7 @@ export default function Configuracoes() {
             </Text>
 
             <Text style={styles.rowDescription}>
-              {tema}
+              {preferencias.tema}
             </Text>
           </View>
 
@@ -174,7 +239,7 @@ export default function Configuracoes() {
           style={styles.optionCard}
           onPress={() => Alert.alert(
             "Privacidade",
-            "A política de privacidade será apresentada aqui."
+            "Os dados da conta e as despesas são usados para fornecer os recursos do WePay. Ao usar o leitor de recibos, a imagem é enviada ao Google Gemini para extração dos dados; revise o resultado antes de salvar e evite enviar documentos sem relação com a despesa. Ao excluir a conta, os dados pessoais são removidos, mas o histórico financeiro compartilhado e as descrições/observações associadas permanecem anonimizados para os demais participantes."
           )}
         >
           <Text style={styles.rowTitle}>
@@ -193,10 +258,66 @@ export default function Configuracoes() {
           </Text>
 
           <Text style={styles.deleteDescription}>
-            Essa ação removerá sua conta permanentemente.
+            Seus dados pessoais serão removidos e o histórico financeiro compartilhado será anonimizado.
           </Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <Modal
+        visible={modalExclusao}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!excluindo) setModalExclusao(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Confirme sua senha</Text>
+            <Text style={styles.modalDescription}>
+              A exclusão é permanente. Informe sua senha atual para continuar.
+            </Text>
+            <TextInput
+              style={styles.passwordInput}
+              value={senhaAtual}
+              onChangeText={setSenhaAtual}
+              placeholder="Senha atual"
+              placeholderTextColor={Cores.textoSuave}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="current-password"
+              textContentType="password"
+              editable={!excluindo}
+              returnKeyType="done"
+              onSubmitEditing={confirmarExclusao}
+            />
+            {erroExclusao ? (
+              <Text style={styles.deleteError}>{erroExclusao}</Text>
+            ) : null}
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                disabled={excluindo}
+                onPress={() => setModalExclusao(false)}
+              >
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.confirmDeleteButton}
+                disabled={excluindo}
+                onPress={confirmarExclusao}
+              >
+                {excluindo ? (
+                  <ActivityIndicator color={Cores.branco} />
+                ) : (
+                  <Text style={styles.confirmDeleteText}>Excluir conta</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -327,5 +448,80 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 5,
     lineHeight: 18,
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    justifyContent: "center",
+    padding: 22,
+  },
+
+  modalCard: {
+    backgroundColor: Cores.branco,
+    borderRadius: 18,
+    padding: 20,
+  },
+
+  modalTitle: {
+    color: Cores.texto,
+    fontSize: 18,
+    fontWeight: "700",
+  },
+
+  modalDescription: {
+    color: Cores.textoSuave,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 8,
+  },
+
+  passwordInput: {
+    minHeight: 50,
+    borderWidth: 1,
+    borderColor: Cores.borda,
+    borderRadius: 12,
+    color: Cores.texto,
+    paddingHorizontal: 14,
+    marginTop: 16,
+  },
+
+  deleteError: {
+    color: Cores.negativo,
+    fontSize: 12,
+    marginTop: 8,
+  },
+
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 18,
+    gap: 10,
+  },
+
+  cancelButton: {
+    minHeight: 46,
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+
+  cancelButtonText: {
+    color: Cores.textoSuave,
+    fontWeight: "600",
+  },
+
+  confirmDeleteButton: {
+    minHeight: 46,
+    minWidth: 120,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Cores.negativo,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+  },
+
+  confirmDeleteText: {
+    color: Cores.branco,
+    fontWeight: "700",
   },
 });

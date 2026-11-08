@@ -1,11 +1,12 @@
 import React, { useCallback, useState } from "react";
 import {
-  SafeAreaView, ScrollView, View, Text,
+  ActivityIndicator, SafeAreaView, ScrollView, View, Text,
   TouchableOpacity, StyleSheet, StatusBar, Alert,
 } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { saldosApi } from "@/services/api";
 import { useUsuario } from "@/contexts/UsuarioContext";
+import { formatCurrencyBRL } from "@/utils/financeFormat";
 
 export default function SaldosGrupo() {
   const params = useLocalSearchParams();
@@ -13,19 +14,32 @@ export default function SaldosGrupo() {
   const grupoNome = String(params.grupoNome ?? "Meu grupo");
   const { usuario } = useUsuario();
   const [saldos, setSaldos] = useState<{ id: string; devedorId: string; credorId: string; nome: string; direcao: string; valor: number }[]>([]);
+  const [carregando, setCarregando] = useState(true);
 
   useFocusEffect(useCallback(() => {
-    if (!Number.isInteger(Number(groupId)) || !usuario) return;
+    setCarregando(true);
+    if (!groupId || Number(groupId) <= 0 || !usuario) {
+      setSaldos([]);
+      setCarregando(false);
+      return;
+    }
     let ativo = true;
-    saldosApi.obter(Number(groupId)).then(({ data }) => {
-      if (!ativo) return;
-      const meuId = Number(usuario.id);
-      setSaldos(data.dividas_simplificadas.filter((item) => item.devedor_id === meuId || item.credor_id === meuId).map((item, indice) => ({
-        id: String(indice), devedorId: String(item.devedor_id), credorId: String(item.credor_id),
-        nome: item.devedor_id === meuId ? item.credor : item.devedor,
-        direcao: item.devedor_id === meuId ? "Você deve para" : "deve para você", valor: Number(item.valor),
-      })));
-    }).catch((erro) => { if (ativo) Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível carregar os saldos."); });
+    void (async () => {
+      try {
+        const { data } = await saldosApi.obter(Number(groupId));
+        if (!ativo) return;
+        const meuId = Number(usuario.id);
+        setSaldos(data.dividas_simplificadas.filter((item) => item.devedor_id === meuId || item.credor_id === meuId).map((item, indice) => ({
+          id: String(indice), devedorId: String(item.devedor_id), credorId: String(item.credor_id),
+          nome: item.devedor_id === meuId ? item.credor : item.devedor,
+          direcao: item.devedor_id === meuId ? "Você deve para" : "deve para você", valor: Number(item.valor),
+        })));
+      } catch (erro) {
+        if (ativo) Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível carregar os saldos.");
+      } finally {
+        if (ativo) setCarregando(false);
+      }
+    })();
     return () => { ativo = false; };
   }, [groupId, usuario]));
 
@@ -65,21 +79,25 @@ export default function SaldosGrupo() {
           <View style={styles.resumoItem}>
             <Text style={styles.rotulo}>Você tem a receber</Text>
             <Text style={styles.positivo}>
-              {aReceber.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+              {formatCurrencyBRL(aReceber)}
             </Text>
           </View>
           <View style={styles.separador} />
           <View style={styles.resumoItem}>
             <Text style={styles.rotulo}>Você tem a pagar</Text>
             <Text style={styles.negativo}>
-              {aPagar.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+              {formatCurrencyBRL(aPagar)}
             </Text>
           </View>
         </View>
 
         <Text style={styles.secao}>Pendências</Text>
 
-        {saldos.map((item) => (
+        {carregando ? (
+          <ActivityIndicator color="#00A17A" style={styles.estado} />
+        ) : saldos.length === 0 ? (
+          <Text style={styles.vazio}>Não há pendências neste grupo.</Text>
+        ) : saldos.map((item) => (
           <View key={item.id} style={styles.card}>
             <View style={styles.avatar}>
               <Text style={styles.avatarTexto}>
@@ -91,7 +109,7 @@ export default function SaldosGrupo() {
               <Text style={styles.nome}>{item.nome}</Text>
               <Text style={styles.direcao}>{item.direcao}</Text>
               <Text style={styles.valor}>
-                {item.valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                {formatCurrencyBRL(item.valor)}
               </Text>
             </View>
 
@@ -120,6 +138,8 @@ const styles = StyleSheet.create({
   negativo: { color: "#FFAD9F", fontSize: 23, fontWeight: "800", marginTop: 5 },
   separador: { height: 1, backgroundColor: "#426E63", marginVertical: 8 },
   secao: { color: "#0B3B33", fontSize: 17, fontWeight: "800", marginBottom: 13 },
+  estado: { marginTop: 16 },
+  vazio: { color: "#6B8F86", textAlign: "center", paddingVertical: 28 },
   card: { flexDirection: "row", alignItems: "center", backgroundColor: "#FFFFFF", borderRadius: 15, borderWidth: 1, borderColor: "#E1EEE8", padding: 12, marginBottom: 10 },
   avatar: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#DDF7EE", alignItems: "center", justifyContent: "center", marginRight: 10 },
   avatarTexto: { color: "#087F5B", fontSize: 11, fontWeight: "800" },

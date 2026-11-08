@@ -5,6 +5,36 @@ export interface ApiResponse<T> {
   mensagem?: string;
 }
 
+export interface Paginacao {
+  limit: number;
+  offset: number;
+  total: number;
+  has_more: boolean;
+}
+
+export interface PaginacaoLista extends Paginacao {
+  categorias: { categoria: string | null; valor: number }[];
+  valor_total: number;
+}
+
+export interface Categoria {
+  id: number;
+  usuario_id: number | null;
+  nome: string;
+  tipo: "pessoal" | "grupo" | "ambos";
+  criado_em: string;
+}
+
+export interface Notificacao {
+  id: number;
+  grupo_id: number | null;
+  tipo: string;
+  titulo: string;
+  mensagem: string;
+  lida: boolean | 0 | 1;
+  criado_em: string;
+}
+
 export interface DespesaPessoal {
   id: number;
   usuario_id: number;
@@ -42,7 +72,7 @@ export interface Participante {
   papel: "admin" | "participante";
   ativo: number;
   nome?: string;
-  email?: string;
+  email?: string | null;
 }
 
 export interface DivisaoDespesa {
@@ -59,6 +89,7 @@ export interface DespesaGrupo {
   pagador_id: number;
   descricao: string;
   categoria: string | null;
+  observacao?: string | null;
   valor: number;
   data_despesa: string;
   vencimento: string | null;
@@ -71,7 +102,7 @@ export interface DespesaGrupo {
 export interface SaldoGrupo {
   usuario_id: number;
   nome: string;
-  email: string;
+  email: string | null;
   saldo: number;
   papel: "admin" | "participante";
   ativo: number;
@@ -104,6 +135,19 @@ export interface PagamentoGrupo {
   recebedor: string;
 }
 
+export interface LembreteDespesa {
+  despesa_id: number;
+  descricao: string;
+  valor: number;
+  vencimento: string;
+  grupo_id: number;
+  grupo_nome: string;
+  saldo_no_grupo: number;
+  sou_pagador: boolean;
+  dias_para_vencer: number;
+  status: "a_receber" | "a_pagar";
+}
+
 export interface Dashboard {
   receber: number;
   pagar: number;
@@ -112,5 +156,5 @@ export interface Dashboard {
   total_gasto_pessoal: number;
   total_gasto_geral: number;
   total_despesas_grupos: number;
-  lembretes_proximos: unknown[];
+  lembretes_proximos: LembreteDespesa[];
 }

@@ -19,43 +19,15 @@ import {
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { despesasPessoaisApi } from "@/services/api";
-
-const CATEGORIAS = [
-  { nome: "Alimentação", icone: "🍽️" },
-  { nome: "Transporte", icone: "🚕" },
-  { nome: "Casa", icone: "🏠" },
-  { nome: "Lazer", icone: "🎮" },
-  { nome: "Assinatura", icone: "🎬" },
-  { nome: "Outros", icone: "📦" },
-];
-
-function converterValor(valor: string): number {
-  const limpo = valor.replace(/R\$/gi, "").replace(/\s/g, "");
-
-  if (limpo.includes(",") && limpo.includes(".")) {
-    return Number(limpo.replace(/\./g, "").replace(",", "."));
-  }
-
-  return Number(limpo.replace(",", "."));
-}
-
-function converterDataParaIso(data: string): string | null {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(data)) return data;
-
-  const brasileira = data.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (!brasileira) return null;
-
-  const [, dia, mes, ano] = brasileira;
-  const dataValidada = new Date(Number(ano), Number(mes) - 1, Number(dia));
-  const eValida =
-    dataValidada.getFullYear() === Number(ano) &&
-    dataValidada.getMonth() === Number(mes) - 1 &&
-    dataValidada.getDate() === Number(dia);
-
-  return eValida ? `${ano}-${mes}-${dia}` : null;
-}
+import {
+  parseCurrencyInput,
+  parseDateInputToIso,
+} from "@/utils/financeInput";
+import { CATEGORIAS_RECIBO as CATEGORIAS } from "@/constants/financeCategories";
+import { useCategoriasFinanceiras } from "@/hooks/useCategoriasFinanceiras";
 
 export default function ConfirmarRecibo() {
+  const { categorias, erro: erroCategorias } = useCategoriasFinanceiras("pessoal", CATEGORIAS);
   const params = useLocalSearchParams<{
     descricao: string;
     valor: string;
@@ -87,7 +59,7 @@ export default function ConfirmarRecibo() {
       Alert.alert("Atenção", "Digite o valor da despesa.");
       return;
     }
-    const valorNumerico = converterValor(valorLimpo);
+    const valorNumerico = parseCurrencyInput(valorLimpo);
     if (isNaN(valorNumerico) || valorNumerico <= 0) {
       Alert.alert("Atenção", "Digite um valor válido.");
       return;
@@ -97,7 +69,7 @@ export default function ConfirmarRecibo() {
       return;
     }
 
-    const dataIso = converterDataParaIso(dataLimpa);
+    const dataIso = parseDateInputToIso(dataLimpa);
     if (!dataIso) {
       Alert.alert("Atenção", "Digite uma data válida no formato DD/MM/AAAA ou AAAA-MM-DD.");
       return;
@@ -232,7 +204,7 @@ export default function ConfirmarRecibo() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.categorias}
             >
-              {CATEGORIAS.map((item) => {
+              {categorias.map((item) => {
                 const selecionada = categoria === item.nome;
                 return (
                   <TouchableOpacity
@@ -249,6 +221,7 @@ export default function ConfirmarRecibo() {
                 );
               })}
             </ScrollView>
+            {erroCategorias && <Text style={styles.erroCategorias}>{erroCategorias}</Text>}
           </View>
 
           {/* BOTÕES */}
@@ -398,6 +371,7 @@ const styles = StyleSheet.create({
   },
 
   categorias: { gap: 8, paddingRight: 10 },
+  erroCategorias: { color: "#D64545", fontSize: 12, marginTop: 6 },
 
   categoria: {
     flexDirection: "row",

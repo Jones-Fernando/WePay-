@@ -116,13 +116,34 @@ export default function ListaGrupos() {
 
         <View style={styles.conteudo}>
           <View style={styles.cardResumo}>
-            <Text style={styles.resumoLabel}>Grupos ativos</Text>
-            <Text style={styles.resumoValor}>{grupos.length}</Text>
-            <Text style={styles.resumoNota}>
-              {grupos.length === 1
-                ? "grupo para acompanhar"
-                : "grupos para acompanhar"}
-            </Text>
+            <View style={styles.resumoTextos}>
+              <View style={styles.resumoCabecalho}>
+                <View style={styles.resumoIndicador} />
+                <Text style={styles.resumoLabel}>Grupos ativos</Text>
+              </View>
+              <View style={styles.resumoLinhaValor}>
+                <Text style={styles.resumoValor}>{grupos.length}</Text>
+                <Text style={styles.resumoNota}>
+                  {grupos.length === 1
+                    ? "grupo para acompanhar"
+                    : "grupos para acompanhar"}
+                </Text>
+              </View>
+            </View>
+            <View
+              style={styles.resumoVisual}
+              pointerEvents="none"
+              accessible={false}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              <View style={styles.resumoCabecas}>
+                <View style={styles.resumoCabecaSecundaria} />
+                <View style={styles.resumoCabecaPrincipal} />
+                <View style={styles.resumoCabecaSecundaria} />
+              </View>
+              <View style={styles.resumoBase} />
+            </View>
           </View>
 
           <View style={styles.buscaContainer}>
@@ -291,21 +312,84 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 14,
     marginBottom: 18,
+    borderWidth: 1,
+    borderColor: CORES.line,
+    borderLeftWidth: 3,
+    borderLeftColor: CORES.accent,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  resumoTextos: {
+    flex: 1,
+  },
+  resumoCabecalho: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  resumoIndicador: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: CORES.accentDark,
+    marginRight: 7,
   },
   resumoLabel: {
-    color: CORES.muted,
-    fontSize: 11,
+    color: CORES.ink,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  resumoLinhaValor: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    flexWrap: "wrap",
+    marginTop: 2,
   },
   resumoValor: {
     color: CORES.ink,
-    fontSize: 25,
-    fontWeight: "600",
-    marginTop: 5,
+    fontSize: 32,
+    fontWeight: "700",
+    lineHeight: 38,
+    marginRight: 8,
   },
   resumoNota: {
     color: CORES.muted,
-    fontSize: 11,
-    marginTop: 5,
+    fontSize: 12,
+    flexShrink: 1,
+  },
+  resumoVisual: {
+    width: 48,
+    height: 48,
+    borderRadius: 15,
+    backgroundColor: "#DDF7EE",
+    justifyContent: "center",
+    alignItems: "center",
+    marginLeft: 12,
+  },
+  resumoCabecas: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 3,
+  },
+  resumoCabecaPrincipal: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: CORES.accentDark,
+    marginHorizontal: 2,
+  },
+  resumoCabecaSecundaria: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: CORES.accent,
+  },
+  resumoBase: {
+    width: 26,
+    height: 10,
+    borderTopLeftRadius: 7,
+    borderTopRightRadius: 7,
+    backgroundColor: CORES.accentDark,
   },
   buscaContainer: {
     height: 52,

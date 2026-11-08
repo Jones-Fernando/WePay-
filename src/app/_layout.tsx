@@ -8,14 +8,17 @@
 
 import { Stack } from "expo-router";
 import { UsuarioProvider } from "@/contexts/UsuarioContext";
+import { PreferenciasProvider } from "@/contexts/PreferenciasContext";
 
 export default function MainLayout() {
   return (
     <UsuarioProvider>
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(auth)" />
-        <Stack.Screen name="(main)" />
-      </Stack>
+      <PreferenciasProvider>
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(auth)" />
+          <Stack.Screen name="(main)" />
+        </Stack>
+      </PreferenciasProvider>
     </UsuarioProvider>
   );
 }

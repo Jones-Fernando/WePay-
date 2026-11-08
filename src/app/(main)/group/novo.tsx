@@ -16,16 +16,46 @@ import {
 import { router } from "expo-router";
 import { gruposApi } from "@/services/api";
 
+const NOME_MIN_LENGTH = 2;
+const DESCRICAO_MAX_LENGTH = 200;
+
 export default function NovoGrupo() {
   const [nome, setNome] = useState("");
   const [descricao, setDescricao] = useState("");
   const [salvando, setSalvando] = useState(false);
 
+  const nomeTrimado = nome.trim();
+  const descricaoTrimada = descricao.trim();
+  const erroNome =
+    nomeTrimado.length > 0 && nomeTrimado.length < NOME_MIN_LENGTH
+      ? `O nome do grupo deve ter pelo menos ${NOME_MIN_LENGTH} caracteres.`
+      : "";
+  const erroDescricao =
+    descricaoTrimada.length > DESCRICAO_MAX_LENGTH
+      ? `A descrição deve ter no máximo ${DESCRICAO_MAX_LENGTH} caracteres.`
+      : "";
+
   async function criar() {
-    const titulo = nome.trim();
+    const titulo = nomeTrimado;
 
     if (!titulo) {
       Alert.alert("Atenção", "Digite o nome do grupo.");
+      return;
+    }
+
+    if (titulo.length < NOME_MIN_LENGTH) {
+      Alert.alert(
+        "Atenção",
+        `O nome do grupo deve ter pelo menos ${NOME_MIN_LENGTH} caracteres.`
+      );
+      return;
+    }
+
+    if (descricaoTrimada.length > DESCRICAO_MAX_LENGTH) {
+      Alert.alert(
+        "Atenção",
+        `A descrição deve ter no máximo ${DESCRICAO_MAX_LENGTH} caracteres.`
+      );
       return;
     }
 
@@ -35,7 +65,7 @@ export default function NovoGrupo() {
       setSalvando(true);
       await gruposApi.criar({
         nome: titulo,
-        descricao: descricao.trim() || undefined,
+        descricao: descricaoTrimada || undefined,
       });
       Alert.alert(
         "Grupo criado",
@@ -100,33 +130,38 @@ export default function NovoGrupo() {
             <View style={styles.campo}>
               <Text style={styles.label}>Nome do grupo</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, erroNome ? styles.inputErro : null]}
                 value={nome}
                 onChangeText={setNome}
                 placeholder="Ex.: Viagem para Bahia"
                 placeholderTextColor="#8AA69E"
                 autoCapitalize="sentences"
                 returnKeyType="next"
+                maxLength={80}
                 accessibilityLabel="Nome do grupo"
               />
-              <Text style={styles.ajudaCampo}>
-                Escolha um nome fácil de reconhecer por todos.
+              <Text style={[styles.ajudaCampo, erroNome ? styles.erroTexto : null]}>
+                {erroNome || "Escolha um nome fácil de reconhecer por todos."}
               </Text>
             </View>
 
             <View style={styles.campo}>
               <Text style={styles.label}>Descrição (opcional)</Text>
               <TextInput
-                style={[styles.input, styles.inputDescricao]}
+                style={[styles.input, styles.inputDescricao, erroDescricao ? styles.inputErro : null]}
                 value={descricao}
                 onChangeText={setDescricao}
                 placeholder="Ex.: Despesas da viagem de julho"
                 placeholderTextColor="#8AA69E"
                 autoCapitalize="sentences"
                 multiline
+                maxLength={DESCRICAO_MAX_LENGTH + 20}
                 textAlignVertical="top"
                 accessibilityLabel="Descrição do grupo, opcional"
               />
+              <Text style={[styles.ajudaCampo, erroDescricao ? styles.erroTexto : null]}>
+                {erroDescricao || `Máximo de ${DESCRICAO_MAX_LENGTH} caracteres.`}
+              </Text>
             </View>
 
             <View style={styles.aviso}>
@@ -246,6 +281,8 @@ const styles = StyleSheet.create({
     color: "#0B3B33",
   },
   ajudaCampo: { fontSize: 11, color: "#6B8F86", marginTop: 7, lineHeight: 16 },
+  erroTexto: { color: "#B42318" },
+  inputErro: { borderColor: "#D92D20" },
   inputDescricao: { height: 112, paddingTop: 14 },
   aviso: {
     flexDirection: "row",

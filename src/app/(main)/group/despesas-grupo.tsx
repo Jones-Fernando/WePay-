@@ -1,7 +1,6 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   RefreshControl,
   SafeAreaView,
   ScrollView,
@@ -13,10 +12,16 @@ import {
 } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { despesasGrupoApi } from "@/services/api";
-import type { DespesaGrupo } from "@/types/api";
+import type { DespesaGrupo, PaginacaoLista } from "@/types/api";
+import { formatDateTimeForDisplay } from "@/utils/financeInput";
+import { formatCurrencyBRL } from "@/utils/financeFormat";
+import {
+  appendUniqueById,
+  createPaginationRequestGate,
+} from "@/utils/paginationRequestGate";
 
 const CORES = { paper: "#F5FBF7", ink: "#0B3B33", surface: "#FFFFFF", accent: "#00C896", accentDark: "#00A17A", muted: "#6B8F86", line: "#E1EEE8", field: "#F0F8F4" };
-const ICONES_CATEGORIA: Record<string, string> = { "Alimentação": "🍽️", Transporte: "🚕", Casa: "🏠", Moradia: "🏘️", Saúde: "💊", Educação: "📚", Lazer: "🎮", Assinatura: "🎬", Assinaturas: "🎬", Compras: "🛍️", Pets: "🐾", Viagem: "✈️", Impostos: "🧾", Mercado: "🛒", "Contas da casa": "💡", "Internet e telefone": "📶", Limpeza: "🧹", "Manutenção e reparos": "🔧", Hospedagem: "🏨", Passagens: "✈️", Combustível: "⛽", "Pedágios e estacionamento": "🅿️", "Passeios e ingressos": "🎟️", Outros: "📦" };
+const ICONES_CATEGORIA: Record<string, string> = { "Alimentação": "🛒", Transporte: "🚕", Casa: "🏠", Moradia: "🏘️", Saúde: "💊", Educação: "📚", Lazer: "🎮", Assinatura: "🎬", Assinaturas: "🎬", Compras: "🛍️", Pets: "🐾", Viagem: "✈️", Impostos: "🧾", Mercado: "🛒", "Contas da casa": "💡", "Internet e telefone": "📶", Limpeza: "🧹", "Manutenção e reparos": "🔧", Hospedagem: "🏨", Passagens: "✈️", Combustível: "⛽", "Pedágios e estacionamento": "🅿️", "Passeios e ingressos": "🎟️", Outros: "📦" };
 const CORES_CATEGORIA: Record<string, string> = {
   Alimentação: "#00C896",
   Transporte: "#FF6B5C",
@@ -44,43 +49,8 @@ const CORES_CATEGORIA: Record<string, string> = {
   Outros: "#A6BDB5",
 };
 
-const moeda = (valor: number | string) => {
-  const numero = Number(valor);
-  return (Number.isFinite(numero) ? numero : 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-};
-const dataCriacao = (valor: string | null | undefined) => {
-  if (!valor) return null;
-
-  const correspondencia = valor.trim().match(
-    /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/,
-  );
-  if (!correspondencia) return null;
-
-  const [, ano, mes, dia, hora, minuto, segundo = "0", fuso] = correspondencia;
-  const data = new Date(Date.UTC(Number(ano), Number(mes) - 1, Number(dia)));
-  if (
-    data.getUTCFullYear() !== Number(ano) ||
-    data.getUTCMonth() !== Number(mes) - 1 ||
-    data.getUTCDate() !== Number(dia) ||
-    Number(hora) > 23 ||
-    Number(minuto) > 59 ||
-    Number(segundo) > 59
-  ) return null;
-
-  if (!fuso) return `${dia}/${mes}/${ano} às ${hora}:${minuto}`;
-
-  const instante = new Date(valor.trim().replace(" ", "T"));
-  if (Number.isNaN(instante.getTime())) return null;
-  return instante.toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).replace(", ", " às ");
-};
 const iconeCategoria = (categoria: string | null | undefined) => (categoria && ICONES_CATEGORIA[categoria]) || "📦";
+const TAMANHO_PAGINA = 50;
 
 export default function DespesasGrupo() {
   const params = useLocalSearchParams();
@@ -89,44 +59,104 @@ export default function DespesasGrupo() {
   const [filtro, setFiltro] = useState<"Todas" | "Recentes">("Todas");
   const [despesas, setDespesas] = useState<DespesaGrupo[]>([]);
   const [carregando, setCarregando] = useState(true);
+  const [carregandoMais, setCarregandoMais] = useState(false);
   const [atualizando, setAtualizando] = useState(false);
+  const [paginacao, setPaginacao] = useState<PaginacaoLista | null>(null);
+  const [erroCarregamento, setErroCarregamento] = useState<string | null>(null);
+  const [erroCarregamentoMais, setErroCarregamentoMais] = useState<string | null>(null);
+  const requestGate = useRef(createPaginationRequestGate());
 
   const carregarDespesas = useCallback(async (mostrarLoading = true) => {
-    if (!groupId || Number(groupId) <= 0) { setCarregando(false); return; }
+    const generation = requestGate.current.beginFirstPage();
+    setCarregandoMais(false);
+    setErroCarregamento(null);
+    setErroCarregamentoMais(null);
+    if (!groupId || Number(groupId) <= 0) {
+      setDespesas([]);
+      setPaginacao(null);
+      setCarregando(false);
+      setAtualizando(false);
+      requestGate.current.finishFirstPage(generation);
+      return;
+    }
     if (mostrarLoading) setCarregando(true); else setAtualizando(true);
     try {
-      const resposta = await despesasGrupoApi.listar(Number(groupId));
+      const resposta = await despesasGrupoApi.listar(Number(groupId), {
+        limit: TAMANHO_PAGINA,
+        offset: 0,
+      });
+      if (!requestGate.current.isCurrent(generation)) return;
       setDespesas(resposta.data);
+      setPaginacao(resposta.paginacao);
     } catch (erro) {
-      Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível carregar as despesas do grupo.");
-    } finally { setCarregando(false); setAtualizando(false); }
+      if (requestGate.current.isCurrent(generation)) {
+        setErroCarregamento(
+          erro instanceof Error
+            ? erro.message
+            : "Não foi possível carregar as despesas do grupo.",
+        );
+      }
+    } finally {
+      if (requestGate.current.isCurrent(generation)) {
+        requestGate.current.finishFirstPage(generation);
+        setCarregando(false);
+        setAtualizando(false);
+      }
+    }
   }, [groupId]);
 
-  useFocusEffect(useCallback(() => { carregarDespesas(); }, [carregarDespesas]));
+  useFocusEffect(useCallback(() => {
+    requestGate.current.activate();
+    void carregarDespesas();
+    return () => requestGate.current.invalidate();
+  }, [carregarDespesas]));
+
+  const carregarMais = useCallback(async () => {
+    if (!paginacao?.has_more || !groupId) return;
+    const ticket = requestGate.current.beginNextPage();
+    if (!ticket) return;
+    setCarregandoMais(true);
+    setErroCarregamentoMais(null);
+    try {
+      const resposta = await despesasGrupoApi.listar(Number(groupId), {
+        limit: TAMANHO_PAGINA,
+        offset: despesas.length,
+      });
+      if (!requestGate.current.isCurrentPage(ticket)) return;
+      setDespesas((atuais) => appendUniqueById(atuais, resposta.data));
+      setPaginacao(resposta.paginacao);
+    } catch (erro) {
+      if (requestGate.current.isCurrentPage(ticket)) {
+        setErroCarregamentoMais(
+          erro instanceof Error
+            ? erro.message
+            : "Não foi possível carregar mais despesas.",
+        );
+      }
+    } finally {
+      if (requestGate.current.isCurrentPage(ticket)) {
+        requestGate.current.finishNextPage(ticket);
+        setCarregandoMais(false);
+      }
+    }
+  }, [despesas.length, groupId, paginacao]);
 
   const despesasExibidas = useMemo(() => filtro === "Recentes" ? despesas.slice(0, 2) : despesas, [despesas, filtro]);
-  const resumoCategorias = useMemo(() => {
-    const agrupamento = new Map<string, number>();
-
-    despesas.forEach((despesa) => {
-      const valor = Number(despesa.valor);
-      if (!Number.isFinite(valor) || valor <= 0) return;
-
-      const categoria = despesa.categoria?.trim() || "Outros";
-      const soma = (agrupamento.get(categoria) ?? 0) + valor;
-      if (Number.isFinite(soma)) agrupamento.set(categoria, soma);
-    });
-
-    return Array.from(agrupamento, ([categoria, valor]) => ({
-      categoria,
-      valor,
-      cor: CORES_CATEGORIA[categoria] ?? CORES_CATEGORIA.Outros,
-    }));
-  }, [despesas]);
-  const totalCategorias = resumoCategorias.reduce((soma, item) => {
-    const total = soma + item.valor;
-    return Number.isFinite(total) ? total : soma;
-  }, 0);
+  const resumoCategorias = useMemo(
+    () =>
+      (paginacao?.categorias ?? [])
+        .filter((item) => Number(item.valor) > 0)
+        .map((item) => {
+          const categoria = item.categoria?.trim() || "Outros";
+          return {
+            categoria,
+            valor: Number(item.valor),
+            cor: CORES_CATEGORIA[categoria] ?? CORES_CATEGORIA.Outros,
+          };
+        }),
+    [paginacao]
+  );
+  const totalCategorias = Number(paginacao?.valor_total ?? 0);
 
   function abrirDespesa(id: number | string) {
     router.push({ pathname: "/(main)/group/detalhes-despesa", params: { id: String(id), groupId, grupoNome } });
@@ -152,11 +182,24 @@ export default function DespesasGrupo() {
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.conteudo} showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={atualizando} onRefresh={() => carregarDespesas(false)} tintColor={CORES.accentDark} />}>
+        {erroCarregamento && despesas.length > 0 && (
+          <View style={styles.erroInline} accessibilityRole="alert">
+            <Text style={styles.erroTexto}>{erroCarregamento}</Text>
+            <TouchableOpacity
+              onPress={() => void carregarDespesas(false)}
+              disabled={atualizando}
+              accessibilityRole="button"
+              accessibilityLabel="Tentar carregar despesas novamente"
+            >
+              <Text style={styles.erroAcao}>Tentar novamente</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         <View style={styles.cardResumo}>
           <View style={styles.grupoChip}><Text style={styles.grupoChipTexto}>Grupo · {grupoNome}</Text></View>
           <Text style={styles.resumoLabel}>Total de despesas</Text>
-          <Text style={styles.resumoValor}>{moeda(totalCategorias)}</Text>
-          <Text style={styles.resumoNota}>{despesas.length} {despesas.length === 1 ? "despesa registrada" : "despesas registradas"}</Text>
+          <Text style={styles.resumoValor}>{formatCurrencyBRL(totalCategorias)}</Text>
+          <Text style={styles.resumoNota}>{paginacao?.total ?? despesas.length} {(paginacao?.total ?? despesas.length) === 1 ? "despesa registrada" : "despesas registradas"}</Text>
           {totalCategorias > 0 && <View style={styles.barraCategorias}>
             {resumoCategorias.map((item) => <View key={item.categoria} style={[styles.segmentoCategoria, { flex: item.valor / totalCategorias, backgroundColor: item.cor }]} />)}
           </View>}
@@ -168,17 +211,20 @@ export default function DespesasGrupo() {
         </View>
 
         {carregando ? <View style={styles.estado}><ActivityIndicator size="large" color={CORES.accentDark} /><Text style={styles.estadoTexto}>Carregando despesas...</Text></View>
+          : erroCarregamento && despesas.length === 0 ? <View style={styles.estadoErro} accessibilityRole="alert"><Text style={styles.vazioTitulo}>Não foi possível carregar as despesas</Text><Text style={styles.vazioTexto}>{erroCarregamento}</Text><TouchableOpacity style={styles.botaoTentarNovamente} onPress={() => void carregarDespesas()} accessibilityRole="button"><Text style={styles.textoCarregarMais}>Tentar novamente</Text></TouchableOpacity></View>
           : despesasExibidas.length === 0 ? <View style={styles.vazio}><Text style={styles.vazioIcone}>🧾</Text><Text style={styles.vazioTitulo}>Nenhuma despesa registrada</Text><Text style={styles.vazioTexto}>Adicione a primeira despesa compartilhada deste grupo.</Text></View>
           : <View style={styles.listaDespesas}>{despesasExibidas.map((item) => {
             const categoria = item.categoria?.trim() || "Outros";
-            const criadaEm = dataCriacao(item.criado_em);
+            const criadaEm = item.criado_em
+              ? formatDateTimeForDisplay(item.criado_em)
+              : null;
             const participantesCount = item.participantes_count ?? item.divisoes?.length ?? 0;
 
             return <TouchableOpacity key={item.id} style={styles.cartaoDespesa} onPress={() => abrirDespesa(item.id)} activeOpacity={0.8} accessibilityRole="button">
               <View style={styles.cartaoDespesaConteudo}>
                 <View style={styles.cartaoDespesaTopo}>
                   <Text style={styles.despesaTitulo} numberOfLines={1}>{iconeCategoria(categoria)} {item.descricao}</Text>
-                  <Text style={styles.despesaValor}>{moeda(item.valor)}</Text>
+                  <Text style={styles.despesaValor}>{formatCurrencyBRL(item.valor)}</Text>
                 </View>
                 <Text style={styles.despesaInfo} numberOfLines={1}>{categoria}</Text>
                 {criadaEm && <Text style={styles.despesaCriadaEm}>Criada em {criadaEm}</Text>}
@@ -191,6 +237,34 @@ export default function DespesasGrupo() {
               </View>
             </TouchableOpacity>;
           })}</View>}
+
+        {filtro === "Todas" && !carregando && paginacao?.has_more && (
+          erroCarregamentoMais ? (
+            <View style={styles.erroPaginacao} accessibilityRole="alert">
+              <Text style={styles.erroTexto}>{erroCarregamentoMais}</Text>
+              <TouchableOpacity
+                style={styles.botaoCarregarMais}
+                onPress={() => void carregarMais()}
+                disabled={carregandoMais}
+                accessibilityRole="button"
+                accessibilityLabel="Tentar carregar mais despesas novamente"
+              >
+                <Text style={styles.textoCarregarMais}>Tentar novamente</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.botaoCarregarMais}
+              onPress={() => void carregarMais()}
+              disabled={carregandoMais}
+              accessibilityRole="button"
+            >
+              {carregandoMais
+                ? <ActivityIndicator color={CORES.accentDark} />
+                : <Text style={styles.textoCarregarMais}>Carregar mais despesas</Text>}
+            </TouchableOpacity>
+          )
+        )}
 
         <View style={styles.acoesSecundarias}>
           <TouchableOpacity style={styles.acaoSecundaria} onPress={abrirParticipantes}><Text style={styles.acaoIcone}>👥</Text><Text style={styles.acaoTexto}>Participantes</Text><Text style={styles.seta}>›</Text></TouchableOpacity>
@@ -230,7 +304,13 @@ const styles = StyleSheet.create({
   pagador: { flex: 1, color: CORES.muted, fontSize: 10 },
   participantesChip: { backgroundColor: CORES.field, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   participantesChipTexto: { color: CORES.ink, fontSize: 9, fontWeight: "700" },
-  estado: { paddingTop: 60, alignItems: "center" }, estadoTexto: { color: CORES.muted, fontSize: 12, marginTop: 12 }, vazio: { paddingTop: 55, paddingHorizontal: 25, alignItems: "center" }, vazioIcone: { fontSize: 36, marginBottom: 12 }, vazioTitulo: { color: CORES.ink, fontSize: 14, fontWeight: "700" }, vazioTexto: { color: CORES.muted, fontSize: 11, textAlign: "center", lineHeight: 17, marginTop: 7 },
+  botaoCarregarMais: { minHeight: 44, alignItems: "center", justifyContent: "center", marginTop: 2, marginBottom: 10 },
+  textoCarregarMais: { color: CORES.accentDark, fontSize: 13, fontWeight: "700" },
+  erroInline: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, backgroundColor: "#FCE8E6", padding: 12, borderRadius: 10, marginBottom: 12 },
+  erroPaginacao: { alignItems: "center", backgroundColor: "#FCE8E6", paddingHorizontal: 12, borderRadius: 10, marginBottom: 10 },
+  erroTexto: { flex: 1, color: "#A72F2F", fontSize: 12, textAlign: "center" },
+  erroAcao: { color: "#A72F2F", fontSize: 12, fontWeight: "700" },
+  estado: { paddingTop: 60, alignItems: "center" }, estadoErro: { paddingTop: 48, paddingHorizontal: 25, alignItems: "center" }, botaoTentarNovamente: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, marginTop: 12, backgroundColor: "#DDF7EE", borderRadius: 12 }, estadoTexto: { color: CORES.muted, fontSize: 12, marginTop: 12 }, vazio: { paddingTop: 55, paddingHorizontal: 25, alignItems: "center" }, vazioIcone: { fontSize: 36, marginBottom: 12 }, vazioTitulo: { color: CORES.ink, fontSize: 14, fontWeight: "700" }, vazioTexto: { color: CORES.muted, fontSize: 11, textAlign: "center", lineHeight: 17, marginTop: 7 },
   acoesSecundarias: { gap: 10, marginTop: 14 }, acaoSecundaria: { backgroundColor: CORES.surface, borderWidth: 1, borderColor: CORES.line, borderRadius: 14, padding: 14, flexDirection: "row", alignItems: "center" }, acaoIcone: { fontSize: 19, marginRight: 12 }, acaoTexto: { flex: 1, color: CORES.ink, fontWeight: "700", fontSize: 13 }, seta: { color: CORES.accentDark, fontSize: 24, marginTop: -2 },
   fab: { position: "absolute", right: 20, bottom: 82, width: 54, height: 54, borderRadius: 18, backgroundColor: CORES.accent, alignItems: "center", justifyContent: "center", elevation: 6, shadowColor: CORES.ink, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.2, shadowRadius: 9 }, fabText: { color: CORES.ink, fontSize: 28, fontWeight: "600", marginTop: -2 },
 });

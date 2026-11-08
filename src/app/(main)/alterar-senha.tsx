@@ -15,10 +15,13 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { authApi } from "@/services/api";
+import { useUsuario } from "@/contexts/UsuarioContext";
+import { MIN_PASSWORD_LENGTH } from "@/constants/password";
 
 import { Cores } from "../../constants/Cores";
 
 export default function AlterarSenha() {
+  const { logout } = useUsuario();
   const [senhaAtual, setSenhaAtual] =
     useState("");
 
@@ -38,10 +41,10 @@ export default function AlterarSenha() {
       return;
     }
 
-    if (novaSenha.length < 6) {
+    if (novaSenha.length < MIN_PASSWORD_LENGTH) {
       Alert.alert(
         "Atenção",
-        "A nova senha deve possuir pelo menos 6 caracteres."
+        `A nova senha deve possuir pelo menos ${MIN_PASSWORD_LENGTH} caracteres.`
       );
       return;
     }
@@ -57,12 +60,20 @@ export default function AlterarSenha() {
     setSalvando(true);
     try {
       await authApi.alterarSenha(senhaAtual, novaSenha);
+      await logout(false);
       setSenhaAtual("");
       setNovaSenha("");
       setConfirmacao("");
-      Alert.alert("Senha alterada", "Sua senha foi alterada com sucesso.", [
-        { text: "OK", onPress: () => router.back() },
-      ]);
+      Alert.alert(
+        "Senha alterada",
+        "Por segurança, todas as sessões foram encerradas. Entre novamente com sua nova senha.",
+        [
+          {
+            text: "Ir para o login",
+            onPress: () => router.replace("/(auth)/login"),
+          },
+        ]
+      );
     } catch (erro) {
       Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível alterar a senha.");
     } finally {

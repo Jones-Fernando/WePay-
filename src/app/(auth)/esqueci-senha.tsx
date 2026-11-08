@@ -40,14 +40,18 @@ export default function EsqueciSenha() {
     try {
       await authApi.esqueciSenha(emailLimpo);
     } catch {
-      // Silencia o erro para não revelar se o e-mail existe
+      Alert.alert(
+        "Não foi possível solicitar",
+        "Não foi possível concluir a solicitação agora. Verifique sua conexão e tente novamente."
+      );
+      return;
     } finally {
       setCarregando(false);
     }
 
     Alert.alert(
-      "E-mail enviado",
-      "Se o e-mail estiver cadastrado, você receberá as instruções para recuperar sua senha.",
+      "Solicitação recebida",
+      "Se o e-mail estiver cadastrado e o serviço de envio estiver disponível, você receberá as instruções para recuperar sua senha.",
       [{ text: "Voltar para o login", onPress: () => router.replace("/(auth)/login") }]
     );
   }

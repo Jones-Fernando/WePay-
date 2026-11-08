@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { authApi } from "@/services/api";
+import { MIN_PASSWORD_LENGTH } from "@/constants/password";
 
 export default function Cadastro() {
   const { convite } = useLocalSearchParams<{ convite?: string }>();
@@ -32,9 +33,6 @@ export default function Cadastro() {
   const [mostrarConfirmacao, setMostrarConfirmacao] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [contaCriada, setContaCriada] = useState(false);
-  const [emailEnviado, setEmailEnviado] = useState(false);
-  const [reenviando, setReenviando] = useState(false);
-  const [mensagemReenvio, setMensagemReenvio] = useState("");
 
   async function criarConta() {
     const nomeLimpo = nome.trim();
@@ -52,41 +50,25 @@ export default function Cadastro() {
       Alert.alert("Erro", "As senhas não são iguais.");
       return;
     }
-    if (senha.length < 6) {
-      Alert.alert("Atenção", "A senha deve ter ao menos 6 caracteres.");
+    if (senha.length < MIN_PASSWORD_LENGTH) {
+      Alert.alert(
+        "Atenção",
+        `A senha deve ter ao menos ${MIN_PASSWORD_LENGTH} caracteres.`
+      );
       return;
     }
 
     setCarregando(true);
     try {
-      const resposta = await authApi.register(
-        nomeLimpo,
-        emailLimpo,
-        senha,
-        conviteToken
-      );
-      setEmailEnviado(resposta.data?.email_enviado ?? false);
+      await authApi.register(nomeLimpo, emailLimpo, senha, conviteToken);
       setContaCriada(true);
-    } catch (erro: any) {
-      Alert.alert("Erro", erro?.message ?? "Não foi possível criar a conta.");
+    } catch (erro) {
+      Alert.alert(
+        "Erro",
+        erro instanceof Error ? erro.message : "Não foi possível criar a conta."
+      );
     } finally {
       setCarregando(false);
-    }
-  }
-
-  async function reenviarConfirmacao() {
-    setReenviando(true);
-    setMensagemReenvio("");
-    try {
-      const resposta = await authApi.reenviarConfirmacao(
-        email.trim().toLowerCase(),
-        conviteToken
-      );
-      setMensagemReenvio(resposta.mensagem ?? "Se a conta estiver pendente, enviaremos um novo link.");
-    } catch (erro: any) {
-      setMensagemReenvio(erro?.message ?? "Não foi possível solicitar o reenvio.");
-    } finally {
-      setReenviando(false);
     }
   }
 
@@ -110,26 +92,10 @@ export default function Cadastro() {
             <View style={styles.successIcon}>
               <Text style={styles.successIconText}>✓</Text>
             </View>
-            <Text style={styles.successTitle}>Confirme seu e-mail</Text>
+            <Text style={styles.successTitle}>Conta criada com sucesso!</Text>
             <Text style={styles.successText}>
-              {emailEnviado
-                ? `Enviamos um link para ${email.trim().toLowerCase()}. Ele expira em 24 horas.`
-                : "A conta foi criada, mas o envio do e-mail falhou. Você pode solicitar um novo link abaixo."}
+              Sua conta está pronta. Entre com seu e-mail e sua senha.
             </Text>
-            {mensagemReenvio ? (
-              <Text style={styles.resendMessage}>{mensagemReenvio}</Text>
-            ) : null}
-            <TouchableOpacity
-              style={[styles.resendButton, reenviando && styles.disabledButton]}
-              onPress={reenviarConfirmacao}
-              disabled={reenviando}
-            >
-              {reenviando ? (
-                <ActivityIndicator color="#00A17A" />
-              ) : (
-                <Text style={styles.resendButtonText}>Reenviar confirmação</Text>
-              )}
-            </TouchableOpacity>
             <TouchableOpacity style={styles.successLoginButton} onPress={irParaLogin}>
               <Text style={styles.primaryButtonText}>Ir para o login</Text>
             </TouchableOpacity>
@@ -465,27 +431,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
-  resendMessage: {
-    color: "#0B3B33",
-    fontSize: 13,
-    marginTop: 14,
-    textAlign: "center",
-  },
-
-  resendButton: {
-    minHeight: 44,
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 14,
-    paddingHorizontal: 10,
-  },
-
-  resendButtonText: {
-    color: "#00A17A",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-
   successLoginButton: {
     width: "100%",
     height: 48,
@@ -496,7 +441,4 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
-  disabledButton: {
-    opacity: 0.6,
-  },
 });

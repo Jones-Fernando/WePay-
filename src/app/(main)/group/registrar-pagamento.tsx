@@ -5,6 +5,7 @@ import {
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { pagamentosApi } from "@/services/api";
+import { parseCurrencyInput, parseDateInputToIso } from "@/utils/financeInput";
 
 export default function RegistrarPagamento() {
   const params = useLocalSearchParams();
@@ -15,26 +16,40 @@ export default function RegistrarPagamento() {
   const valorInicial = String(params.valor ?? "");
 
   const [valor, setValor] = useState(valorInicial);
-  const [data, setData] = useState("25/10/2026");
+  const [data, setData] = useState(() => {
+    const hoje = new Date();
+    return `${String(hoje.getDate()).padStart(2, "0")}/${String(hoje.getMonth() + 1).padStart(2, "0")}/${hoje.getFullYear()}`;
+  });
   const [metodo, setMetodo] = useState("PIX");
   const [observacao, setObservacao] = useState("");
   const [salvando, setSalvando] = useState(false);
 
-  async function salvarPagamento() {
-    const numero = Number(valor.trim().replace(/\./g, "").replace(",", "."));
+  const valorNumerico = parseCurrencyInput(valor);
+  const dataIso = parseDateInputToIso(data.trim());
+  const erroValor = !valor.trim()
+    ? "Informe um valor maior que zero."
+    : !Number.isFinite(valorNumerico) || valorNumerico <= 0
+      ? "Informe um valor maior que zero."
+      : "";
+  const erroData = !data.trim()
+    ? "Informe a data do pagamento."
+    : !dataIso
+      ? "Use o formato DD/MM/AAAA válido."
+      : "";
 
+  async function salvarPagamento() {
     if (!groupId) {
       Alert.alert("Grupo não identificado", "Retorne ao grupo e abra novamente o registro de pagamento.");
       return;
     }
 
-    if (!Number.isFinite(numero) || numero <= 0) {
-      Alert.alert("Valor inválido", "Informe um valor maior que zero.");
+    if (erroValor) {
+      Alert.alert("Valor inválido", erroValor);
       return;
     }
 
-    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(data)) {
-      Alert.alert("Data inválida", "Utilize o formato DD/MM/AAAA.");
+    if (erroData) {
+      Alert.alert("Data inválida", erroData);
       return;
     }
 
@@ -43,8 +58,8 @@ export default function RegistrarPagamento() {
     try {
       setSalvando(true);
       await pagamentosApi.criar({
-        grupo_id: Number(groupId), recebedor_id: participanteId, valor: numero,
-        data_pagamento: data.slice(6, 10) + "-" + data.slice(3, 5) + "-" + data.slice(0, 2),
+        grupo_id: Number(groupId), recebedor_id: participanteId, valor: valorNumerico,
+        data_pagamento: dataIso!,
         metodo, observacao: observacao.trim() || undefined,
       });
       Alert.alert("Pagamento registrado", "Os saldos foram recalculados.", [{ text: "OK", onPress: () => router.replace({ pathname: "/(main)/group/saldos", params: { groupId, grupoNome } }) }]);
@@ -73,12 +88,23 @@ export default function RegistrarPagamento() {
         </View>
 
         <Text style={styles.label}>Valor pago (R$)</Text>
-        <TextInput style={styles.input} value={valor}
-          onChangeText={setValor} keyboardType="decimal-pad" placeholder="0,00" />
+        <TextInput
+          style={[styles.input, erroValor ? styles.inputErro : null]}
+          value={valor}
+          onChangeText={setValor}
+          keyboardType="decimal-pad"
+          placeholder="0,00"
+        />
+        {erroValor ? <Text style={styles.erroTexto}>{erroValor}</Text> : null}
 
         <Text style={styles.label}>Data do pagamento</Text>
-        <TextInput style={styles.input} value={data}
-          onChangeText={setData} placeholder="DD/MM/AAAA" />
+        <TextInput
+          style={[styles.input, erroData ? styles.inputErro : null]}
+          value={data}
+          onChangeText={setData}
+          placeholder="DD/MM/AAAA"
+        />
+        {erroData ? <Text style={styles.erroTexto}>{erroData}</Text> : null}
 
         <Text style={styles.label}>Método de pagamento</Text>
         <View style={styles.metodos}>
@@ -122,6 +148,8 @@ const styles = StyleSheet.create({
   ajuda: { color: "#6B8F86", fontSize: 11, marginTop: 5, lineHeight: 17 },
   label: { color: "#0B3B33", fontSize: 13, fontWeight: "700", marginBottom: 8, marginTop: 5 },
   input: { minHeight: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 13, paddingHorizontal: 14, fontSize: 14, color: "#0B3B33", marginBottom: 18 },
+  inputErro: { borderColor: "#D92D20" },
+  erroTexto: { color: "#B42318", fontSize: 11, lineHeight: 16, marginTop: -10, marginBottom: 12 },
   metodos: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 18 },
   metodo: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 11, paddingHorizontal: 12, paddingVertical: 10 },
   metodoAtivo: { backgroundColor: "#DDF7EE", borderColor: "#00C896" },

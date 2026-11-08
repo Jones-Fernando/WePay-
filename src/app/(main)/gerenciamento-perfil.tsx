@@ -30,26 +30,7 @@
  * - navegação com Expo Router.
  *
  *
- * FLUXO ATUAL:
- *
- * Tela
- *   ↓
- * estado local
- *   ↓
- * validação
- *   ↓
- * simulação
- *
- *
- * FLUXO FUTURO:
- *
- * gerenciamento-perfil.tsx
- *          ↓
- * src/services/api.ts
- *          ↓
- * Flask
- *          ↓
- * MySQL
+ * Os dados do perfil são carregados e salvos pela API.
  */
 
 
@@ -120,10 +101,6 @@ export default function GerenciamentoPerfilScreen() {
 
   /**
    * Nome atual do usuário.
-   *
-   * Como ainda estamos trabalhando com frontend/mock,
-   * iniciamos o campo com o mesmo usuário utilizado
-   * como referência nas telas existentes.
    */
   const [nome, setNome] = useState(usuarioAtual.nome);
 
@@ -137,8 +114,6 @@ export default function GerenciamentoPerfilScreen() {
 
   /**
    * Telefone do usuário.
-   *
-   * Neste primeiro momento é apenas um dado visual/mock.
    */
   const [telefone, setTelefone] =
     useState(usuarioAtual.telefone);
@@ -259,44 +234,6 @@ export default function GerenciamentoPerfilScreen() {
       setSalvando(true);
 
 
-      /**
-       * ======================================================
-       * FUTURA INTEGRAÇÃO COM O BACKEND
-       * ======================================================
-       *
-       * Quando o backend estiver pronto, aqui deverá ocorrer
-       * a chamada ao serviço:
-       *
-       * await api.put(
-       *   "/api/auth/perfil",
-       *   {
-       *     nome: nomeLimpo,
-       *     email: emailLimpo,
-       *     telefone,
-       *   }
-       * );
-       *
-       * A tela não deve chamar o Flask diretamente.
-       *
-       * O correto será:
-       *
-       * tela
-       *   ↓
-       * services/api.ts
-       *   ↓
-       * Flask
-       */
-
-
-      /**
-       * ------------------------------------------------------
-       * SIMULAÇÃO TEMPORÁRIA
-       * ------------------------------------------------------
-       *
-       * Usamos um pequeno atraso apenas para reproduzir
-       * o comportamento de uma requisição.
-       */
-
       await authApi.atualizarPerfil({
         nome: nomeLimpo,
         email: emailLimpo,
@@ -391,12 +328,16 @@ export default function GerenciamentoPerfilScreen() {
            */
 
           onPress: async () => {
-
-            /**
-             * Depois do logout,
-             * retornamos para o login.
-             */
-            await logout();
+            try {
+              await logout();
+            } catch (erro) {
+              Alert.alert(
+                "Sessão encerrada",
+                erro instanceof Error
+                  ? erro.message
+                  : "A sessão local foi encerrada, mas o servidor não confirmou a revogação.",
+              );
+            }
             router.replace("/(auth)/login");
 
           },
