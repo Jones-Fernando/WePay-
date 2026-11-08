@@ -8,13 +8,14 @@ from config import Config
 from database.connection import cursor_for, fetch_one, get_connection_context
 
 
-def _generate_token(usuario_id, token_type, expires_delta):
+def _generate_token(usuario_id, token_type, expires_delta, auth_version=0):
     now = datetime.now(timezone.utc)
     expires_at = now + expires_delta
     payload = {
         "sub": str(usuario_id),
         "type": token_type,
         "jti": str(uuid4()),
+        "auth_version": auth_version,
         "iat": now,
         "exp": expires_at,
     }
@@ -25,19 +26,21 @@ def _generate_token(usuario_id, token_type, expires_delta):
     )
 
 
-def generate_token(usuario_id):
+def generate_token(usuario_id, auth_version=0):
     return _generate_token(
         usuario_id,
         "access",
         timedelta(minutes=Config.JWT_ACCESS_TOKEN_EXPIRES_MINUTES),
+        auth_version,
     )
 
 
-def generate_refresh_token(usuario_id):
+def generate_refresh_token(usuario_id, auth_version=0):
     return _generate_token(
         usuario_id,
         "refresh",
         timedelta(days=Config.JWT_REFRESH_TOKEN_EXPIRES_DAYS),
+        auth_version,
     )
 
 
@@ -58,15 +61,33 @@ def decode_token(token, expected_type="access"):
     return payload
 
 
-def is_token_revoked(jti: str) -> bool:
-    if not jti:
+def is_access_token_valid(usuario_id: int, jti: str, auth_version: int) -> bool:
+    if not usuario_id or not jti:
         return False
     with get_connection_context() as conn:
         cursor = cursor_for(conn)
         try:
-            query = "SELECT id FROM revoked_tokens WHERE jti = ? AND expires_at > CURRENT_TIMESTAMP"
-            cursor.execute(query, (jti,))
-            return fetch_one(cursor) is not None
+            cursor.execute(
+                """
+                SELECT u.auth_version,
+                       EXISTS (
+                           SELECT 1
+                           FROM revoked_tokens r
+                           WHERE r.jti = ?
+                             AND r.expires_at > CURRENT_TIMESTAMP
+                       ) AS token_revoked
+                FROM usuarios u
+                WHERE u.id = ?
+                  AND u.excluido_em IS NULL
+                """,
+                (jti, usuario_id),
+            )
+            state = fetch_one(cursor)
+            return bool(
+                state
+                and int(state["auth_version"]) == auth_version
+                and not state["token_revoked"]
+            )
         finally:
             cursor.close()
 

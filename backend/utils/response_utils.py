@@ -14,13 +14,15 @@ def _json_safe(value):
 
 class ResponseUtils:
     @staticmethod
-    def sucesso(dados=None, mensagem=None, status=200):
+    def sucesso(dados=None, mensagem=None, status=200, paginacao=None):
         resposta = {"status": "sucesso"}
         if mensagem:
             resposta["mensagem"] = mensagem
             resposta["message"] = mensagem
         if dados is not None:
             resposta["data"] = _json_safe(dados)
+        if paginacao is not None:
+            resposta["paginacao"] = _json_safe(paginacao)
         return jsonify(resposta), status
 
     @staticmethod

@@ -1,9 +1,15 @@
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+import database.connection as database_connection
 from database.connection import (
-    _apply_email_confirmation_migration,
+    _apply_auth_version_migration,
+    _apply_account_anonymization_migration,
+    _apply_email_login_migration,
+    _apply_notification_preferences_migration,
+    _apply_group_expense_observation_migration,
     _apply_participantes_migration,
     _apply_saldos_migration,
 )
@@ -49,6 +55,62 @@ class FakeCursor:
 
     def fetchone(self) -> tuple[int]:
         return (self.counts.pop(0) if self.counts else 0,)
+
+
+def test_database_connections_use_a_shared_resetting_pool(monkeypatch):
+    class FakePool:
+        instances = []
+
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.connections = []
+            self.__class__.instances.append(self)
+
+        def get_connection(self):
+            connection = object()
+            self.connections.append(connection)
+            return connection
+
+    monkeypatch.setattr(database_connection, "_connection_pool", None)
+    monkeypatch.setattr(
+        database_connection,
+        "mysql_connector",
+        SimpleNamespace(
+            pooling=SimpleNamespace(MySQLConnectionPool=FakePool),
+            connect=lambda **kwargs: kwargs,
+        ),
+    )
+
+    first = database_connection._connect_mysql(database_connection.Config.DB_NAME)
+    second = database_connection._connect_mysql(database_connection.Config.DB_NAME)
+
+    assert first is not second
+    assert len(FakePool.instances) == 1
+    assert FakePool.instances[0].kwargs["pool_size"] == database_connection.Config.DB_POOL_SIZE
+    assert FakePool.instances[0].kwargs["pool_reset_session"] is True
+    assert len(FakePool.instances[0].connections) == 2
+
+
+def test_server_level_database_connection_remains_unpooled(monkeypatch):
+    connected = []
+    monkeypatch.setattr(
+        database_connection,
+        "mysql_connector",
+        SimpleNamespace(
+            pooling=SimpleNamespace(MySQLConnectionPool=object),
+            connect=lambda **kwargs: connected.append(kwargs) or "direct",
+        ),
+    )
+
+    assert database_connection._connect_mysql() == "direct"
+    assert connected == [
+        {
+            "host": database_connection.Config.DB_HOST,
+            "port": database_connection.Config.DB_PORT,
+            "user": database_connection.Config.DB_USER,
+            "password": database_connection.Config.DB_PASSWORD,
+        }
+    ]
 
 
 def _legacy_cursor(counts=None):
@@ -132,23 +194,146 @@ def _legacy_cursor(counts=None):
     )
 
 
-def test_email_migration_adds_confirmation_as_verified_for_existing_users():
+def test_email_login_migration_verifies_all_users_and_sets_verified_default():
     cursor = FakeCursor(columns={"usuarios": {"id": "bigint unsigned"}})
 
-    _apply_email_confirmation_migration(cursor)
+    _apply_email_login_migration(cursor)
 
     assert cursor.statements[1][0] == (
         "ALTER TABLE usuarios ADD COLUMN email_verificado "
         "TINYINT(1) NOT NULL DEFAULT 1"
     )
     assert cursor.statements[2][0] == (
+        "UPDATE usuarios SET email_verificado = 1 WHERE email_verificado = 0"
+    )
+
+
+def test_email_login_migration_updates_existing_column_to_open_login():
+    cursor = FakeCursor(
+        columns={
+            "usuarios": {
+                "id": "bigint unsigned",
+                "email_verificado": "tinyint(1)",
+            }
+        }
+    )
+
+    _apply_email_login_migration(cursor)
+
+    assert cursor.statements[1][0] == (
         "ALTER TABLE usuarios MODIFY COLUMN email_verificado "
+        "TINYINT(1) NOT NULL DEFAULT 1"
+    )
+    assert cursor.statements[2][0] == (
+        "UPDATE usuarios SET email_verificado = 1 WHERE email_verificado = 0"
+    )
+
+
+def test_auth_version_migration_adds_version_to_existing_users_table():
+    cursor = FakeCursor(columns={"usuarios": {"id": "bigint unsigned"}})
+
+    _apply_auth_version_migration(cursor)
+
+    assert cursor.statements[1][0] == (
+        "ALTER TABLE usuarios ADD COLUMN auth_version "
+        "INT UNSIGNED NOT NULL DEFAULT 0"
+    )
+
+
+def test_auth_version_migration_does_not_replace_existing_version():
+    cursor = FakeCursor(
+        columns={
+            "usuarios": {
+                "id": "bigint unsigned",
+                "auth_version": "int unsigned",
+            }
+        }
+    )
+
+    _apply_auth_version_migration(cursor)
+
+    assert len(cursor.statements) == 1
+
+
+def test_account_anonymization_migration_adds_deleted_timestamp():
+    cursor = FakeCursor(columns={"usuarios": {"id": "bigint unsigned"}})
+
+    _apply_account_anonymization_migration(cursor)
+
+    assert cursor.statements[1][0] == (
+        "ALTER TABLE usuarios ADD COLUMN excluido_em DATETIME NULL"
+    )
+
+
+def test_account_anonymization_migration_keeps_existing_deleted_timestamp():
+    cursor = FakeCursor(
+        columns={
+            "usuarios": {
+                "id": "bigint unsigned",
+                "excluido_em": "datetime",
+            }
+        }
+    )
+
+    _apply_account_anonymization_migration(cursor)
+
+    assert len(cursor.statements) == 1
+
+
+def test_notification_preferences_migration_adds_disabled_defaults():
+    cursor = FakeCursor(columns={"usuarios": {"id": "bigint unsigned"}})
+
+    _apply_notification_preferences_migration(cursor)
+
+    assert cursor.statements[1][0] == (
+        "ALTER TABLE usuarios ADD COLUMN notificacoes_ativas "
         "TINYINT(1) NOT NULL DEFAULT 0"
     )
-    migration_update = cursor.statements[3][0]
-    assert "UPDATE usuarios AS u" in migration_update
-    assert "email_verificado = 0" in migration_update
-    assert "email_verification_tokens" in migration_update
+    assert cursor.statements[2][0] == (
+        "ALTER TABLE usuarios ADD COLUMN sons_notificacoes_ativos "
+        "TINYINT(1) NOT NULL DEFAULT 1"
+    )
+
+
+def test_notification_preferences_migration_preserves_existing_columns():
+    cursor = FakeCursor(
+        columns={
+            "usuarios": {
+                "id": "bigint unsigned",
+                "notificacoes_ativas": "tinyint(1)",
+                "sons_notificacoes_ativos": "tinyint(1)",
+            }
+        }
+    )
+
+    _apply_notification_preferences_migration(cursor)
+
+    assert len(cursor.statements) == 1
+
+
+def test_group_expense_observation_migration_adds_optional_column():
+    cursor = FakeCursor(columns={"despesas": {"id": "bigint unsigned"}})
+
+    _apply_group_expense_observation_migration(cursor)
+
+    assert cursor.statements[-1][0] == (
+        "ALTER TABLE despesas ADD COLUMN observacao VARCHAR(500) NULL"
+    )
+
+
+def test_group_expense_observation_migration_preserves_existing_column():
+    cursor = FakeCursor(
+        columns={
+            "despesas": {
+                "id": "bigint unsigned",
+                "observacao": "varchar(500)",
+            }
+        }
+    )
+
+    _apply_group_expense_observation_migration(cursor)
+
+    assert len(cursor.statements) == 1
 
 
 def test_participantes_migration_maps_legacy_fields():

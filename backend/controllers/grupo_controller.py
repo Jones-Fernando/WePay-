@@ -4,6 +4,7 @@ from database.connection import get_connection_context, cursor_for
 from models.grupo_model import GrupoModel
 from models.participante_model import ParticipanteModel
 from utils.response_utils import ResponseUtils
+from utils.validators import parse_positive_int
 
 
 def _is_admin(grupo_id, usuario_id):
@@ -14,9 +15,17 @@ def _is_admin(grupo_id, usuario_id):
 class GrupoController:
     @staticmethod
     def criar(current_user_id):
-        data = request.get_json(silent=True) or {}
-        nome = (data.get("nome") or "").strip()
-        descricao = (data.get("descricao") or "").strip() or None
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
+        nome_value = data.get("nome")
+        descricao_value = data.get("descricao", "")
+        if not isinstance(nome_value, str):
+            return ResponseUtils.erro("Nome do grupo eh obrigatorio.")
+        if not isinstance(descricao_value, str):
+            return ResponseUtils.erro("Descricao deve ser um texto.")
+        nome = nome_value.strip()
+        descricao = descricao_value.strip() or None
         participantes = data.get("participantes", [])
 
         if not nome:
@@ -26,7 +35,13 @@ class GrupoController:
         if not isinstance(participantes, list):
             return ResponseUtils.erro("Participantes deve ser uma lista de IDs.")
 
-        ids = {int(item) for item in participantes if str(item).isdigit()}
+        try:
+            ids = {
+                parse_positive_int(item, "participante")
+                for item in participantes
+            }
+        except ValueError as exc:
+            return ResponseUtils.erro(str(exc))
         ids.discard(int(current_user_id))
 
         with get_connection_context() as conn:
@@ -35,7 +50,8 @@ class GrupoController:
                 if ids:
                     placeholders = ",".join(["?"] * len(ids))
                     cursor.execute(
-                        f"SELECT id FROM usuarios WHERE id IN ({placeholders})",
+                        f"SELECT id FROM usuarios WHERE id IN ({placeholders}) "
+                        "AND excluido_em IS NULL",
                         tuple(sorted(ids)),
                     )
                     encontrados = {int(row["id"]) for row in cursor.fetchall()}
@@ -77,11 +93,21 @@ class GrupoController:
         if not _is_admin(grupo_id, current_user_id):
             return ResponseUtils.erro("Apenas administradores podem editar o grupo.", status=403)
 
-        data = request.get_json(silent=True) or {}
-        nome = (data.get("nome") or "").strip()
-        descricao = (data.get("descricao") or "").strip() or None
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
+        nome_value = data.get("nome")
+        descricao_value = data.get("descricao", "")
+        if not isinstance(nome_value, str):
+            return ResponseUtils.erro("Nome do grupo eh obrigatorio.")
+        if not isinstance(descricao_value, str):
+            return ResponseUtils.erro("Descricao deve ser um texto.")
+        nome = nome_value.strip()
+        descricao = descricao_value.strip() or None
         if not nome:
             return ResponseUtils.erro("Nome do grupo eh obrigatorio.")
+        if len(nome) < 2:
+            return ResponseUtils.erro("Nome do grupo deve ter ao menos 2 caracteres.")
 
         grupo = GrupoModel.buscar_por_id(grupo_id)
         if not grupo:

@@ -3,16 +3,27 @@ from flask import request
 
 from models.despesa_pessoal_model import DespesaPessoalModel
 from utils.response_utils import ResponseUtils
-from utils.validators import parse_money, parse_iso_date
+from utils.validators import parse_money, parse_iso_date, parse_pagination
 
 
 class DespesaPessoalController:
     @staticmethod
     def criar(current_user_id):
-        data = request.get_json(silent=True) or {}
-        descricao = (data.get("descricao") or "").strip()
-        categoria = (data.get("categoria") or "").strip() or None
-        tipo = (data.get("tipo") or "despesa").strip().lower()
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
+        descricao_value = data.get("descricao")
+        categoria_value = data.get("categoria")
+        tipo_value = data.get("tipo", "despesa")
+        if not isinstance(descricao_value, str):
+            return ResponseUtils.erro("Descricao eh obrigatoria.")
+        if categoria_value is not None and not isinstance(categoria_value, str):
+            return ResponseUtils.erro("Categoria deve ser um texto.")
+        if not isinstance(tipo_value, str):
+            return ResponseUtils.erro("Tipo deve ser despesa ou receita.")
+        descricao = descricao_value.strip()
+        categoria = categoria_value.strip() or None if categoria_value else None
+        tipo = tipo_value.strip().lower()
         if tipo not in {"despesa", "receita"}:
             return ResponseUtils.erro("Tipo deve ser despesa ou receita.")
         if not descricao:
@@ -51,15 +62,23 @@ class DespesaPessoalController:
         try:
             data_inicio = parse_iso_date(data_inicio, "data_inicio")
             data_fim = parse_iso_date(data_fim, "data_fim")
+            limit, offset = parse_pagination(
+                request.args.get("limit"), request.args.get("offset")
+            )
         except ValueError as exc:
             return ResponseUtils.erro(str(exc))
         if tipo and tipo not in {"despesa", "receita"}:
             return ResponseUtils.erro("Tipo invalido.")
-        return ResponseUtils.sucesso(
-            dados=DespesaPessoalModel.listar_por_usuario(
-                current_user_id, categoria, tipo, data_inicio, data_fim
-            )
+        dados, paginacao = DespesaPessoalModel.listar_por_usuario(
+            current_user_id,
+            categoria,
+            tipo,
+            data_inicio,
+            data_fim,
+            limit,
+            offset,
         )
+        return ResponseUtils.sucesso(dados=dados, paginacao=paginacao)
 
     @staticmethod
     def detalhes(current_user_id, despesa_id):
@@ -78,10 +97,29 @@ class DespesaPessoalController:
         if int(item["usuario_id"]) != int(current_user_id):
             return ResponseUtils.erro("Voce nao pode editar essa transacao.", status=403)
 
-        data = request.get_json(silent=True) or {}
-        descricao = (data.get("descricao") or "").strip()
-        categoria = (data.get("categoria") if "categoria" in data else item.get("categoria")) or None
-        tipo = (data.get("tipo") if "tipo" in data else item.get("tipo", "despesa")) or "despesa"
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
+        descricao_value = data.get("descricao")
+        categoria_value = (
+            data.get("categoria")
+            if "categoria" in data
+            else item.get("categoria")
+        )
+        tipo_value = (
+            data.get("tipo")
+            if "tipo" in data
+            else item.get("tipo", "despesa")
+        )
+        if not isinstance(descricao_value, str):
+            return ResponseUtils.erro("Descricao eh obrigatoria.")
+        if categoria_value is not None and not isinstance(categoria_value, str):
+            return ResponseUtils.erro("Categoria deve ser um texto.")
+        if not isinstance(tipo_value, str):
+            return ResponseUtils.erro("Tipo invalido.")
+        descricao = descricao_value.strip()
+        categoria = categoria_value.strip() or None if categoria_value else None
+        tipo = tipo_value.strip().lower() or "despesa"
         if tipo not in {"despesa", "receita"}:
             return ResponseUtils.erro("Tipo invalido.")
         if not descricao:
@@ -122,11 +160,18 @@ class DespesaPessoalController:
         except ValueError:
             return ResponseUtils.erro("Ano ou mes invalido.")
 
-        inicio = date(ano, mes, 1)
-        if mes == 12:
-            fim = date(ano + 1, 1, 1) - timedelta(days=1)
-        else:
-            fim = date(ano, mes + 1, 1) - timedelta(days=1)
+        try:
+            inicio = date(ano, mes, 1)
+            if mes == 12:
+                fim = (
+                    date(ano + 1, 1, 1) - timedelta(days=1)
+                    if ano < date.max.year
+                    else date.max
+                )
+            else:
+                fim = date(ano, mes + 1, 1) - timedelta(days=1)
+        except ValueError:
+            return ResponseUtils.erro("Ano ou mes invalido.")
 
         resumo = DespesaPessoalModel.resumo_periodo(
             current_user_id,

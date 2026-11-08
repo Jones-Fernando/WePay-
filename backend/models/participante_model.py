@@ -53,15 +53,21 @@ class ParticipanteModel:
             cursor = cursor_for(conn)
             try:
                 query = """
-                    SELECT p.id, p.grupo_id, p.usuario_id, p.papel, p.ativo,
-                           p.criado_em, p.removido_em, u.nome, u.email
+                    SELECT p.id, p.grupo_id, p.usuario_id, p.papel,
+                           p.criado_em, p.removido_em,
+                           CASE WHEN u.excluido_em IS NULL THEN u.nome
+                                ELSE 'Usuário excluído' END AS nome,
+                           CASE WHEN u.excluido_em IS NULL THEN u.email
+                                ELSE NULL END AS email,
+                           CASE WHEN u.excluido_em IS NULL THEN p.ativo
+                                ELSE 0 END AS ativo
                     FROM participantes p
                     JOIN usuarios u ON p.usuario_id = u.id
                     WHERE p.grupo_id = ?
                 """
                 if not incluir_inativos:
                     query += " AND p.ativo = 1"
-                query += " ORDER BY p.ativo DESC, u.nome"
+                query += " ORDER BY ativo DESC, u.nome"
                 cursor.execute(query, (grupo_id,))
                 return fetch_all(cursor)
             finally:

@@ -10,24 +10,29 @@ class AuthService:
         if UsuarioModel.buscar_por_email(email_normalizado):
             return None, "Email ja cadastrado no sistema."
         senha_hash = hash_password(senha)
-        usuario_id = UsuarioModel.criar(nome.strip(), email_normalizado, senha_hash)
+        usuario_id = UsuarioModel.criar(
+            nome.strip(), email_normalizado, senha_hash, email_verificado=True
+        )
         return usuario_id, None
 
     @staticmethod
     def autenticar_usuario(email, senha):
         email_normalizado = email.strip().lower()
         usuario = UsuarioModel.buscar_por_email(email_normalizado)
-        if not usuario or not check_password(senha, usuario["senha"]):
+        if (
+            not usuario
+            or usuario.get("excluido_em") is not None
+            or not check_password(senha, usuario["senha"])
+        ):
             return None, "Credenciais invalidas."
-        if not usuario.get("email_verificado", 1):
-            return None, "Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada ou solicite um novo link."
-
-        token = generate_token(usuario["id"])
-        refresh_token = generate_refresh_token(usuario["id"])
+        auth_version = int(usuario.get("auth_version", 0))
+        token = generate_token(usuario["id"], auth_version)
+        refresh_token = generate_refresh_token(usuario["id"], auth_version)
         dados_usuario = {
             "id": usuario["id"],
             "nome": usuario["nome"],
             "email": usuario["email"],
+            "saldo_total": usuario["saldo_total"],
         }
         return {
             "token": token,

@@ -37,7 +37,7 @@ class GrupoModel:
                     """
                     SELECT g.id, g.nome, g.descricao, g.criado_por,
                            COALESCE(s.saldo, 0) AS saldo,
-                           COUNT(DISTINCT p2.usuario_id) AS participantes
+                           COUNT(DISTINCT u2.id) AS participantes
                     FROM grupos g
                     JOIN participantes me
                       ON me.grupo_id = g.id
@@ -49,6 +49,9 @@ class GrupoModel:
                     LEFT JOIN participantes p2
                       ON p2.grupo_id = g.id
                      AND p2.ativo = 1
+                    LEFT JOIN usuarios u2
+                      ON u2.id = p2.usuario_id
+                     AND u2.excluido_em IS NULL
                     GROUP BY g.id, g.nome, g.descricao, g.criado_por, s.saldo
                     ORDER BY g.nome
                     """,

@@ -22,6 +22,16 @@ TIPOS_PERMITIDOS = {
 TAMANHO_MAXIMO = 8 * 1024 * 1024
 
 
+def assinatura_imagem_valida(imagem: bytes, mime_type: str) -> bool:
+    if mime_type == "image/jpeg":
+        return imagem.startswith(b"\xff\xd8\xff")
+    if mime_type == "image/png":
+        return imagem.startswith(b"\x89PNG\r\n\x1a\n")
+    if mime_type == "image/webp":
+        return imagem.startswith(b"RIFF") and imagem[8:12] == b"WEBP"
+    return False
+
+
 @recibo_bp.route("/ler", methods=["POST"])
 @token_required
 def ler(current_user_id):
@@ -57,6 +67,11 @@ def ler(current_user_id):
         return ResponseUtils.erro(
             "A imagem deve ter no máximo 8 MB.",
             status=413,
+        )
+    if not assinatura_imagem_valida(imagem, arquivo.mimetype):
+        return ResponseUtils.erro(
+            "O conteúdo do arquivo não corresponde a uma imagem JPEG, PNG ou WEBP.",
+            status=400,
         )
 
     try:

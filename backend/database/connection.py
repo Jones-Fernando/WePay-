@@ -4,11 +4,13 @@ from contextlib import contextmanager
 from collections.abc import Generator, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
+from threading import Lock
 from typing import Any, Protocol
 
 from config import Config
 from database.legacy_finance_migrations import apply_legacy_finance_migrations
 from database.legacy_invite_migrations import apply_legacy_invitation_migration
+from database.legacy_recovery_migrations import apply_legacy_recovery_migration
 
 mysql_connector: Any = None
 try:
@@ -18,7 +20,9 @@ except ImportError:  # pragma: no cover - dependência obrigatória em runtime
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SCHEMA_FILE = BASE_DIR / "database" / "wepay.sql"
-SCHEMA_VERSION = "2026-11-02_email_confirmation"
+SCHEMA_VERSION = "2026-11-08_transactional_push_outbox"
+_connection_pool: Any = None
+_connection_pool_lock = Lock()
 
 
 class _MigrationCursor(Protocol):
@@ -35,6 +39,7 @@ def adapt_query(query: str) -> str:
 
 
 def _connect_mysql(database: str | None = None) -> Any:
+    global _connection_pool
     if mysql_connector is None:
         raise RuntimeError(
             "mysql-connector-python não está instalado. Execute: pip install -r requirements.txt"
@@ -48,6 +53,15 @@ def _connect_mysql(database: str | None = None) -> Any:
     }
     if database:
         params["database"] = database
+        with _connection_pool_lock:
+            if _connection_pool is None:
+                _connection_pool = mysql_connector.pooling.MySQLConnectionPool(
+                    pool_name="wepay_pool",
+                    pool_size=Config.DB_POOL_SIZE,
+                    pool_reset_session=True,
+                    **params,
+                )
+        return _connection_pool.get_connection()
     return mysql_connector.connect(**params)
 
 
@@ -163,7 +177,7 @@ def _foreign_keys_for_column(
     return [str(row[0]) for row in cursor.fetchall()]
 
 
-def _apply_email_confirmation_migration(cursor: _MigrationCursor) -> None:
+def _apply_email_login_migration(cursor: _MigrationCursor) -> None:
     cursor.execute("SHOW COLUMNS FROM `usuarios`")
     columns = {str(column[0]): column for column in cursor.fetchall()}
     if "email_verificado" not in columns:
@@ -171,28 +185,61 @@ def _apply_email_confirmation_migration(cursor: _MigrationCursor) -> None:
             "ALTER TABLE usuarios ADD COLUMN email_verificado "
             "TINYINT(1) NOT NULL DEFAULT 1"
         )
-        default = "1"
     else:
-        default = str(columns["email_verificado"][4])
-
-    if default != "0":
         cursor.execute(
             "ALTER TABLE usuarios MODIFY COLUMN email_verificado "
-            "TINYINT(1) NOT NULL DEFAULT 0"
+            "TINYINT(1) NOT NULL DEFAULT 1"
         )
 
     cursor.execute(
-        """
-        UPDATE usuarios AS u
-        SET u.email_verificado = 1
-        WHERE u.email_verificado = 0
-          AND NOT EXISTS (
-              SELECT 1
-              FROM email_verification_tokens AS t
-              WHERE t.usuario_id = u.id
-          )
-        """
+        "UPDATE usuarios SET email_verificado = 1 WHERE email_verificado = 0"
     )
+
+
+def _apply_auth_version_migration(cursor: _MigrationCursor) -> None:
+    cursor.execute("SHOW COLUMNS FROM `usuarios`")
+    columns = {str(column[0]) for column in cursor.fetchall()}
+    if "auth_version" not in columns:
+        cursor.execute(
+            "ALTER TABLE usuarios ADD COLUMN auth_version "
+            "INT UNSIGNED NOT NULL DEFAULT 0"
+        )
+
+
+def _apply_account_anonymization_migration(cursor: _MigrationCursor) -> None:
+    cursor.execute("SHOW COLUMNS FROM `usuarios`")
+    columns = {str(column[0]) for column in cursor.fetchall()}
+    if "excluido_em" not in columns:
+        cursor.execute(
+            "ALTER TABLE usuarios ADD COLUMN excluido_em DATETIME NULL"
+        )
+
+
+def _apply_notification_preferences_migration(
+    cursor: _MigrationCursor,
+) -> None:
+    cursor.execute("SHOW COLUMNS FROM `usuarios`")
+    columns = {str(column[0]) for column in cursor.fetchall()}
+    if "notificacoes_ativas" not in columns:
+        cursor.execute(
+            "ALTER TABLE usuarios ADD COLUMN notificacoes_ativas "
+            "TINYINT(1) NOT NULL DEFAULT 0"
+        )
+    if "sons_notificacoes_ativos" not in columns:
+        cursor.execute(
+            "ALTER TABLE usuarios ADD COLUMN sons_notificacoes_ativos "
+            "TINYINT(1) NOT NULL DEFAULT 1"
+        )
+
+
+def _apply_group_expense_observation_migration(
+    cursor: _MigrationCursor,
+) -> None:
+    columns = _column_metadata(cursor, "despesas")
+    if "observacao" not in columns:
+        cursor.execute(
+            "ALTER TABLE despesas ADD COLUMN observacao VARCHAR(500) NULL"
+        )
 
 
 def _apply_participantes_migration(cursor: _MigrationCursor) -> None:
@@ -537,7 +584,11 @@ def _apply_compatibility_migrations() -> None:
         if "telefone" not in colunas:
             cursor.execute("ALTER TABLE usuarios ADD COLUMN telefone VARCHAR(30) NULL")
 
-        _apply_email_confirmation_migration(cursor)
+        _apply_email_login_migration(cursor)
+        _apply_auth_version_migration(cursor)
+        _apply_account_anonymization_migration(cursor)
+        _apply_notification_preferences_migration(cursor)
+        _apply_group_expense_observation_migration(cursor)
 
         cursor.execute("SHOW COLUMNS FROM refresh_tokens")
         colunas_refresh = {coluna[0] for coluna in cursor.fetchall()}
@@ -562,6 +613,7 @@ def _apply_compatibility_migrations() -> None:
                 "ALTER TABLE refresh_tokens ADD COLUMN revogado_em DATETIME NULL"
             )
 
+        apply_legacy_recovery_migration(cursor)
         _apply_participantes_migration(cursor)
         _apply_saldos_migration(cursor)
         apply_legacy_finance_migrations(cursor)

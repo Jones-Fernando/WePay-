@@ -13,22 +13,22 @@ auth_bp.route("/register", methods=["POST"], endpoint="registrar_register")(
 auth_bp.route("/cadastro", methods=["POST"], endpoint="registrar_cadastro")(
     limiter.limit(Config.RATE_LIMIT_REGISTER)(AuthController.registrar)
 )
-auth_bp.route("/confirmar-email", methods=["POST"], endpoint="confirmar_email")(
-    limiter.limit(Config.RATE_LIMIT_EMAIL_CONFIRM)(AuthController.confirmar_email)
-)
-auth_bp.route(
-    "/reenviar-confirmacao", methods=["POST"], endpoint="reenviar_confirmacao_email"
-)(
-    limiter.limit(Config.RATE_LIMIT_EMAIL_RESEND)(
-        AuthController.reenviar_confirmacao_email
-    )
-)
 auth_bp.route("/login", methods=["POST"], endpoint="login")(
     limiter.limit(Config.RATE_LIMIT_LOGIN)(AuthController.login)
 )
 auth_bp.route("/refresh", methods=["POST"])(AuthController.refresh)
-auth_bp.route("/esqueci-senha", methods=["POST"])(AuthController.esqueci_senha)
-auth_bp.route("/redefinir-senha", methods=["POST"])(AuthController.redefinir_senha)
+auth_bp.route("/esqueci-senha", methods=["POST"])(
+    limiter.shared_limit(
+        Config.RATE_LIMIT_PASSWORD_RESET_REQUEST,
+        scope="password-reset-request",
+    )(AuthController.esqueci_senha)
+)
+auth_bp.route("/redefinir-senha", methods=["POST"])(
+    limiter.shared_limit(
+        Config.RATE_LIMIT_PASSWORD_RESET_CONFIRM,
+        scope="password-reset-confirm",
+    )(AuthController.redefinir_senha)
+)
 
 
 @auth_bp.route("/logout", methods=["POST"])

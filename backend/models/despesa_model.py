@@ -3,10 +3,23 @@ from database.connection import get_connection_context, cursor_for, fetch_one, f
 
 class DespesaModel:
     @staticmethod
-    def listar_por_grupo(grupo_id):
+    def listar_por_grupo(grupo_id, limit=50, offset=0):
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
+                cursor.execute(
+                    "SELECT COUNT(*) AS total, COALESCE(SUM(valor), 0) AS valor_total "
+                    "FROM despesas WHERE grupo_id = ?",
+                    (grupo_id,),
+                )
+                resumo = fetch_one(cursor)
+                cursor.execute(
+                    "SELECT categoria, SUM(valor) AS valor "
+                    "FROM despesas WHERE grupo_id = ? "
+                    "GROUP BY categoria ORDER BY categoria",
+                    (grupo_id,),
+                )
+                categorias = fetch_all(cursor)
                 cursor.execute(
                     """
                     SELECT d.id, d.grupo_id, d.pagador_id, d.descricao,
@@ -21,10 +34,20 @@ class DespesaModel:
                     JOIN usuarios u ON u.id = d.pagador_id
                     WHERE d.grupo_id = ?
                     ORDER BY d.data_despesa DESC, d.id DESC
+                    LIMIT ? OFFSET ?
                     """,
-                    (grupo_id,),
+                    (grupo_id, limit, offset),
                 )
-                return fetch_all(cursor)
+                dados = fetch_all(cursor)
+                total = int(resumo["total"])
+                return dados, {
+                    "limit": limit,
+                    "offset": offset,
+                    "total": total,
+                    "has_more": offset + len(dados) < total,
+                    "categorias": categorias,
+                    "valor_total": resumo["valor_total"],
+                }
             finally:
                 cursor.close()
 

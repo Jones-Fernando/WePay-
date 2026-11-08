@@ -26,3 +26,37 @@ def parse_iso_date(value, field_name="data"):
         return date.fromisoformat(str(value)).isoformat()
     except ValueError:
         raise ValueError(f"{field_name} deve estar no formato AAAA-MM-DD.")
+
+
+def parse_positive_int(value, field_name):
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} invalido.")
+    if isinstance(value, int):
+        result = value
+    elif isinstance(value, str) and value.isdecimal():
+        result = int(value)
+    else:
+        raise ValueError(f"{field_name} invalido.")
+    if result <= 0:
+        raise ValueError(f"{field_name} invalido.")
+    return result
+
+
+def parse_pagination(limit_value, offset_value, default_limit=50, max_limit=100):
+    limit = default_limit if limit_value in (None, "") else parse_positive_int(
+        limit_value, "limit"
+    )
+    if limit > max_limit:
+        raise ValueError(f"limit deve ser no maximo {max_limit}.")
+
+    if offset_value in (None, ""):
+        offset = 0
+    elif isinstance(offset_value, str) and offset_value.isdecimal():
+        offset = int(offset_value)
+    elif isinstance(offset_value, int) and not isinstance(offset_value, bool):
+        offset = offset_value
+    else:
+        raise ValueError("offset invalido.")
+    if offset < 0:
+        raise ValueError("offset invalido.")
+    return limit, offset

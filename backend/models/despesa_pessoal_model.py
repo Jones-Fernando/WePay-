@@ -26,32 +26,64 @@ class DespesaPessoalModel:
                 cursor.close()
 
     @staticmethod
-    def listar_por_usuario(usuario_id, categoria=None, tipo=None, data_inicio=None, data_fim=None):
+    def listar_por_usuario(
+        usuario_id,
+        categoria=None,
+        tipo=None,
+        data_inicio=None,
+        data_fim=None,
+        limit=50,
+        offset=0,
+    ):
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
-                query = (
-                    "SELECT id, usuario_id, descricao, valor, categoria, tipo, "
-                    "CAST(data_despesa AS CHAR) AS data_despesa, "
-                    "CAST(criado_em AS CHAR) AS criado_em "
-                    "FROM despesas_pessoais WHERE usuario_id = ?"
-                )
+                where = " WHERE usuario_id = ?"
                 params = [usuario_id]
                 if categoria:
-                    query += " AND categoria = ?"
+                    where += " AND categoria = ?"
                     params.append(categoria)
                 if tipo:
-                    query += " AND tipo = ?"
+                    where += " AND tipo = ?"
                     params.append(tipo)
                 if data_inicio:
-                    query += " AND data_despesa >= ?"
+                    where += " AND data_despesa >= ?"
                     params.append(data_inicio)
                 if data_fim:
-                    query += " AND data_despesa <= ?"
+                    where += " AND data_despesa <= ?"
                     params.append(data_fim)
-                query += " ORDER BY data_despesa DESC, id DESC"
-                cursor.execute(query, tuple(params))
-                return fetch_all(cursor)
+                cursor.execute(
+                    "SELECT COUNT(*) AS total FROM despesas_pessoais" + where,
+                    tuple(params),
+                )
+                total = int(fetch_one(cursor)["total"])
+                cursor.execute(
+                    "SELECT categoria, SUM(valor) AS valor "
+                    "FROM despesas_pessoais" + where +
+                    " GROUP BY categoria ORDER BY categoria",
+                    tuple(params),
+                )
+                categorias = fetch_all(cursor)
+                cursor.execute(
+                    "SELECT id, usuario_id, descricao, valor, categoria, tipo, "
+                    "CAST(data_despesa AS CHAR) AS data_despesa, "
+                    "CAST(criado_em AS CHAR) AS criado_em, "
+                    "CAST(atualizado_em AS CHAR) AS atualizado_em "
+                    "FROM despesas_pessoais" + where +
+                    " ORDER BY data_despesa DESC, id DESC LIMIT ? OFFSET ?",
+                    (*params, limit, offset),
+                )
+                dados = fetch_all(cursor)
+                return dados, {
+                    "limit": limit,
+                    "offset": offset,
+                    "total": total,
+                    "has_more": offset + len(dados) < total,
+                    "categorias": categorias,
+                    "valor_total": sum(
+                        (row["valor"] for row in categorias), start=0
+                    ),
+                }
             finally:
                 cursor.close()
 

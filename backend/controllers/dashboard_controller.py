@@ -54,7 +54,9 @@ class DashboardController:
             finally:
                 cursor.close()
 
-        lembretes = LembreteService.despesas_a_vencer(current_user_id, dias=3)
+        lembretes, _ = LembreteService.despesas_a_vencer(
+            current_user_id, dias=3, limit=3
+        )
         return ResponseUtils.sucesso(
             dados={
                 "receber": saldo["receber"],

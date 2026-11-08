@@ -2,78 +2,117 @@ from datetime import datetime, timedelta, timezone
 import secrets
 
 import jwt
-from flask import current_app, request
+from flask import request
 
 from config import Config
 
 from services.auth_service import AuthService
 from services.email_service import EmailService
-from services.email_confirmation_service import EmailConfirmationService
 from utils.response_utils import ResponseUtils
 from models.usuario_model import UsuarioModel
-from utils.password_utils import hash_password, check_password
-from utils.jwt_utils import decode_token, generate_token, generate_refresh_token, token_hash, revoke_token
-from database.connection import get_connection_context, cursor_for, fetch_one
+from utils.password_utils import hash_password, check_password, validar_senha
+from utils.jwt_utils import decode_token, generate_token, generate_refresh_token, token_hash
+from database.connection import (
+    cursor_for,
+    fetch_all,
+    fetch_one,
+    get_connection_context,
+)
+
+
+def _json_object():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _origem_web_permitida():
+    return request.headers.get("Origin") in Config.CORS_ORIGINS
+
+
+def _definir_cookie_refresh(resposta, token):
+    resposta.set_cookie(
+        Config.AUTH_REFRESH_COOKIE_NAME,
+        token,
+        max_age=Config.JWT_REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60,
+        httponly=True,
+        secure=Config.AUTH_REFRESH_COOKIE_SECURE,
+        samesite=Config.AUTH_REFRESH_COOKIE_SAMESITE,
+        path="/api/auth",
+    )
+    return resposta
+
+
+def _remover_cookie_refresh(resposta):
+    resposta.delete_cookie(
+        Config.AUTH_REFRESH_COOKIE_NAME,
+        httponly=True,
+        secure=Config.AUTH_REFRESH_COOKIE_SECURE,
+        samesite=Config.AUTH_REFRESH_COOKIE_SAMESITE,
+        path="/api/auth",
+    )
+    return resposta
+
+
+def _erro_refresh(mensagem, status, limpar_cookie=False):
+    resposta = ResponseUtils.erro(mensagem, status=status)[0]
+    if limpar_cookie:
+        _remover_cookie_refresh(resposta)
+    return resposta, status
 
 
 class AuthController:
     @staticmethod
     def registrar():
-        data = request.get_json(silent=True) or {}
-        nome = (data.get("nome") or "").strip()
-        email = (data.get("email") or "").strip().lower()
+        data = _json_object()
+        if data is None:
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
+        nome_value = data.get("nome")
+        email_value = data.get("email")
         senha = data.get("senha")
 
+        if not isinstance(nome_value, str) or not isinstance(email_value, str):
+            return ResponseUtils.erro("Nome, email e senha sao obrigatorios.")
+        nome = nome_value.strip()
+        email = email_value.strip().lower()
         if not nome or not email or not senha:
+            return ResponseUtils.erro("Nome, email e senha sao obrigatorios.")
+        if not isinstance(senha, str):
             return ResponseUtils.erro("Nome, email e senha sao obrigatorios.")
         if len(nome) < 2:
             return ResponseUtils.erro("Nome deve ter ao menos 2 caracteres.")
         if "@" not in email:
             return ResponseUtils.erro("Email invalido.")
-        if not isinstance(senha, str) or len(senha) < 6:
-            return ResponseUtils.erro("Senha deve ter ao menos 6 caracteres.")
+        erro_senha = validar_senha(senha)
+        if erro_senha:
+            return ResponseUtils.erro(erro_senha)
 
         usuario_id, erro = AuthService.registrar_usuario(nome, email, senha)
         if erro:
             return ResponseUtils.erro(erro, status=409)
-        convite = data.get("convite")
-        try:
-            token_confirmacao, email_enviado = EmailConfirmationService.emitir(
-                usuario_id, email, convite
-            )
-        except Exception:
-            current_app.logger.exception(
-                "Falha ao criar confirmação de e-mail para usuario_id=%s",
-                usuario_id,
-            )
-            return ResponseUtils.erro(
-                "Conta criada, mas nao foi possivel preparar o e-mail de confirmacao. Solicite um novo link.",
-                status=500,
-            )
-
-        mensagem = (
-            "Conta criada. Verifique sua caixa de entrada para confirmar o e-mail."
-            if email_enviado
-            else "Conta criada, mas nao foi possivel enviar o e-mail. Verifique a configuracao SMTP ou solicite um novo link."
+        return ResponseUtils.sucesso(
+            mensagem="Conta criada com sucesso. Você já pode entrar.",
+            status=201,
         )
-        dados = {"email_enviado": email_enviado}
-        if Config.ENVIRONMENT == "testing":
-            dados["token_teste"] = token_confirmacao
-        return ResponseUtils.sucesso(dados=dados, mensagem=mensagem, status=201)
 
     @staticmethod
     def login():
-        data = request.get_json(silent=True) or {}
-        email = (data.get("email") or "").strip().lower()
+        data = _json_object()
+        if data is None:
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
+        email_value = data.get("email")
         senha = data.get("senha")
 
+        if not isinstance(email_value, str) or not isinstance(senha, str):
+            return ResponseUtils.erro("Email e senha sao obrigatorios.")
+        email = email_value.strip().lower()
         if not email or not senha:
             return ResponseUtils.erro("Email e senha sao obrigatorios.")
 
         resultado, erro = AuthService.autenticar_usuario(email, senha)
         if erro:
-            status = 403 if erro.startswith("Confirme seu e-mail") else 401
-            return ResponseUtils.erro(erro, status=status)
+            return ResponseUtils.erro(erro, status=401)
 
         expires_at = datetime.now(timezone.utc) + timedelta(days=30)
         try:
@@ -96,94 +135,148 @@ class AuthController:
         except Exception:
             return ResponseUtils.erro("Nao foi possivel iniciar a sessao.", status=500)
 
+        if data.get("web") is True:
+            resposta = ResponseUtils.sucesso(
+                dados={"token": resultado["token"], "user": resultado["user"]}
+            )[0]
+            return _definir_cookie_refresh(resposta, resultado["refresh_token"])
         return ResponseUtils.sucesso(dados=resultado)
 
     @staticmethod
-    def confirmar_email():
-        data = request.get_json(silent=True) or {}
-        token = data.get("token")
-        if not isinstance(token, str) or not token:
-            return ResponseUtils.erro("Token de confirmacao invalido ou expirado.", status=400)
-        if not EmailConfirmationService.confirmar(token):
-            return ResponseUtils.erro(
-                "Token de confirmacao invalido, expirado ou ja utilizado.",
-                status=400,
-            )
-        return ResponseUtils.sucesso(mensagem="E-mail confirmado com sucesso.")
-
-    @staticmethod
-    def reenviar_confirmacao_email():
-        data = request.get_json(silent=True) or {}
-        email = data.get("email")
-        if isinstance(email, str) and email.strip():
-            try:
-                EmailConfirmationService.reenviar(email, data.get("convite"))
-            except Exception:
-                current_app.logger.exception(
-                    "Falha ao solicitar reenvio de confirmação de e-mail"
-                )
-        return ResponseUtils.sucesso(
-            mensagem=(
-                "Se houver uma conta pendente para este e-mail, enviaremos "
-                "um novo link de confirmação."
-            )
-        )
-
-    @staticmethod
     def logout(current_user_id, access_token):
-        try:
-            payload = decode_token(access_token, expected_type="access")
-            revoke_token(payload.get("jti"), "access", datetime.fromtimestamp(payload["exp"], tz=timezone.utc).replace(tzinfo=None))
-        except Exception:
-            pass
-
-        data = request.get_json(silent=True) or {}
+        payload = decode_token(access_token, expected_type="access")
+        data = _json_object()
+        if data is None:
+            if request.get_data(cache=True):
+                return ResponseUtils.erro("Corpo da requisicao invalido.")
+            data = {}
         refresh = data.get("refresh_token")
-        if refresh:
-            with get_connection_context() as conn:
-                cursor = cursor_for(conn)
-                try:
+        cookie_refresh = request.cookies.get(Config.AUTH_REFRESH_COOKIE_NAME)
+        if cookie_refresh and not _origem_web_permitida():
+            return ResponseUtils.erro("Origem da requisicao invalida.", status=403)
+        refresh = refresh or cookie_refresh
+        push_token = data.get("expo_push_token")
+        with get_connection_context() as conn:
+            cursor = cursor_for(conn)
+            try:
+                cursor.execute(
+                    "DELETE FROM revoked_tokens WHERE expires_at < CURRENT_TIMESTAMP"
+                )
+                cursor.execute(
+                    "INSERT INTO revoked_tokens (jti, token_type, expires_at) "
+                    "VALUES (?, 'access', ?)",
+                    (
+                        payload["jti"],
+                        datetime.fromtimestamp(
+                            payload["exp"], tz=timezone.utc
+                        ).replace(tzinfo=None),
+                    ),
+                )
+                if isinstance(refresh, str) and refresh:
                     cursor.execute(
-                        "UPDATE refresh_tokens SET revogado_em = CURRENT_TIMESTAMP WHERE usuario_id = ? AND token_hash = ?",
+                        "UPDATE refresh_tokens "
+                        "SET revogado_em = CURRENT_TIMESTAMP "
+                        "WHERE usuario_id = ? AND token_hash = ? "
+                        "AND revogado_em IS NULL",
                         (current_user_id, token_hash(refresh)),
                     )
-                    conn.commit()
-                finally:
-                    cursor.close()
+                if isinstance(push_token, str) and push_token:
+                    cursor.execute(
+                        "DELETE FROM expo_push_tokens "
+                        "WHERE usuario_id = ? AND token = ?",
+                        (current_user_id, push_token),
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                cursor.close()
 
-        return ResponseUtils.sucesso(mensagem="Logoff realizado com sucesso.")
+        resposta = ResponseUtils.sucesso(
+            mensagem="Logoff realizado com sucesso."
+        )[0]
+        if cookie_refresh:
+            return _remover_cookie_refresh(resposta)
+        return resposta, 200
 
     @staticmethod
     def refresh():
-        data = request.get_json(silent=True) or {}
+        data = request.get_json(silent=True)
+        if data is not None and not isinstance(data, dict):
+            return ResponseUtils.erro("Refresh token invalido.", status=401)
+        data = data or {}
         refresh_token = data.get("refresh_token")
-        if not refresh_token:
-            return ResponseUtils.erro("Refresh token nao fornecido.", status=401)
+        cookie_refresh = request.cookies.get(Config.AUTH_REFRESH_COOKIE_NAME)
+        usa_cookie = not refresh_token and bool(cookie_refresh)
+        if usa_cookie and not _origem_web_permitida():
+            resposta = ResponseUtils.erro(
+                "Origem da requisicao invalida.", status=403
+            )[0]
+            return _remover_cookie_refresh(resposta), 403
+        refresh_token = refresh_token or cookie_refresh
+        if not isinstance(refresh_token, str) or not refresh_token:
+            return _erro_refresh(
+                "Refresh token nao fornecido.", 401, limpar_cookie=usa_cookie
+            )
 
         try:
             payload = decode_token(refresh_token, expected_type="refresh")
             usuario_id = int(payload["sub"])
+            auth_version = int(payload.get("auth_version", 0))
+            if auth_version < 0:
+                raise ValueError("Versao de autenticacao invalida.")
         except (jwt.PyJWTError, KeyError, TypeError, ValueError):
-            return ResponseUtils.erro("Refresh token invalido.", status=401)
+            return _erro_refresh(
+                "Refresh token invalido.", 401, limpar_cookie=usa_cookie
+            )
 
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
                 cursor.execute(
+                    "SELECT auth_version FROM usuarios "
+                    "WHERE id = ? AND excluido_em IS NULL FOR UPDATE",
+                    (usuario_id,),
+                )
+                usuario = fetch_one(cursor)
+                if not usuario or int(usuario["auth_version"]) != auth_version:
+                    return _erro_refresh(
+                        "Refresh token expirado ou revogado.",
+                        401,
+                        limpar_cookie=usa_cookie,
+                    )
+
+                cursor.execute(
                     "SELECT id FROM refresh_tokens WHERE usuario_id = ? AND token_hash = ? "
-                    "AND revogado_em IS NULL AND expires_at > CURRENT_TIMESTAMP",
+                    "AND revogado_em IS NULL AND expires_at > CURRENT_TIMESTAMP "
+                    "FOR UPDATE",
                     (usuario_id, token_hash(refresh_token)),
                 )
                 sessao = fetch_one(cursor)
                 if not sessao:
-                    return ResponseUtils.erro("Refresh token expirado ou revogado.", status=401)
+                    return _erro_refresh(
+                        "Refresh token expirado ou revogado.",
+                        401,
+                        limpar_cookie=usa_cookie,
+                    )
 
                 cursor.execute(
-                    "UPDATE refresh_tokens SET revogado_em = CURRENT_TIMESTAMP WHERE id = ?",
+                    "UPDATE refresh_tokens SET revogado_em = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND revogado_em IS NULL",
                     (sessao["id"],),
                 )
-                novo_access = generate_token(usuario_id)
-                novo_refresh = generate_refresh_token(usuario_id)
+                if cursor.rowcount != 1:
+                    conn.rollback()
+                    return _erro_refresh(
+                        "Refresh token expirado ou revogado.",
+                        401,
+                        limpar_cookie=usa_cookie,
+                    )
+                novo_access = generate_token(usuario_id, int(usuario["auth_version"]))
+                novo_refresh = generate_refresh_token(
+                    usuario_id, int(usuario["auth_version"])
+                )
                 novo_payload = decode_token(novo_refresh, expected_type="refresh")
                 novo_exp = datetime.fromtimestamp(novo_payload["exp"], tz=timezone.utc).replace(tzinfo=None)
                 cursor.execute(
@@ -191,9 +284,13 @@ class AuthController:
                     (usuario_id, token_hash(novo_refresh), novo_exp),
                 )
                 conn.commit()
-                return ResponseUtils.sucesso(
-                    dados={"token": novo_access, "refresh_token": novo_refresh}
-                )
+                dados = {"token": novo_access}
+                if not usa_cookie:
+                    dados["refresh_token"] = novo_refresh
+                resposta = ResponseUtils.sucesso(dados=dados)[0]
+                if usa_cookie:
+                    return _definir_cookie_refresh(resposta, novo_refresh)
+                return resposta, 200
             finally:
                 cursor.close()
 
@@ -206,10 +303,19 @@ class AuthController:
 
     @staticmethod
     def atualizar(current_user_id):
-        data = request.get_json(silent=True) or {}
-        nome = (data.get("nome") or "").strip()
-        email = (data.get("email") or "").strip().lower()
-        telefone = (data.get("telefone") or "").strip() or None
+        data = _json_object()
+        if data is None:
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
+        nome_value = data.get("nome")
+        email_value = data.get("email")
+        telefone_value = data.get("telefone")
+        if not isinstance(nome_value, str) or not isinstance(email_value, str):
+            return ResponseUtils.erro("Nome e email sao obrigatorios.")
+        if telefone_value is not None and not isinstance(telefone_value, str):
+            return ResponseUtils.erro("Telefone deve ser um texto.")
+        nome = nome_value.strip()
+        email = email_value.strip().lower()
+        telefone = telefone_value.strip() or None if telefone_value else None
 
         if not nome or not email:
             return ResponseUtils.erro("Nome e email sao obrigatorios.")
@@ -225,30 +331,61 @@ class AuthController:
 
     @staticmethod
     def alterar_senha(current_user_id):
-        data = request.get_json(silent=True) or {}
+        data = _json_object()
+        if data is None:
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
         senha_atual = data.get("senha_atual")
         nova_senha = data.get("nova_senha")
 
-        if not senha_atual or not nova_senha:
+        if not isinstance(senha_atual, str) or not senha_atual:
             return ResponseUtils.erro("Senha atual e nova senha sao obrigatorias.")
-        if len(nova_senha) < 6:
-            return ResponseUtils.erro("A nova senha deve ter ao menos 6 caracteres.")
+        erro_senha = validar_senha(nova_senha)
+        if erro_senha:
+            return ResponseUtils.erro(erro_senha)
 
-        usuario_perfil = UsuarioModel.buscar_por_id(current_user_id)
-        if not usuario_perfil:
-            return ResponseUtils.erro("Usuario nao encontrado.", status=404)
+        with get_connection_context() as conn:
+            cursor = cursor_for(conn)
+            try:
+                cursor.execute(
+                    "SELECT senha FROM usuarios WHERE id = ? FOR UPDATE",
+                    (current_user_id,),
+                )
+                usuario = fetch_one(cursor)
+                if not usuario:
+                    return ResponseUtils.erro("Usuario nao encontrado.", status=404)
+                if not check_password(senha_atual, usuario["senha"]):
+                    return ResponseUtils.erro("Senha atual invalida.", status=401)
 
-        usuario = UsuarioModel.buscar_por_email(usuario_perfil["email"])
-        if not usuario or not check_password(senha_atual, usuario["senha"]):
-            return ResponseUtils.erro("Senha atual invalida.", status=401)
-
-        UsuarioModel.atualizar_senha(current_user_id, hash_password(nova_senha))
+                UsuarioModel.atualizar_senha(
+                    current_user_id, hash_password(nova_senha), conn
+                )
+                cursor.execute(
+                    "UPDATE refresh_tokens SET revogado_em = CURRENT_TIMESTAMP "
+                    "WHERE usuario_id = ? AND revogado_em IS NULL",
+                    (current_user_id,),
+                )
+                cursor.execute(
+                    "UPDATE recuperacao_tokens SET usado_em = CURRENT_TIMESTAMP "
+                    "WHERE usuario_id = ? AND usado_em IS NULL",
+                    (current_user_id,),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                cursor.close()
         return ResponseUtils.sucesso(mensagem="Senha atualizada com sucesso.")
 
     @staticmethod
     def esqueci_senha():
-        data = request.get_json(silent=True) or {}
-        email = (data.get("email") or "").strip().lower()
+        data = _json_object()
+        if data is None:
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
+        email_value = data.get("email")
+        if not isinstance(email_value, str):
+            return ResponseUtils.erro("Email invalido.")
+        email = email_value.strip().lower()
         if not email or "@" not in email:
             return ResponseUtils.erro("Email invalido.")
 
@@ -259,6 +396,14 @@ class AuthController:
             with get_connection_context() as conn:
                 cursor = cursor_for(conn)
                 try:
+                    cursor.execute(
+                        "SELECT id FROM usuarios WHERE id = ? FOR UPDATE",
+                        (usuario["id"],),
+                    )
+                    if not fetch_one(cursor):
+                        return ResponseUtils.sucesso(
+                            mensagem="Se o e-mail estiver cadastrado, voce recebera as instrucoes."
+                        )
                     cursor.execute(
                         "UPDATE recuperacao_tokens SET usado_em = CURRENT_TIMESTAMP "
                         "WHERE usuario_id = ? AND usado_em IS NULL",
@@ -282,13 +427,16 @@ class AuthController:
 
     @staticmethod
     def redefinir_senha():
-        data = request.get_json(silent=True) or {}
+        data = _json_object()
+        if data is None:
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
         token = data.get("token")
         nova_senha = data.get("nova_senha")
-        if not token or not isinstance(nova_senha, str):
+        if not isinstance(token, str) or not token:
             return ResponseUtils.erro("Token e nova senha sao obrigatorios.")
-        if len(nova_senha) < 6:
-            return ResponseUtils.erro("A nova senha deve ter ao menos 6 caracteres.")
+        erro_senha = validar_senha(nova_senha)
+        if erro_senha:
+            return ResponseUtils.erro(erro_senha)
 
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
@@ -302,16 +450,36 @@ class AuthController:
                 if not recuperacao:
                     return ResponseUtils.erro("Token invalido, expirado ou ja utilizado.", status=400)
 
+                cursor.execute(
+                    "SELECT id FROM usuarios WHERE id = ? FOR UPDATE",
+                    (recuperacao["usuario_id"],),
+                )
+                if not fetch_one(cursor):
+                    return ResponseUtils.erro(
+                        "Token invalido, expirado ou ja utilizado.", status=400
+                    )
+                cursor.execute(
+                    "UPDATE recuperacao_tokens SET usado_em = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND usado_em IS NULL "
+                    "AND expires_at > CURRENT_TIMESTAMP",
+                    (recuperacao["id"],),
+                )
+                if cursor.rowcount != 1:
+                    return ResponseUtils.erro(
+                        "Token invalido, expirado ou ja utilizado.", status=400
+                    )
+
                 UsuarioModel.atualizar_senha(
                     recuperacao["usuario_id"], hash_password(nova_senha), conn
                 )
                 cursor.execute(
-                    "UPDATE recuperacao_tokens SET usado_em = CURRENT_TIMESTAMP WHERE id = ?",
-                    (recuperacao["id"],),
-                )
-                cursor.execute(
                     "UPDATE refresh_tokens SET revogado_em = CURRENT_TIMESTAMP "
                     "WHERE usuario_id = ? AND revogado_em IS NULL",
+                    (recuperacao["usuario_id"],),
+                )
+                cursor.execute(
+                    "UPDATE recuperacao_tokens SET usado_em = CURRENT_TIMESTAMP "
+                    "WHERE usuario_id = ? AND usado_em IS NULL",
                     (recuperacao["usuario_id"],),
                 )
                 conn.commit()
@@ -324,5 +492,176 @@ class AuthController:
 
     @staticmethod
     def deletar(current_user_id):
-        UsuarioModel.deletar(current_user_id)
+        data = _json_object()
+        if data is None:
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
+        senha_atual = data.get("senha_atual")
+        if not isinstance(senha_atual, str) or not senha_atual:
+            return ResponseUtils.erro("A senha atual eh obrigatoria.")
+
+        with get_connection_context() as conn:
+            cursor = cursor_for(conn)
+            try:
+                cursor.execute(
+                    "SELECT email, senha FROM usuarios "
+                    "WHERE id = ? AND excluido_em IS NULL FOR UPDATE",
+                    (current_user_id,),
+                )
+                usuario = fetch_one(cursor)
+                if not usuario:
+                    return ResponseUtils.erro("Usuario nao encontrado.", status=404)
+                if not check_password(senha_atual, usuario["senha"]):
+                    return ResponseUtils.erro("Senha atual invalida.", status=401)
+
+                cursor.execute(
+                    "SELECT id FROM grupos WHERE criado_por = ? FOR UPDATE",
+                    (current_user_id,),
+                )
+                grupos = fetch_all(cursor)
+                for grupo in grupos:
+                    cursor.execute(
+                        """
+                        SELECT p.usuario_id
+                        FROM participantes p
+                        JOIN usuarios u ON u.id = p.usuario_id
+                        WHERE p.grupo_id = ?
+                          AND p.usuario_id <> ?
+                          AND p.ativo = 1
+                          AND u.excluido_em IS NULL
+                        ORDER BY CASE WHEN p.papel = 'admin' THEN 0 ELSE 1 END,
+                                 p.criado_em, p.id
+                        LIMIT 1
+                        FOR UPDATE
+                        """,
+                        (grupo["id"], current_user_id),
+                    )
+                    sucessor = fetch_one(cursor)
+                    if sucessor:
+                        cursor.execute(
+                            "UPDATE participantes SET papel = 'admin' "
+                            "WHERE grupo_id = ? AND usuario_id = ? AND ativo = 1",
+                            (grupo["id"], sucessor["usuario_id"]),
+                        )
+                        cursor.execute(
+                            "UPDATE grupos SET criado_por = ? "
+                            "WHERE id = ? AND criado_por = ?",
+                            (sucessor["usuario_id"], grupo["id"], current_user_id),
+                        )
+                        continue
+
+                    cursor.execute(
+                        """
+                        SELECT COUNT(DISTINCT p.usuario_id) AS total
+                        FROM participantes p
+                        JOIN usuarios u ON u.id = p.usuario_id
+                        WHERE p.grupo_id = ?
+                          AND p.usuario_id <> ?
+                          AND p.ativo = 1
+                          AND u.excluido_em IS NULL
+                        """,
+                        (grupo["id"], current_user_id),
+                    )
+                    outros_participantes = fetch_one(cursor)
+                    if not int(outros_participantes["total"]):
+                        cursor.execute(
+                            "DELETE FROM grupos WHERE id = ?",
+                            (grupo["id"],),
+                        )
+
+                cursor.execute(
+                    "DELETE FROM convites_grupo "
+                    "WHERE criado_por = ? OR LOWER(email) = LOWER(?)",
+                    (current_user_id, usuario["email"]),
+                )
+                for query in (
+                    "DELETE FROM despesas_pessoais WHERE usuario_id = ?",
+                    "DELETE FROM categorias WHERE usuario_id = ?",
+                    "DELETE FROM notificacoes WHERE usuario_id = ?",
+                    "DELETE FROM expo_push_tokens WHERE usuario_id = ?",
+                    "DELETE FROM refresh_tokens WHERE usuario_id = ?",
+                    "DELETE FROM recuperacao_tokens WHERE usuario_id = ?",
+                ):
+                    cursor.execute(
+                        query,
+                        (current_user_id,),
+                    )
+
+                cursor.execute(
+                    "SELECT grupo_id FROM participantes "
+                    "WHERE usuario_id = ? AND ativo = 1 AND papel = 'admin' "
+                    "FOR UPDATE",
+                    (current_user_id,),
+                )
+                grupos_admin = fetch_all(cursor)
+                grupos_proprios = {int(grupo["id"]) for grupo in grupos}
+                for grupo_admin in grupos_admin:
+                    grupo_id = int(grupo_admin["grupo_id"])
+                    if grupo_id in grupos_proprios:
+                        continue
+                    cursor.execute(
+                        """
+                        SELECT p.usuario_id
+                        FROM participantes p
+                        JOIN usuarios u ON u.id = p.usuario_id
+                        WHERE p.grupo_id = ?
+                          AND p.usuario_id <> ?
+                          AND p.ativo = 1
+                          AND p.papel = 'admin'
+                          AND u.excluido_em IS NULL
+                        LIMIT 1
+                        FOR UPDATE
+                        """,
+                        (grupo_id, current_user_id),
+                    )
+                    if fetch_one(cursor):
+                        continue
+                    cursor.execute(
+                        """
+                        SELECT p.usuario_id
+                        FROM participantes p
+                        JOIN usuarios u ON u.id = p.usuario_id
+                        WHERE p.grupo_id = ?
+                          AND p.usuario_id <> ?
+                          AND p.ativo = 1
+                          AND u.excluido_em IS NULL
+                        ORDER BY p.criado_em, p.id
+                        LIMIT 1
+                        FOR UPDATE
+                        """,
+                        (grupo_id, current_user_id),
+                    )
+                    sucessor = fetch_one(cursor)
+                    if sucessor:
+                        cursor.execute(
+                            "UPDATE participantes SET papel = 'admin' "
+                            "WHERE grupo_id = ? AND usuario_id = ? AND ativo = 1",
+                            (grupo_id, sucessor["usuario_id"]),
+                        )
+                    else:
+                        cursor.execute(
+                            "DELETE FROM grupos WHERE id = ?",
+                            (grupo_id,),
+                        )
+
+                cursor.execute(
+                    "UPDATE participantes SET papel = 'participante' "
+                    "WHERE usuario_id = ?",
+                    (current_user_id,),
+                )
+                email_anonimo = f"excluido+{current_user_id}@deleted.invalid"
+                if UsuarioModel.anonimizar(
+                    current_user_id,
+                    email_anonimo,
+                    hash_password(secrets.token_urlsafe(48)),
+                    conn,
+                ) != 1:
+                    conn.rollback()
+                    return ResponseUtils.erro("Usuario nao encontrado.", status=404)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                cursor.close()
+
         return ResponseUtils.sucesso(mensagem="Conta excluida com sucesso.")

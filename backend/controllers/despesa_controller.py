@@ -8,31 +8,77 @@ from models.participante_model import ParticipanteModel
 from models.despesa_model import DespesaModel
 from services.financeiro_service import FinanceiroService, money
 from utils.response_utils import ResponseUtils
-from utils.validators import parse_money, parse_iso_date
+from utils.validators import (
+    parse_money,
+    parse_iso_date,
+    parse_pagination,
+    parse_positive_int,
+)
 
 
 class DespesaController:
     @staticmethod
     def _dados_divisao(data):
+        tipo = data.get("divisao_tipo", "igual")
+        participantes = data.get("participantes", [])
+        percentuais = data.get("percentuais")
+        valores = data.get("valores")
+        if not isinstance(tipo, str) or tipo not in {
+            "igual",
+            "porcentagem",
+            "valores",
+        }:
+            raise ValueError("Tipo de divisao invalido.")
+        if not isinstance(participantes, list):
+            raise ValueError("Participantes deve ser uma lista de IDs.")
+        participantes = [
+            parse_positive_int(item, "participante")
+            for item in participantes
+        ]
+        if percentuais is not None and not isinstance(percentuais, dict):
+            raise ValueError("Informe os percentuais.")
+        if valores is not None and not isinstance(valores, dict):
+            raise ValueError("Informe os valores individuais.")
         return (
-            data.get("divisao_tipo", "igual"),
-            data.get("participantes", []),
-            data.get("percentuais"),
-            data.get("valores"),
+            tipo,
+            participantes,
+            percentuais,
+            valores,
         )
 
     @staticmethod
     def criar(current_user_id):
         data = request.get_json(silent=True) or {}
-        grupo_id = data.get("grupo_id")
-        descricao = (data.get("descricao") or "").strip()
-        categoria = (data.get("categoria") or "").strip() or None
-        pagador_id = int(data.get("pagador_id") or current_user_id)
+        if not isinstance(data, dict):
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
+        descricao_value = data.get("descricao")
+        categoria_value = data.get("categoria")
+        if not isinstance(descricao_value, str):
+            return ResponseUtils.erro("Descricao eh obrigatoria.")
+        if categoria_value is not None and not isinstance(categoria_value, str):
+            return ResponseUtils.erro("Categoria deve ser um texto.")
+        descricao = descricao_value.strip()
+        categoria = categoria_value.strip() or None if categoria_value else None
+        if categoria is not None and len(categoria) > 100:
+            return ResponseUtils.erro("Categoria nao pode exceder 100 caracteres.")
+        observacao = data.get("observacao")
 
-        if not grupo_id:
-            return ResponseUtils.erro("grupo_id eh obrigatorio.")
+        try:
+            grupo_id = parse_positive_int(data.get("grupo_id"), "grupo_id")
+            pagador_id = parse_positive_int(
+                data.get("pagador_id", current_user_id), "pagador_id"
+            )
+        except ValueError as exc:
+            return ResponseUtils.erro(str(exc))
         if not descricao:
             return ResponseUtils.erro("Descricao eh obrigatoria.")
+        if observacao is not None and not isinstance(observacao, str):
+            return ResponseUtils.erro("Observacao deve ser um texto.")
+        observacao = observacao.strip() if observacao else None
+        if observacao and len(observacao) > 500:
+            return ResponseUtils.erro(
+                "Observacao nao pode exceder 500 caracteres."
+            )
 
         try:
             valor = parse_money(data.get("valor"))
@@ -51,7 +97,12 @@ class DespesaController:
         if not ParticipanteModel.buscar(grupo_id, pagador_id):
             return ResponseUtils.erro("Pagador deve ser participante ativo do grupo.", status=400)
 
-        divisao_tipo, participantes, percentuais, valores = DespesaController._dados_divisao(data)
+        try:
+            divisao_tipo, participantes, percentuais, valores = (
+                DespesaController._dados_divisao(data)
+            )
+        except ValueError as exc:
+            return ResponseUtils.erro(str(exc))
         if not participantes:
             participantes = [
                 row["usuario_id"]
@@ -71,6 +122,7 @@ class DespesaController:
                 participantes=participantes,
                 percentuais=percentuais,
                 valores=valores,
+                observacao=observacao,
             )
         except ValueError as exc:
             return ResponseUtils.erro(str(exc))
@@ -85,12 +137,21 @@ class DespesaController:
 
     @staticmethod
     def listar(current_user_id, grupo_id):
+        try:
+            limit, offset = parse_pagination(
+                request.args.get("limit"), request.args.get("offset")
+            )
+        except ValueError as exc:
+            return ResponseUtils.erro(str(exc))
         grupo = GrupoModel.buscar_por_id(grupo_id)
         if not grupo:
             return ResponseUtils.erro("Grupo nao encontrado.", status=404)
         if not ParticipanteModel.buscar(grupo_id, current_user_id):
             return ResponseUtils.erro("Voce nao participa deste grupo.", status=403)
-        return ResponseUtils.sucesso(dados=DespesaModel.listar_por_grupo(grupo_id))
+        dados, paginacao = DespesaModel.listar_por_grupo(
+            grupo_id, limit, offset
+        )
+        return ResponseUtils.sucesso(dados=dados, paginacao=paginacao)
 
     @staticmethod
     def detalhes(current_user_id, despesa_id):
@@ -104,10 +165,29 @@ class DespesaController:
     @staticmethod
     def atualizar(current_user_id, despesa_id):
         data = request.get_json(silent=True) or {}
-        descricao = (data.get("descricao") or "").strip()
-        categoria = (data.get("categoria") or "").strip() or None
+        if not isinstance(data, dict):
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
+        descricao_value = data.get("descricao")
+        categoria_value = data.get("categoria")
+        if not isinstance(descricao_value, str):
+            return ResponseUtils.erro("Descricao eh obrigatoria.")
+        if categoria_value is not None and not isinstance(categoria_value, str):
+            return ResponseUtils.erro("Categoria deve ser um texto.")
+        descricao = descricao_value.strip()
+        categoria = categoria_value.strip() or None if categoria_value else None
+        if categoria is not None and len(categoria) > 100:
+            return ResponseUtils.erro("Categoria nao pode exceder 100 caracteres.")
+        observacao = data.get("observacao")
         if not descricao:
             return ResponseUtils.erro("Descricao eh obrigatoria.")
+        if "observacao" in data and observacao is not None:
+            if not isinstance(observacao, str):
+                return ResponseUtils.erro("Observacao deve ser um texto.")
+            observacao = observacao.strip() or None
+            if observacao is not None and len(observacao) > 500:
+                return ResponseUtils.erro(
+                    "Observacao nao pode exceder 500 caracteres."
+                )
 
         despesa = DespesaModel.buscar_por_id(despesa_id)
         if not despesa:
@@ -116,7 +196,12 @@ class DespesaController:
         if not ParticipanteModel.buscar(grupo_id, current_user_id):
             return ResponseUtils.erro("Voce nao participa deste grupo.", status=403)
 
-        pagador_id = int(data.get("pagador_id") or despesa["pagador_id"])
+        try:
+            pagador_id = parse_positive_int(
+                data.get("pagador_id", despesa["pagador_id"]), "pagador_id"
+            )
+        except ValueError as exc:
+            return ResponseUtils.erro(str(exc))
         if not ParticipanteModel.buscar(grupo_id, pagador_id):
             return ResponseUtils.erro("Pagador deve ser participante ativo do grupo.", status=400)
 
@@ -132,7 +217,12 @@ class DespesaController:
         except ValueError as exc:
             return ResponseUtils.erro(str(exc))
 
-        divisao_tipo, participantes, percentuais, valores = DespesaController._dados_divisao(data)
+        try:
+            divisao_tipo, participantes, percentuais, valores = (
+                DespesaController._dados_divisao(data)
+            )
+        except ValueError as exc:
+            return ResponseUtils.erro(str(exc))
         if not participantes:
             participantes = [row["usuario_id"] for row in despesa.get("divisoes", [])]
         if not participantes:
@@ -151,6 +241,7 @@ class DespesaController:
                 participantes=participantes,
                 percentuais=percentuais,
                 valores=valores,
+                **({"observacao": observacao} if "observacao" in data else {}),
             )
         except LookupError as exc:
             return ResponseUtils.erro(str(exc), status=404)

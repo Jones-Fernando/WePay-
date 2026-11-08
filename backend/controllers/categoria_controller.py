@@ -1,4 +1,6 @@
 from flask import request
+from mysql.connector import errorcode
+from mysql.connector.errors import IntegrityError
 
 from models.categoria_model import CategoriaModel
 from utils.response_utils import ResponseUtils
@@ -14,26 +16,44 @@ class CategoriaController:
 
     @staticmethod
     def criar(current_user_id):
-        data = request.get_json(silent=True) or {}
-        nome = (data.get("nome") or "").strip()
-        tipo = (data.get("tipo") or "ambos").strip().lower()
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
+        nome_value = data.get("nome")
+        tipo_value = data.get("tipo", "ambos")
+        if not isinstance(nome_value, str) or not isinstance(tipo_value, str):
+            return ResponseUtils.erro("Nome e tipo da categoria devem ser textos.")
+        nome = nome_value.strip()
+        tipo = tipo_value.strip().lower()
         if not nome:
             return ResponseUtils.erro("Nome da categoria eh obrigatorio.")
+        if len(nome) > 100:
+            return ResponseUtils.erro("Nome da categoria nao pode exceder 100 caracteres.")
         if tipo not in {"pessoal", "grupo", "ambos"}:
             return ResponseUtils.erro("Tipo de categoria invalido.")
         try:
             item_id = CategoriaModel.criar(current_user_id, nome, tipo)
-        except Exception:
+        except IntegrityError as erro:
+            if erro.errno != errorcode.ER_DUP_ENTRY:
+                raise
             return ResponseUtils.erro("Categoria ja existe ou nao pode ser criada.", status=409)
         return ResponseUtils.sucesso(dados={"id": item_id}, mensagem="Categoria criada.", status=201)
 
     @staticmethod
     def atualizar(current_user_id, categoria_id):
-        data = request.get_json(silent=True) or {}
-        nome = (data.get("nome") or "").strip()
-        tipo = (data.get("tipo") or "ambos").strip().lower()
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
+        nome_value = data.get("nome")
+        tipo_value = data.get("tipo", "ambos")
+        if not isinstance(nome_value, str) or not isinstance(tipo_value, str):
+            return ResponseUtils.erro("Nome e tipo da categoria devem ser textos.")
+        nome = nome_value.strip()
+        tipo = tipo_value.strip().lower()
         if not nome:
             return ResponseUtils.erro("Nome da categoria eh obrigatorio.")
+        if len(nome) > 100:
+            return ResponseUtils.erro("Nome da categoria nao pode exceder 100 caracteres.")
         if tipo not in {"pessoal", "grupo", "ambos"}:
             return ResponseUtils.erro("Tipo de categoria invalido.")
         if not CategoriaModel.atualizar(current_user_id, categoria_id, nome, tipo):

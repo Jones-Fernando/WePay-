@@ -4,7 +4,11 @@ CREATE TABLE IF NOT EXISTS usuarios (
     email VARCHAR(255) NOT NULL UNIQUE,
     telefone VARCHAR(30) NULL,
     senha VARCHAR(255) NOT NULL,
-    email_verificado TINYINT(1) NOT NULL DEFAULT 0,
+    email_verificado TINYINT(1) NOT NULL DEFAULT 1,
+    auth_version INT UNSIGNED NOT NULL DEFAULT 0,
+    notificacoes_ativas TINYINT(1) NOT NULL DEFAULT 0,
+    sons_notificacoes_ativos TINYINT(1) NOT NULL DEFAULT 1,
+    excluido_em DATETIME NULL,
     criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_usuarios_nome (nome)
@@ -43,6 +47,7 @@ CREATE TABLE IF NOT EXISTS despesas (
     pagador_id BIGINT UNSIGNED NOT NULL,
     descricao VARCHAR(255) NOT NULL,
     categoria VARCHAR(100) NULL,
+    observacao VARCHAR(500) NULL,
     valor DECIMAL(12,2) NOT NULL,
     data_despesa DATE NOT NULL,
     vencimento DATE NULL,
@@ -162,20 +167,6 @@ CREATE TABLE IF NOT EXISTS recuperacao_tokens (
     INDEX idx_recuperacao_expiracao (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS email_verification_tokens (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    usuario_id BIGINT UNSIGNED NOT NULL,
-    token_hash CHAR(64) NOT NULL UNIQUE,
-    expires_at DATETIME NOT NULL,
-    usado_em DATETIME NULL,
-    delivery_status ENUM('pending', 'sent', 'failed') NOT NULL DEFAULT 'pending',
-    delivery_error VARCHAR(255) NULL,
-    criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_email_verification_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
-    INDEX idx_email_verification_usuario (usuario_id),
-    INDEX idx_email_verification_expiracao (expires_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 CREATE TABLE IF NOT EXISTS convites_grupo (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     grupo_id BIGINT UNSIGNED NOT NULL,
@@ -204,4 +195,33 @@ CREATE TABLE IF NOT EXISTS notificacoes (
     CONSTRAINT fk_notificacao_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
     CONSTRAINT fk_notificacao_grupo FOREIGN KEY (grupo_id) REFERENCES grupos(id) ON DELETE SET NULL,
     INDEX idx_notificacao_usuario_lida (usuario_id, lida, criado_em)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS push_outbox (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    notificacao_id BIGINT UNSIGNED NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    tentativas SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    disponivel_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reservado_em DATETIME NULL,
+    enviado_em DATETIME NULL,
+    ultimo_erro VARCHAR(1000) NULL,
+    criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_push_outbox_notificacao UNIQUE (notificacao_id),
+    CONSTRAINT fk_push_outbox_notificacao
+        FOREIGN KEY (notificacao_id) REFERENCES notificacoes(id)
+        ON DELETE CASCADE,
+    INDEX idx_push_outbox_pendente (status, disponivel_em, id),
+    INDEX idx_push_outbox_reserva (status, reservado_em)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS expo_push_tokens (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    usuario_id BIGINT UNSIGNED NOT NULL,
+    token VARCHAR(255) NOT NULL UNIQUE,
+    plataforma ENUM('ios', 'android') NOT NULL,
+    criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_expo_push_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+    INDEX idx_expo_push_usuario (usuario_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

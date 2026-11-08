@@ -3,7 +3,7 @@ from functools import wraps
 import jwt
 from flask import request
 
-from utils.jwt_utils import decode_token, is_token_revoked
+from utils.jwt_utils import decode_token, is_access_token_valid
 from utils.response_utils import ResponseUtils
 
 
@@ -22,9 +22,8 @@ def token_required(f):
             payload = decode_token(token, expected_type="access")
             current_user_id = int(payload.get("sub"))
             jti = payload.get("jti")
-            if not current_user_id:
-                raise ValueError("Sub ausente")
-            if is_token_revoked(jti):
+            auth_version = int(payload.get("auth_version", 0))
+            if not is_access_token_valid(current_user_id, jti, auth_version):
                 return ResponseUtils.erro("Token revogado.", status=401)
         except (jwt.PyJWTError, ValueError, TypeError):
             return ResponseUtils.erro("Token invalido.", status=401)

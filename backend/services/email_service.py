@@ -48,39 +48,6 @@ class EmailService:
             return False
 
     @staticmethod
-    def enviar_confirmacao_email(
-        email_destino: str, token: str, convite: str | None = None
-    ) -> bool:
-        params = {"token": token}
-        if isinstance(convite, str) and convite and len(convite) <= 1024:
-            params["convite"] = convite
-        link = EmailService._frontend_link("verificar-email", params)
-        link_html = escape(link, quote=True)
-        texto = (
-            "Olá!\n\n"
-            "Confirme seu e-mail para ativar sua conta WePay:\n"
-            f"{link}\n\n"
-            "Este link expira em 24 horas e só pode ser usado uma vez.\n\n"
-            "Se você não criou uma conta no WePay, ignore esta mensagem.\n\n"
-            "Equipe WePay"
-        )
-        html = f"""
-        <html><body style='font-family:Arial,sans-serif;background:#F5FBF7;padding:20px'>
-          <div style='max-width:480px;margin:auto;background:#FFFFFF;border-radius:16px;padding:28px'>
-            <h2 style='color:#0B3B33'>Confirme seu e-mail</h2>
-            <p>Confirme seu endereço para ativar sua conta WePay.</p>
-            <p><a href='{link_html}' style='display:inline-block;background:#00C896;color:#0B3B33;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:bold'>Confirmar e-mail</a></p>
-            <p>Se o botão não funcionar, copie e cole este endereço no navegador:</p>
-            <p><a href='{link_html}'>{link_html}</a></p>
-            <p style='color:#6B8F86;font-size:13px'>O link expira em 24 horas e só pode ser usado uma vez.</p>
-          </div>
-        </body></html>
-        """
-        return EmailService._enviar_email(
-            email_destino, "WePay - Confirme seu e-mail", texto, html
-        )
-
-    @staticmethod
     def enviar_recuperacao_senha(email_destino: str, token: str) -> bool:
         link = EmailService._frontend_link("redefinir-senha", {"token": token})
         link_html = escape(link, quote=True)

@@ -3,6 +3,23 @@ import hmac
 
 import bcrypt
 
+MIN_PASSWORD_LENGTH = 12
+MAX_PASSWORD_BYTES = 72
+
+
+def validar_senha(password: object) -> str | None:
+    if not isinstance(password, str):
+        return "Senha deve ser texto."
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return f"Senha deve ter ao menos {MIN_PASSWORD_LENGTH} caracteres."
+    try:
+        tamanho_bytes = len(password.encode("utf-8"))
+    except UnicodeEncodeError:
+        return "Senha contem caracteres invalidos."
+    if tamanho_bytes > MAX_PASSWORD_BYTES:
+        return f"Senha deve ter no maximo {MAX_PASSWORD_BYTES} bytes."
+    return None
+
 
 def hash_password(password: str) -> str:
     if password is None:

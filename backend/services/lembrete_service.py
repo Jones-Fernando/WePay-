@@ -6,7 +6,7 @@ from services.financeiro_service import money
 
 class LembreteService:
     @staticmethod
-    def despesas_a_vencer(usuario_id, dias=3):
+    def despesas_a_vencer(usuario_id, dias=3, limit=50, offset=0):
         dias = max(0, min(int(dias), 365))
         hoje = date.today()
         fim = hoje + timedelta(days=dias)
@@ -14,6 +14,29 @@ class LembreteService:
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
+                query = """
+                    FROM despesas d
+                    JOIN grupos g ON g.id = d.grupo_id
+                    JOIN participantes p ON p.grupo_id = d.grupo_id
+                                            AND p.usuario_id = ?
+                                            AND p.ativo = 1
+                    LEFT JOIN saldos s ON s.grupo_id = d.grupo_id
+                                      AND s.usuario_id = ?
+                    WHERE d.vencimento IS NOT NULL
+                      AND d.vencimento BETWEEN ? AND ?
+                      AND COALESCE(s.saldo, 0) <> 0
+                """
+                params = (
+                    usuario_id,
+                    usuario_id,
+                    hoje.isoformat(),
+                    fim.isoformat(),
+                )
+                cursor.execute(
+                    "SELECT COUNT(DISTINCT d.id) AS total " + query,
+                    params,
+                )
+                total = int(cursor.fetchone()["total"])
                 cursor.execute(
                     """
                     SELECT DISTINCT
@@ -25,19 +48,13 @@ class LembreteService:
                         g.nome AS grupo_nome,
                         COALESCE(s.saldo, 0) AS saldo_no_grupo,
                         CASE WHEN d.pagador_id = ? THEN 1 ELSE 0 END AS sou_pagador
-                    FROM despesas d
-                    JOIN grupos g ON g.id = d.grupo_id
-                    JOIN participantes p ON p.grupo_id = d.grupo_id
-                                            AND p.usuario_id = ?
-                                            AND p.ativo = 1
-                    LEFT JOIN saldos s ON s.grupo_id = d.grupo_id
-                                      AND s.usuario_id = ?
-                    WHERE d.vencimento IS NOT NULL
-                      AND d.vencimento BETWEEN ? AND ?
-                      AND COALESCE(s.saldo, 0) <> 0
+                    """
+                    + query
+                    + """
                     ORDER BY d.vencimento ASC, d.id ASC
+                    LIMIT ? OFFSET ?
                     """,
-                    (usuario_id, usuario_id, usuario_id, hoje.isoformat(), fim.isoformat()),
+                    (usuario_id, *params, limit, offset),
                 )
                 rows = fetch_all(cursor)
             finally:
@@ -54,4 +71,9 @@ class LembreteService:
             ).days
             row["status"] = "a_receber" if row["saldo_no_grupo"] > 0 else "a_pagar"
             resultado.append(row)
-        return resultado
+        return resultado, {
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "has_more": offset + len(resultado) < total,
+        }
