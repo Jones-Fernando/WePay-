@@ -87,9 +87,30 @@ def test_personal_expense_endpoints_reject_non_object_json(client):
         json=[],
         headers=headers,
     )
+    invalid_amounts = [
+        client.post(
+            "/api/despesas-pessoais",
+            json={
+                "descricao": "Valor fora do intervalo",
+                "valor": "10000000000.00",
+                "tipo": "despesa",
+            },
+            headers=headers,
+        ),
+        client.post(
+            "/api/despesas-pessoais",
+            json={
+                "descricao": "Precisao fora do contexto",
+                "valor": "1e1000",
+                "tipo": "despesa",
+            },
+            headers=headers,
+        ),
+    ]
 
     assert invalid_create.status_code == 400
     assert invalid_update.status_code == 400
+    assert [response.status_code for response in invalid_amounts] == [400, 400]
 
 
 def test_auth_required(client):
@@ -1001,6 +1022,9 @@ def test_group_expense_api_validates_crud_and_access(client):
     ).status_code == 404
     assert client.delete(
         f"/api/despesas/{despesa_id}", headers=member_headers
+    ).status_code == 403
+    assert client.delete(
+        f"/api/despesas/{despesa_id}", headers=owner_headers
     ).status_code == 200
     assert client.delete(
         f"/api/despesas/{despesa_id}", headers=owner_headers
@@ -1081,6 +1105,69 @@ def test_expense_lists_support_bounded_pagination(client):
     ]
 
 
+def test_group_and_participant_lists_support_bounded_pagination(client):
+    emails = [
+        "group-page-owner@example.com",
+        "group-page-member-one@example.com",
+        "group-page-member-two@example.com",
+    ]
+    user_ids = []
+    for index, email in enumerate(emails):
+        cadastrar_usuario(client, f"Pagination User {index}", email)
+        login = client.post(
+            "/api/auth/login",
+            json={"email": email, "senha": "SenhaSegura123!"},
+        ).get_json()["data"]
+        user_ids.append(login["user"]["id"])
+        if index == 0:
+            owner_headers = {
+                "Authorization": "Bearer " + login["token"]
+            }
+
+    for index in range(3):
+        response = client.post(
+            "/api/grupos",
+            json={
+                "nome": f"Grupo paginação {index}",
+                "participantes": user_ids[1:] if index == 0 else [],
+            },
+            headers=owner_headers,
+        )
+        assert response.status_code == 201
+        if index == 0:
+            grupo_id = response.get_json()["data"]["id"]
+
+    grupos = client.get(
+        "/api/grupos?limit=2&offset=1", headers=owner_headers
+    ).get_json()
+    assert len(grupos["data"]) == 2
+    assert grupos["paginacao"] == {
+        "limit": 2,
+        "offset": 1,
+        "total": 3,
+        "has_more": False,
+    }
+
+    participantes = client.get(
+        f"/api/participantes/grupo/{grupo_id}?limit=2&offset=1",
+        headers=owner_headers,
+    ).get_json()
+    assert len(participantes["data"]) == 2
+    assert participantes["paginacao"] == {
+        "limit": 2,
+        "offset": 1,
+        "total": 3,
+        "has_more": False,
+    }
+    assert client.get(
+        "/api/grupos?limit=101", headers=owner_headers
+    ).status_code == 400
+    assert client.get(
+        f"/api/participantes/grupo/{grupo_id}?offset=-1",
+        headers=owner_headers,
+    ).status_code == 400
+
+
 def test_group_expense_observation_is_saved_and_returned_in_details(client):
     email = "expense-observation@example.com"
     cadastrar_usuario(client, "Observation", email)
@@ -1140,6 +1227,98 @@ def test_group_expense_observation_is_saved_and_returned_in_details(client):
     assert limpa.status_code == 200
     detalhes = client.get(f"/api/despesas/{despesa_id}", headers=headers)
     assert detalhes.get_json()["data"]["observacao"] is None
+
+
+def test_group_expense_changes_require_creator_or_active_admin(client):
+    emails = (
+        "expense-auth-admin@example.com",
+        "expense-auth-creator@example.com",
+        "expense-auth-member@example.com",
+    )
+    headers_by_user = []
+    user_ids = []
+    for index, email in enumerate(emails):
+        cadastrar_usuario(client, f"Expense Auth {index}", email)
+        login = client.post(
+            "/api/auth/login",
+            json={"email": email, "senha": "SenhaSegura123!"},
+        ).get_json()["data"]
+        headers_by_user.append(
+            {"Authorization": f"Bearer {login['token']}"}
+        )
+        user_ids.append(login["user"]["id"])
+
+    admin_headers, creator_headers, member_headers = headers_by_user
+    resposta_grupo = client.post(
+        "/api/grupos",
+        json={"nome": "Grupo autorização", "participantes": user_ids[1:]},
+        headers=admin_headers,
+    )
+    assert resposta_grupo.status_code == 201, resposta_grupo.get_json()
+    grupo = resposta_grupo.get_json()["data"]["id"]
+    criada = client.post(
+        "/api/despesas",
+        json={
+            "grupo_id": grupo,
+            "pagador_id": user_ids[1],
+            "descricao": "Despesa original",
+            "valor": 30,
+            "participantes": user_ids[1:],
+        },
+        headers=creator_headers,
+    )
+    assert criada.status_code == 201
+    despesa_id = criada.get_json()["data"]["id"]
+    detalhes = client.get(
+        f"/api/despesas/{despesa_id}", headers=admin_headers
+    ).get_json()["data"]
+    assert detalhes["criado_por"] == user_ids[1]
+
+    update_payload = {"descricao": "Despesa alterada", "valor": 40}
+    assert client.put(
+        f"/api/despesas/{despesa_id}",
+        json=update_payload,
+        headers=member_headers,
+    ).status_code == 403
+    assert client.delete(
+        f"/api/despesas/{despesa_id}", headers=member_headers
+    ).status_code == 403
+    assert client.get(
+        f"/api/despesas/{despesa_id}", headers=admin_headers
+    ).get_json()["data"]["descricao"] == "Despesa original"
+    assert client.put(
+        f"/api/despesas/{despesa_id}",
+        json=update_payload,
+        headers=creator_headers,
+    ).status_code == 200
+
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "UPDATE despesas SET criado_por = NULL WHERE id = ?",
+                (despesa_id,),
+            )
+            connection.commit()
+        finally:
+            cursor.close()
+
+    assert client.put(
+        f"/api/despesas/{despesa_id}",
+        json={"descricao": "Alteração não autorizada", "valor": 50},
+        headers=creator_headers,
+    ).status_code == 403
+    assert client.put(
+        f"/api/despesas/{despesa_id}",
+        json={"descricao": "Despesa legada editada", "valor": 50},
+        headers=admin_headers,
+    ).status_code == 200
+    assert client.delete(
+        f"/api/despesas/{despesa_id}", headers=member_headers
+    ).status_code == 403
+    assert client.delete(
+        f"/api/despesas/{despesa_id}", headers=admin_headers
+    ).status_code == 200
 
 
 def test_global_user_directory_is_not_exposed(client):
@@ -1861,6 +2040,76 @@ def test_receipt_reader_normalizes_ai_response(client, monkeypatch):
         "moeda": "BRL",
         "categoria_sugerida": "Outros",
     }
+
+
+def test_receipt_rate_limit_is_per_authenticated_user(client, monkeypatch):
+    tokens = []
+    for nome, email in (
+        ("Receipt User One", "receipt-limit-one@example.com"),
+        ("Receipt User Two", "receipt-limit-two@example.com"),
+    ):
+        cadastrar_usuario(client, nome, email)
+        login = client.post(
+            "/api/auth/login",
+            json={"email": email, "senha": "SenhaSegura123!"},
+        )
+        tokens.append(login.get_json()["data"]["token"])
+
+    monkeypatch.setattr(
+        "routes.recibo_routes.ler_recibo",
+        lambda *_: {"estabelecimento": "Teste"},
+    )
+
+    def enviar(token):
+        return client.post(
+            "/api/recibos/ler",
+            data={
+                "imagem": (
+                    BytesIO(b"\xff\xd8\xffconteudo-de-teste"),
+                    "recibo.jpg",
+                    "image/jpeg",
+                )
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            content_type="multipart/form-data",
+        )
+
+    assert [enviar(tokens[0]).status_code for _ in range(5)] == [200] * 5
+    assert enviar(tokens[0]).status_code == 429
+    assert enviar(tokens[1]).status_code == 200
+
+
+def test_refresh_rate_limit_is_per_account(client):
+    tokens = []
+    for nome, email in (
+        ("Refresh User One", "refresh-limit-one@example.com"),
+        ("Refresh User Two", "refresh-limit-two@example.com"),
+    ):
+        cadastrar_usuario(client, nome, email)
+        login = client.post(
+            "/api/auth/login",
+            json={"email": email, "senha": "SenhaSegura123!"},
+        )
+        tokens.append(login.get_json()["data"]["refresh_token"])
+
+    refresh = tokens[0]
+    for _ in range(10):
+        resposta = client.post(
+            "/api/auth/refresh",
+            json={"refresh_token": refresh},
+        )
+        assert resposta.status_code == 200
+        refresh = resposta.get_json()["data"]["refresh_token"]
+
+    assert client.post(
+        "/api/auth/refresh",
+        json={"refresh_token": refresh},
+    ).status_code == 429
+
+    assert client.post(
+        "/api/auth/refresh",
+        json={"refresh_token": tokens[1]},
+    ).status_code == 200
 
 
 def test_receipt_reader_rejects_mime_content_mismatch(client, monkeypatch):

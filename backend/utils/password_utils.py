@@ -7,6 +7,14 @@ MIN_PASSWORD_LENGTH = 12
 MAX_PASSWORD_BYTES = 72
 
 
+def is_legacy_password_hash(hashed_password):
+    return (
+        isinstance(hashed_password, str)
+        and len(hashed_password) == 64
+        and all(character in "0123456789abcdef" for character in hashed_password)
+    )
+
+
 def validar_senha(password: object) -> str | None:
     if not isinstance(password, str):
         return "Senha deve ser texto."

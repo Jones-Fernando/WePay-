@@ -1,0 +1,27 @@
+[Unit]
+Description=WePay push notification outbox worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wepay
+Group=wepay
+WorkingDirectory=/opt/wepay/backend
+Environment=APP_ENV=production
+Environment=PUSH_WORKER_HEARTBEAT_FILE=/run/wepay/push-worker.heartbeat
+RuntimeDirectory=wepay
+RuntimeDirectoryMode=0750
+ExecStart=/opt/wepay/backend/.venv/bin/python -m services.push_outbox_worker
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/wepay
+
+[Install]
+WantedBy=multi-user.target

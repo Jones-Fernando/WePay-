@@ -307,10 +307,40 @@ def test_push_rejeita_ticket_com_falha_do_expo(monkeypatch):
         "services.notificacao_service.urlopen",
         lambda *_args, **_kwargs: RespostaComTicketFalho(),
     )
-    with pytest.raises(RuntimeError, match="falha em um ou mais dispositivos"):
-        NotificacaoService._enviar_lote_push(
-            [{"to": "ExpoPushToken[device]", "title": "Teste"}]
-        )
+    tickets = NotificacaoService._enviar_lote_push(
+        [{"to": "ExpoPushToken[device]", "title": "Teste"}]
+    )
+    assert tickets[0]["message"] == "DeviceNotRegistered"
+
+
+def test_push_consulta_recibos_com_endpoint_do_expo(monkeypatch):
+    class Resposta:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"data":{"ticket-1":{"status":"ok"}}}'
+
+    capturado = {}
+
+    def fake_urlopen(request, timeout):
+        capturado["url"] = request.full_url
+        capturado["payload"] = json.loads(request.data)
+        capturado["timeout"] = timeout
+        return Resposta()
+
+    monkeypatch.setattr("services.notificacao_service.urlopen", fake_urlopen)
+    recibos = NotificacaoService._consultar_recibos(["ticket-1"])
+
+    assert capturado == {
+        "url": "https://exp.host/--/api/v2/push/getReceipts",
+        "payload": {"ids": ["ticket-1"]},
+        "timeout": 5,
+    }
+    assert recibos == {"ticket-1": {"status": "ok"}}
 
 
 def test_notificacoes_sao_listadas_e_marcadas_com_escopo_do_usuario(client):
@@ -370,11 +400,69 @@ def test_notificacoes_sao_listadas_e_marcadas_com_escopo_do_usuario(client):
     ).get_json()["data"] == []
 
 
+def test_notificacoes_suportam_paginacao_e_filtro_nao_lidas(client):
+    dados, headers = criar_usuario_autenticado(
+        client, "push-pagination@example.com"
+    )
+    usuario_id = dados["user"]["id"]
+    for indice in range(3):
+        NotificacaoModel.criar(
+            usuario_id,
+            None,
+            "teste",
+            f"Notificação {indice}",
+            "Mensagem de teste",
+        )
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "UPDATE notificacoes SET lida = 1 "
+                "WHERE usuario_id = ? AND titulo = ?",
+                (usuario_id, "Notificação 0"),
+            )
+            connection.commit()
+        finally:
+            cursor.close()
+
+    primeira = client.get(
+        "/api/notificacoes?limit=2&offset=0", headers=headers
+    ).get_json()
+    segunda = client.get(
+        "/api/notificacoes?limit=2&offset=2", headers=headers
+    ).get_json()
+    nao_lidas = client.get(
+        "/api/notificacoes?nao_lidas=true&limit=2", headers=headers
+    ).get_json()
+
+    assert len(primeira["data"]) == 2
+    assert primeira["paginacao"]["total"] == 3
+    assert primeira["paginacao"]["has_more"] is True
+    assert len(segunda["data"]) == 1
+    assert segunda["paginacao"]["has_more"] is False
+    assert nao_lidas["paginacao"]["total"] == 2
+    assert all(notificacao["lida"] in (False, 0) for notificacao in nao_lidas["data"])
+    assert client.get(
+        "/api/notificacoes?limit=101", headers=headers
+    ).status_code == 400
+
+
 def test_modelo_notificacao_devolve_none_para_usuario_ausente():
     assert NotificacaoModel.obter_preferencias(999999) is None
     assert NotificacaoModel.atualizar_preferencias(999999, True, False) is False
     assert NotificacaoModel.remover_push_token(999999, "missing-token") is False
     assert NotificacaoModel.listar_tokens_push([]) == []
+
+
+def test_health_snapshot_da_outbox_retorna_contadores_e_reserva_expirada():
+    snapshot = PushOutboxModel.health_snapshot()
+
+    assert snapshot["pending"] == 0
+    assert snapshot["processing"] == 0
+    assert snapshot["failed"] == 0
+    assert snapshot["sent"] == 0
+    assert snapshot["oldest_pending_age_seconds"] == 0
+    assert snapshot["stale_processing"] == 0
 
 
 def test_notification_model_adds_group_notifications_in_shared_transaction(client):
@@ -420,6 +508,21 @@ def test_worker_confirma_evento_sem_dispositivos(monkeypatch):
     )
     monkeypatch.setattr(
         PushOutboxModel,
+        "preparar_destinatarios",
+        staticmethod(lambda _outbox_id, _rows: None),
+    )
+    monkeypatch.setattr(
+        PushOutboxModel,
+        "recibos_pendentes",
+        staticmethod(lambda _outbox_id: []),
+    )
+    monkeypatch.setattr(
+        PushOutboxModel,
+        "listar_destinatarios",
+        staticmethod(lambda _outbox_id, status=None: []),
+    )
+    monkeypatch.setattr(
+        PushOutboxModel,
         "marcar_enviado",
         staticmethod(lambda _outbox_id: None),
     )
@@ -444,6 +547,7 @@ def test_worker_envia_lotes_de_ate_cem_dispositivos(monkeypatch):
         staticmethod(
             lambda _id: [
                 {
+                    "token_id": index,
                     "usuario_id": index,
                     "token": f"ExpoPushToken[device-{index}]",
                     "sons_notificacoes_ativos": 1,
@@ -459,7 +563,37 @@ def test_worker_envia_lotes_de_ate_cem_dispositivos(monkeypatch):
     monkeypatch.setattr(
         NotificacaoService,
         "_enviar_lote_push",
-        staticmethod(lambda mensagens: lotes.append(mensagens)),
+        staticmethod(
+            lambda mensagens: lotes.append(mensagens)
+            or [{"status": "ok", "id": f"ticket-{len(lotes)}-{index}"} for index, _ in enumerate(mensagens)]
+        ),
+    )
+    destinos = []
+    monkeypatch.setattr(
+        PushOutboxModel,
+        "preparar_destinatarios",
+        staticmethod(lambda _outbox_id, _rows: None),
+    )
+    monkeypatch.setattr(
+        PushOutboxModel,
+        "recibos_pendentes",
+        staticmethod(lambda _outbox_id: []),
+    )
+    monkeypatch.setattr(
+        PushOutboxModel,
+        "listar_destinatarios",
+        staticmethod(
+            lambda _outbox_id, status=None: (
+                [{"id": index, "token": f"ExpoPushToken[device-{index}]"} for index in range(1, 202)]
+                if status == "pending" and not destinos
+                else []
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        PushOutboxModel,
+        "registrar_tickets",
+        staticmethod(lambda _outbox_id, results: destinos.extend(results)),
     )
     enviados = []
     monkeypatch.setattr(
@@ -471,3 +605,392 @@ def test_worker_envia_lotes_de_ate_cem_dispositivos(monkeypatch):
 
     assert [len(lote) for lote in lotes] == [100, 100, 1]
     assert enviados == [1]
+
+
+def test_worker_nao_reenvia_dispositivos_com_ticket_aceito(client, monkeypatch):
+    dados, _headers = criar_usuario_autenticado(
+        client, "push-partial-batch@example.com"
+    )
+    usuario_id = dados["user"]["id"]
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "UPDATE usuarios SET notificacoes_ativas = 1 WHERE id = ?",
+                (usuario_id,),
+            )
+            for index in range(101):
+                cursor.execute(
+                    """
+                    INSERT INTO expo_push_tokens (usuario_id, token, plataforma)
+                    VALUES (?, ?, 'ios')
+                    """,
+                    (usuario_id, f"ExpoPushToken[partial-{index}]"),
+                )
+            connection.commit()
+        finally:
+            cursor.close()
+    notificacao_id = NotificacaoModel.criar(
+        usuario_id,
+        None,
+        "nova_despesa",
+        "Teste parcial",
+        "Mensagem de teste",
+    )
+
+    chamadas = []
+
+    def enviar(mensagens):
+        chamadas.append([mensagem["to"] for mensagem in mensagens])
+        if len(chamadas) == 2:
+            raise RuntimeError("Expo indisponível no segundo lote")
+        return [
+            {"status": "ok", "id": f"ticket-{len(chamadas)}-{index}"}
+            for index, _ in enumerate(mensagens)
+        ]
+
+    monkeypatch.setattr(
+        NotificacaoService, "_enviar_lote_push", staticmethod(enviar)
+    )
+    monkeypatch.setattr(
+        NotificacaoService,
+        "_consultar_recibos",
+        staticmethod(lambda _ticket_ids: {}),
+    )
+
+    assert processar_proxima() is True
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                """
+                UPDATE push_outbox
+                SET disponivel_em = CURRENT_TIMESTAMP
+                WHERE notificacao_id = ?
+                """,
+                (notificacao_id,),
+            )
+            connection.commit()
+        finally:
+            cursor.close()
+
+    assert processar_proxima() is True
+
+    assert [len(chamada) for chamada in chamadas] == [100, 1, 1]
+    assert set(chamadas[0]).isdisjoint(chamadas[2])
+    assert chamadas[2] == chamadas[1]
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                """
+                SELECT d.status, COUNT(*) AS total
+                FROM push_outbox_destinatarios d
+                JOIN push_outbox o ON o.id = d.outbox_id
+                WHERE o.notificacao_id = ?
+                GROUP BY d.status
+                """,
+                (notificacao_id,),
+            )
+            resultados = {row["status"]: row["total"] for row in cursor.fetchall()}
+        finally:
+            cursor.close()
+
+    assert resultados == {"ticketed": 101}
+
+
+def test_worker_aplica_recibos_e_remove_token_nao_registrado(client, monkeypatch):
+    dados, _headers = criar_usuario_autenticado(
+        client, "push-receipt-invalid@example.com"
+    )
+    usuario_id = dados["user"]["id"]
+    token_invalido = "ExpoPushToken[receipt-invalid]"
+    token_entregue = "ExpoPushToken[receipt-delivered]"
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "UPDATE usuarios SET notificacoes_ativas = 1 WHERE id = ?",
+                (usuario_id,),
+            )
+            cursor.execute(
+                """
+                INSERT INTO expo_push_tokens (usuario_id, token, plataforma)
+                VALUES (?, ?, 'android')
+                """,
+                (usuario_id, token_invalido),
+            )
+            cursor.execute(
+                """
+                INSERT INTO expo_push_tokens (usuario_id, token, plataforma)
+                VALUES (?, ?, 'ios')
+                """,
+                (usuario_id, token_entregue),
+            )
+            connection.commit()
+        finally:
+            cursor.close()
+    notificacao_id = NotificacaoModel.criar(
+        usuario_id,
+        None,
+        "nova_despesa",
+        "Teste recibo",
+        "Mensagem de teste",
+    )
+    chamadas_envio = []
+    monkeypatch.setattr(
+        NotificacaoService,
+        "_enviar_lote_push",
+        staticmethod(
+            lambda mensagens: chamadas_envio.append(mensagens)
+            or [
+                {
+                    "status": "ok",
+                    "id": (
+                        "ticket-receipt-invalid"
+                        if mensagem["to"] == token_invalido
+                        else "ticket-receipt-delivered"
+                    ),
+                }
+                for mensagem in mensagens
+            ]
+        ),
+    )
+    consultas = []
+
+    def consultar(_ticket_ids):
+        consultas.append(True)
+        if len(consultas) == 1:
+            return {}
+        return {
+            "ticket-receipt-invalid": {
+                "status": "error",
+                "message": "DeviceNotRegistered",
+                "details": {"error": "DeviceNotRegistered"},
+            },
+            "ticket-receipt-delivered": {"status": "ok"},
+        }
+
+    monkeypatch.setattr(
+        NotificacaoService, "_consultar_recibos", staticmethod(consultar)
+    )
+
+    assert processar_proxima() is True
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                """
+                UPDATE push_outbox_destinatarios
+                SET receipt_check_at = DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 MINUTE)
+                WHERE ticket_id IN (
+                    'ticket-receipt-invalid', 'ticket-receipt-delivered'
+                )
+                """
+            )
+            cursor.execute(
+                """
+                UPDATE push_outbox
+                SET disponivel_em = CURRENT_TIMESTAMP
+                WHERE notificacao_id = ?
+                """,
+                (notificacao_id,),
+            )
+            connection.commit()
+        finally:
+            cursor.close()
+
+    assert processar_proxima() is True
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                """
+                SELECT status FROM push_outbox_destinatarios
+                WHERE ticket_id = 'ticket-receipt-delivered'
+                """
+            )
+            assert cursor.fetchone()["status"] == "ticketed"
+            cursor.execute(
+                """
+                UPDATE push_outbox_destinatarios
+                SET receipt_check_at = DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 MINUTE)
+                WHERE ticket_id IN (
+                    'ticket-receipt-invalid', 'ticket-receipt-delivered'
+                )
+                """
+            )
+            cursor.execute(
+                """
+                UPDATE push_outbox
+                SET disponivel_em = CURRENT_TIMESTAMP
+                WHERE notificacao_id = ?
+                """,
+                (notificacao_id,),
+            )
+            connection.commit()
+        finally:
+            cursor.close()
+
+    assert processar_proxima() is True
+    assert len(chamadas_envio) == 1
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM expo_push_tokens WHERE token = ?",
+                (token_invalido,),
+            )
+            assert cursor.fetchone()["total"] == 0
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM expo_push_tokens WHERE token = ?",
+                (token_entregue,),
+            )
+            assert cursor.fetchone()["total"] == 1
+            cursor.execute(
+                """
+                SELECT d.status
+                FROM push_outbox_destinatarios d
+                JOIN push_outbox o ON o.id = d.outbox_id
+                WHERE o.notificacao_id = ?
+                """,
+                (notificacao_id,),
+            )
+            statuses = {row["status"] for row in cursor.fetchall()}
+            assert statuses == {"provider_accepted", "failed"}
+        finally:
+            cursor.close()
+
+
+def test_reprocessar_evento_failed_preserva_aceitos_e_nao_reativa_tokens_removidos(
+    client, monkeypatch
+):
+    dados, _headers = criar_usuario_autenticado(
+        client, "push-manual-retry@example.com"
+    )
+    usuario_id = dados["user"]["id"]
+    token_retry = "ExpoPushToken[manual-retry]"
+    token_accepted = "ExpoPushToken[manual-accepted]"
+    token_removed = "ExpoPushToken[manual-removed]"
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "UPDATE usuarios SET notificacoes_ativas = 1 WHERE id = ?",
+                (usuario_id,),
+            )
+            for token in (token_retry, token_accepted):
+                cursor.execute(
+                    """
+                    INSERT INTO expo_push_tokens (usuario_id, token, plataforma)
+                    VALUES (?, ?, 'android')
+                    """,
+                    (usuario_id, token),
+                )
+            connection.commit()
+        finally:
+            cursor.close()
+    notificacao_id = NotificacaoModel.criar(
+        usuario_id,
+        None,
+        "nova_despesa",
+        "Evento para reprocessar",
+        "Mensagem de teste",
+    )
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "SELECT id FROM push_outbox WHERE notificacao_id = ?",
+                (notificacao_id,),
+            )
+            outbox_id = cursor.fetchone()["id"]
+            cursor.execute(
+                """
+                UPDATE push_outbox
+                SET status = 'failed', tentativas = 8, ultimo_erro = 'erro final'
+                WHERE id = ?
+                """,
+                (outbox_id,),
+            )
+            cursor.execute(
+                """
+                INSERT INTO push_outbox_destinatarios
+                    (outbox_id, token, status, ultimo_erro)
+                VALUES
+                    (?, ?, 'failed', 'falha transitória'),
+                    (?, ?, 'provider_accepted', NULL),
+                    (?, ?, 'failed', 'DeviceNotRegistered')
+                """,
+                (
+                    outbox_id,
+                    token_retry,
+                    outbox_id,
+                    token_accepted,
+                    outbox_id,
+                    token_removed,
+                ),
+            )
+            connection.commit()
+        finally:
+            cursor.close()
+
+    assert PushOutboxModel.reprocessar_falhos(outbox_id) == 1
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                """
+                SELECT d.token, d.status, o.status AS outbox_status, o.tentativas
+                FROM push_outbox_destinatarios d
+                JOIN push_outbox o ON o.id = d.outbox_id
+                WHERE o.id = ?
+                """,
+                (outbox_id,),
+            )
+            rows = {row["token"]: row for row in cursor.fetchall()}
+        finally:
+            cursor.close()
+
+    assert rows[token_retry]["status"] == "pending"
+    assert rows[token_accepted]["status"] == "provider_accepted"
+    assert rows[token_removed]["status"] == "failed"
+    assert {row["outbox_status"] for row in rows.values()} == {"pending"}
+    assert {row["tentativas"] for row in rows.values()} == {0}
+
+    envios = []
+
+    def enviar(mensagens):
+        envios.extend(mensagem["to"] for mensagem in mensagens)
+        return [{"status": "ok", "id": "manual-retry-ticket"}]
+
+    monkeypatch.setattr(
+        NotificacaoService, "_enviar_lote_push", staticmethod(enviar)
+    )
+    assert processar_proxima() is True
+    assert envios == [token_retry]
+
+
+def test_reprocessar_falhos_rejeita_id_que_nao_esta_failed(client):
+    dados, _headers = criar_usuario_autenticado(
+        client, "push-manual-retry-missing@example.com"
+    )
+    notificacao_id = NotificacaoModel.criar(
+        dados["user"]["id"],
+        None,
+        "nova_despesa",
+        "Evento pendente",
+        "Mensagem de teste",
+    )
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "SELECT id FROM push_outbox WHERE notificacao_id = ?",
+                (notificacao_id,),
+            )
+            outbox_id = cursor.fetchone()["id"]
+        finally:
+            cursor.close()
+
+    assert PushOutboxModel.reprocessar_falhos(outbox_id) == 0

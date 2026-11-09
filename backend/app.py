@@ -116,6 +116,31 @@ def create_app():
         initialize_database()
         print("Schema do WEPAY inicializado.")
 
+    @app.cli.command("gemini-usage")
+    @click.option(
+        "--days",
+        type=click.IntRange(min=1, max=365),
+        default=7,
+        show_default=True,
+        help="Quantidade de dias de métricas a exibir.",
+    )
+    def gemini_usage_command(days):
+        """Exibe o volume diário de chamadas Gemini e bytes enviados."""
+        from models.gemini_usage_model import GeminiUsageModel
+
+        linhas = GeminiUsageModel.resumo(days)
+        if not linhas:
+            click.echo("Nenhuma chamada Gemini registrada no período.")
+            return
+        for linha in linhas:
+            mib = int(linha["bytes_imagem"]) / (1024 * 1024)
+            click.echo(
+                f"{linha['data_utc']} modelo={linha['modelo']} "
+                f"solicitacoes={linha['solicitacoes']} "
+                f"imagem_mib={mib:.2f} "
+                f"alerta_emitido={bool(linha['alerta_emitido'])}"
+            )
+
     @app.cli.command("reconcile-balances")
     @click.option(
         "--group-id",
@@ -167,6 +192,49 @@ def create_app():
                 f"Foram encontradas {total_divergencias} divergência(s); "
                 "execute sem --check-only para corrigi-las."
             )
+
+    @app.cli.command("cleanup-retained-data")
+    @click.option(
+        "--batch-size",
+        type=click.IntRange(min=1, max=5000),
+        default=500,
+        show_default=True,
+        help="Máximo de registros por lote de exclusão.",
+    )
+    @click.option(
+        "--dry-run",
+        is_flag=True,
+        help="Conta os registros elegíveis sem removê-los.",
+    )
+    def cleanup_retained_data_command(batch_size, dry_run):
+        """Remove registros expirados conforme os prazos de retenção."""
+        import json
+        from datetime import datetime, timezone
+
+        from models.data_retention_model import DataRetentionModel
+
+        try:
+            counts = DataRetentionModel.limpar_registros_expirados(
+                batch_size=batch_size,
+                dry_run=dry_run,
+            )
+        except Exception as error:
+            app.logger.exception("Falha na rotina de retenção de dados.")
+            raise click.ClickException(
+                "A rotina de retenção falhou; consulte o journal para detalhes."
+            ) from error
+
+        click.echo(
+            json.dumps(
+                {
+                    "modo": "dry-run" if dry_run else "delete",
+                    "concluido_em": datetime.now(timezone.utc).isoformat(),
+                    "registros": counts,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
 
     return app
 

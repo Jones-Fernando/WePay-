@@ -2,6 +2,9 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 
+MAX_MONEY = Decimal("9999999999.99")
+
+
 def parse_money(value):
     if value is None or value == "":
         raise ValueError("Valor eh obrigatorio.")
@@ -14,9 +17,19 @@ def parse_money(value):
         result = Decimal(text)
     except (InvalidOperation, ValueError):
         raise ValueError("Valor invalido.")
+    if not result.is_finite():
+        raise ValueError("Valor invalido.")
     if result <= 0:
         raise ValueError("Valor deve ser maior que zero.")
-    return result.quantize(Decimal("0.01"))
+    if result > MAX_MONEY:
+        raise ValueError("Valor excede o limite permitido.")
+    try:
+        result = result.quantize(Decimal("0.01"))
+    except InvalidOperation:
+        raise ValueError("Precisao do valor invalida.")
+    if result > MAX_MONEY:
+        raise ValueError("Valor excede o limite permitido.")
+    return result
 
 
 def parse_iso_date(value, field_name="data"):

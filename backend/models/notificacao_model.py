@@ -1,6 +1,6 @@
 from contextlib import nullcontext
 
-from database.connection import get_connection_context, cursor_for, fetch_all
+from database.connection import get_connection_context, cursor_for, fetch_one, fetch_all
 
 
 class NotificacaoModel:
@@ -98,7 +98,8 @@ class NotificacaoModel:
             try:
                 cursor.execute(
                     f"""
-                    SELECT t.usuario_id, t.token, u.sons_notificacoes_ativos
+                    SELECT t.id AS token_id, t.usuario_id, t.token,
+                           u.sons_notificacoes_ativos
                     FROM expo_push_tokens t
                     JOIN usuarios u ON u.id = t.usuario_id
                     WHERE u.notificacoes_ativas = 1
@@ -118,7 +119,8 @@ class NotificacaoModel:
             try:
                 cursor.execute(
                     """
-                    SELECT n.usuario_id, n.grupo_id, n.tipo, n.titulo,
+                    SELECT t.id AS token_id, n.usuario_id, n.grupo_id,
+                           n.tipo, n.titulo,
                            g.nome AS grupo_nome,
                            u.sons_notificacoes_ativos, t.token
                     FROM notificacoes n
@@ -157,20 +159,32 @@ class NotificacaoModel:
                 cursor.close()
 
     @staticmethod
-    def listar(usuario_id, somente_nao_lidas=False):
+    def listar(usuario_id, somente_nao_lidas=False, limit=50, offset=0):
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
-                query = (
-                    "SELECT id, grupo_id, tipo, titulo, mensagem, lida, criado_em "
-                    "FROM notificacoes WHERE usuario_id = ?"
-                )
+                where = " WHERE usuario_id = ?"
                 params = [usuario_id]
                 if somente_nao_lidas:
-                    query += " AND lida = 0"
-                query += " ORDER BY criado_em DESC, id DESC LIMIT 100"
-                cursor.execute(query, tuple(params))
-                return fetch_all(cursor)
+                    where += " AND lida = 0"
+                cursor.execute(
+                    "SELECT COUNT(*) AS total FROM notificacoes" + where,
+                    tuple(params),
+                )
+                total = int(fetch_one(cursor)["total"])
+                cursor.execute(
+                    "SELECT id, grupo_id, tipo, titulo, mensagem, lida, criado_em "
+                    "FROM notificacoes"
+                    + where
+                    + " ORDER BY criado_em DESC, id DESC LIMIT ? OFFSET ?",
+                    (*params, limit, offset),
+                )
+                return fetch_all(cursor), {
+                    "limit": limit,
+                    "offset": offset,
+                    "total": total,
+                    "has_more": offset + limit < total,
+                }
             finally:
                 cursor.close()
 

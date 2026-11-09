@@ -77,6 +77,34 @@ class Config:
     RATE_LIMIT_PASSWORD_RESET_CONFIRM = os.getenv(
         "RATE_LIMIT_PASSWORD_RESET_CONFIRM", "10 per hour"
     )
+    RATE_LIMIT_REFRESH = os.getenv("RATE_LIMIT_REFRESH", "10 per minute")
+    RATE_LIMIT_RECEIPT_HOURLY = os.getenv(
+        "RATE_LIMIT_RECEIPT_HOURLY", "5 per hour"
+    )
+    RATE_LIMIT_RECEIPT_DAILY = os.getenv(
+        "RATE_LIMIT_RECEIPT_DAILY", "20 per day"
+    )
+    try:
+        TRUSTED_PROXY_HOPS = int(os.getenv("TRUSTED_PROXY_HOPS", "0"))
+    except ValueError as exc:
+        raise RuntimeError("TRUSTED_PROXY_HOPS deve ser um inteiro.") from exc
+    if not 0 <= TRUSTED_PROXY_HOPS <= 10:
+        raise RuntimeError("TRUSTED_PROXY_HOPS deve estar entre 0 e 10.")
+    TRUSTED_PROXY_CIDRS = tuple(
+        cidr.strip()
+        for cidr in os.getenv("TRUSTED_PROXY_CIDRS", "").split(",")
+        if cidr.strip()
+    )
+    if TRUSTED_PROXY_HOPS and not TRUSTED_PROXY_CIDRS:
+        raise RuntimeError(
+            "TRUSTED_PROXY_CIDRS deve identificar o proxy reverso confiável "
+            "quando TRUSTED_PROXY_HOPS for maior que zero."
+        )
+    GEMINI_DAILY_ALERT_REQUESTS = int(
+        os.getenv("GEMINI_DAILY_ALERT_REQUESTS", "500")
+    )
+    if GEMINI_DAILY_ALERT_REQUESTS < 1:
+        raise RuntimeError("GEMINI_DAILY_ALERT_REQUESTS deve ser maior que zero.")
     CORS_ORIGINS = [
         origin.strip()
         for origin in os.getenv(

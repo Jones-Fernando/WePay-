@@ -42,7 +42,7 @@ def database_reset():
     flask_app.config.update(TESTING=True)
     limiter.reset()
     tables = (
-        "push_outbox", "expo_push_tokens", "notificacoes", "convites_grupo", "recuperacao_tokens", "revoked_tokens",
+        "gemini_usage_diaria", "push_outbox_destinatarios", "push_outbox", "expo_push_tokens", "notificacoes", "convites_grupo", "recuperacao_tokens", "revoked_tokens",
         "refresh_tokens", "categorias", "despesas_pessoais", "saldos", "pagamentos",
         "despesa_divisoes", "despesas", "participantes", "grupos", "usuarios",
     )

@@ -6,6 +6,7 @@ from utils.password_utils import (
     MIN_PASSWORD_LENGTH,
     check_password,
     hash_password,
+    is_legacy_password_hash,
     validar_senha,
 )
 
@@ -47,6 +48,14 @@ def test_check_password_valida_bcrypt_e_hashes_legados():
     legacy_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
     assert check_password(password, legacy_hash) is True
     assert check_password("OutraSenha123!", legacy_hash) is False
+
+
+def test_is_legacy_password_hash_recognizes_sha256_hex_only():
+    assert is_legacy_password_hash("a" * 64) is True
+    assert is_legacy_password_hash("A" * 64) is False
+    assert is_legacy_password_hash("a" * 63) is False
+    assert is_legacy_password_hash("$2b$12$" + "a" * 53) is False
+    assert is_legacy_password_hash(None) is False
 
 
 def test_check_password_rejeita_valores_ausentes_ou_hash_invalido():

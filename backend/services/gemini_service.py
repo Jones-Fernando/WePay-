@@ -1,11 +1,16 @@
 
 import json
+import logging
+from time import perf_counter
 from datetime import datetime
 
 from google import genai
 from google.genai import types
 
 from config import Config
+from models.gemini_usage_model import GeminiUsageModel
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class GeminiReceiptError(Exception):
@@ -68,13 +73,26 @@ def normalizar_recibo(dados: dict) -> dict:
     }
 
 
-def ler_recibo(imagem: bytes, mime_type: str) -> dict:
+def ler_recibo(
+    imagem: bytes,
+    mime_type: str,
+    usuario_id: int | None = None,
+) -> dict:
     api_key = Config.GEMINI_API_KEY
     model = Config.GEMINI_MODEL
 
     if not api_key:
         raise GeminiUnavailableError(
             "A chave da API do Gemini não está configurada."
+        )
+
+    inicio = perf_counter()
+    resultado = "falha"
+    if usuario_id is not None:
+        GeminiUsageModel.registrar_solicitacao(
+            usuario_id,
+            model,
+            len(imagem),
         )
 
     prompt = """
@@ -142,7 +160,9 @@ def ler_recibo(imagem: bytes, mime_type: str) -> dict:
                 "A resposta da IA está em formato inválido."
             )
 
-        return normalizar_recibo(dados)
+        resultado_normalizado = normalizar_recibo(dados)
+        resultado = "sucesso"
+        return resultado_normalizado
 
     except GeminiReceiptError:
         raise
@@ -154,3 +174,14 @@ def ler_recibo(imagem: bytes, mime_type: str) -> dict:
         raise GeminiReceiptError(
             "Não foi possível processar o recibo. Tente novamente."
         ) from erro
+    finally:
+        _LOGGER.info(
+            "Uso Gemini para leitura de recibo.",
+            extra={
+                "event": "gemini_receipt_usage",
+                "model": model,
+                "outcome": resultado,
+                "image_bytes": len(imagem),
+                "duration_ms": round((perf_counter() - inicio) * 1000),
+            },
+        )

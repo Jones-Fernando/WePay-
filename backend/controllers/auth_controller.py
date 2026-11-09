@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import secrets
 
 import jwt
-from flask import request
+from flask import current_app, request
 
 from config import Config
 
@@ -119,6 +119,10 @@ class AuthController:
             payload = decode_token(resultado["refresh_token"], expected_type="refresh")
             expires_at = datetime.fromtimestamp(payload["exp"], tz=timezone.utc).replace(tzinfo=None)
         except Exception:
+            current_app.logger.exception(
+                "Falha ao decodificar refresh token durante login (usuario_id=%s).",
+                resultado["user"]["id"],
+            )
             return ResponseUtils.erro("Nao foi possivel iniciar a sessao.", status=500)
 
         try:
@@ -133,6 +137,10 @@ class AuthController:
                 finally:
                     cursor.close()
         except Exception:
+            current_app.logger.exception(
+                "Falha ao persistir refresh token durante login (usuario_id=%s).",
+                resultado["user"]["id"],
+            )
             return ResponseUtils.erro("Nao foi possivel iniciar a sessao.", status=500)
 
         if data.get("web") is True:

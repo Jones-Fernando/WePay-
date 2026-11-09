@@ -86,6 +86,22 @@ class UsuarioModel:
                 cursor.close()
 
     @staticmethod
+    def atualizar_hash_senha_legado(usuario_id, hash_atual, novo_hash):
+        with get_connection_context() as connection:
+            cursor = cursor_for(connection)
+            try:
+                cursor.execute(
+                    "UPDATE usuarios SET senha = ?, atualizado_em = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND senha = ? AND excluido_em IS NULL",
+                    (novo_hash, usuario_id, hash_atual),
+                )
+                atualizado = cursor.rowcount == 1
+                connection.commit()
+                return atualizado
+            finally:
+                cursor.close()
+
+    @staticmethod
     def atualizar(usuario_id, nome, email, telefone=None, conn=None):
         context = nullcontext(conn) if conn is not None else get_connection_context()
         with context as connection:

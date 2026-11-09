@@ -4,7 +4,7 @@ from database.connection import get_connection_context, cursor_for
 from models.grupo_model import GrupoModel
 from models.participante_model import ParticipanteModel
 from utils.response_utils import ResponseUtils
-from utils.validators import parse_positive_int
+from utils.validators import parse_pagination, parse_positive_int
 
 
 def _is_admin(grupo_id, usuario_id):
@@ -77,7 +77,16 @@ class GrupoController:
 
     @staticmethod
     def listar(current_user_id):
-        return ResponseUtils.sucesso(dados=GrupoModel.listar_por_usuario(current_user_id))
+        try:
+            limit, offset = parse_pagination(
+                request.args.get("limit"), request.args.get("offset")
+            )
+        except ValueError as exc:
+            return ResponseUtils.erro(str(exc))
+        dados, paginacao = GrupoModel.listar_por_usuario(
+            current_user_id, limit, offset
+        )
+        return ResponseUtils.sucesso(dados=dados, paginacao=paginacao)
 
     @staticmethod
     def buscar(current_user_id, grupo_id):

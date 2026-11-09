@@ -10,6 +10,9 @@ from database.connection import (
     _apply_email_login_migration,
     _apply_notification_preferences_migration,
     _apply_group_expense_observation_migration,
+    _apply_group_expense_creator_migration,
+    _apply_push_outbox_destination_migration,
+    _apply_push_outbox_retention_migration,
     _apply_participantes_migration,
     _apply_saldos_migration,
 )
@@ -334,6 +337,120 @@ def test_group_expense_observation_migration_preserves_existing_column():
     _apply_group_expense_observation_migration(cursor)
 
     assert len(cursor.statements) == 1
+
+
+def test_group_expense_creator_migration_adds_nullable_legacy_field_and_index():
+    cursor = FakeCursor(
+        columns={"despesas": {"id": "bigint unsigned"}},
+    )
+
+    _apply_group_expense_creator_migration(cursor)
+
+    statements = [operation for operation, _ in cursor.statements]
+    assert (
+        "ALTER TABLE despesas ADD COLUMN criado_por BIGINT UNSIGNED NULL"
+        in statements
+    )
+    index_statement = (
+        "CREATE INDEX idx_despesas_criador ON despesas (criado_por)"
+    )
+    foreign_key_statement = next(
+        statement for statement in statements if "FOREIGN KEY (criado_por)" in statement
+    )
+    assert index_statement in statements
+    assert statements.index(index_statement) < statements.index(foreign_key_statement)
+
+
+def test_group_expense_creator_migration_preserves_existing_constraints():
+    cursor = FakeCursor(
+        columns={
+            "despesas": {
+                "id": "bigint unsigned",
+                "criado_por": "bigint unsigned",
+            }
+        },
+        indexes={
+            "despesas": [
+                (1, 0, "fk_despesa_criador", 1, "criado_por"),
+            ]
+        },
+        foreign_keys={
+            ("despesas", "criado_por"): ["fk_despesa_criador"],
+        },
+    )
+
+    _apply_group_expense_creator_migration(cursor)
+
+    assert len(cursor.statements) == 3
+
+
+def test_push_outbox_migration_renames_delivery_to_provider_acceptance():
+    cursor = FakeCursor(
+        columns={
+            "push_outbox_destinatarios": {
+                "status": "enum('pending','ticketed','delivered','failed')",
+            }
+        }
+    )
+
+    _apply_push_outbox_destination_migration(cursor)
+
+    statements = [operation for operation, _ in cursor.statements]
+    assert len(statements) == 6
+    assert "provider_accepted" in statements[1]
+    assert (
+        "UPDATE push_outbox_destinatarios "
+        "SET status = 'provider_accepted' WHERE status = 'delivered'"
+        in statements
+    )
+    assert "delivered" not in statements[3]
+    assert "ADD COLUMN receipt_expires_at DATETIME NULL" in statements[4]
+    assert "INTERVAL 1 DAY" in statements[5]
+
+
+def test_push_outbox_migration_is_idempotent_for_current_schema():
+    cursor = FakeCursor(
+        columns={
+            "push_outbox_destinatarios": {
+                "status": "enum('pending','ticketed','provider_accepted','failed')",
+                "receipt_expires_at": "datetime",
+            }
+        }
+    )
+
+    _apply_push_outbox_destination_migration(cursor)
+
+    assert len(cursor.statements) == 1
+
+
+def test_push_outbox_retention_migration_adds_index():
+    cursor = FakeCursor(indexes={"push_outbox": []})
+
+    _apply_push_outbox_retention_migration(cursor)
+
+    assert cursor.statements == [
+        ("SHOW INDEX FROM `push_outbox`", None),
+        (
+            "CREATE INDEX idx_push_outbox_retencao "
+            "ON push_outbox (status, enviado_em, id)",
+            None,
+        )
+    ]
+
+
+def test_push_outbox_retention_migration_preserves_existing_index():
+    cursor = FakeCursor(
+        indexes={
+            "push_outbox": [
+                (1, 0, "idx_custom_retention", 1, "status"),
+                (1, 0, "idx_custom_retention", 2, "enviado_em"),
+            ]
+        }
+    )
+
+    _apply_push_outbox_retention_migration(cursor)
+
+    assert cursor.statements == [("SHOW INDEX FROM `push_outbox`", None)]
 
 
 def test_participantes_migration_maps_legacy_fields():

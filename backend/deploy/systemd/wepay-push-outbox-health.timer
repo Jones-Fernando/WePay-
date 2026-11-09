@@ -1,0 +1,12 @@
+[Unit]
+Description=Schedule WePay push outbox health checks
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Persistent=true
+Unit=wepay-push-outbox-health.service
+
+[Install]
+WantedBy=timers.target

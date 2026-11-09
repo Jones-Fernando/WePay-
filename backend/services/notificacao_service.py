@@ -5,6 +5,7 @@ from config import Config
 from models.notificacao_model import NotificacaoModel
 
 _EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+_EXPO_RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts"
 
 
 class NotificacaoService:
@@ -83,11 +84,34 @@ class NotificacaoService:
         if (
             not isinstance(tickets, list)
             or len(tickets) != len(mensagens)
-            or any(
-                not isinstance(ticket, dict) or ticket.get("status") != "ok"
-                for ticket in tickets
-            )
+            or any(not isinstance(ticket, dict) for ticket in tickets)
         ):
             raise RuntimeError(
-                "Expo Push Service retornou falha em um ou mais dispositivos."
+                "Expo Push Service retornou tickets inválidos."
             )
+        return tickets
+
+    @staticmethod
+    def _consultar_recibos(ticket_ids):
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        if Config.EXPO_ACCESS_TOKEN:
+            headers["Authorization"] = f"******"
+        request = Request(
+            _EXPO_RECEIPTS_URL,
+            data=json.dumps({"ids": ticket_ids}).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with urlopen(request, timeout=5) as response:
+            resultado = json.loads(response.read().decode("utf-8"))
+        if resultado.get("errors"):
+            raise RuntimeError("Expo Push Service rejeitou a consulta de recibos.")
+        recibos = resultado.get("data")
+        if not isinstance(recibos, dict) or any(
+            not isinstance(recibo, dict) for recibo in recibos.values()
+        ):
+            raise RuntimeError("Expo Push Service retornou recibos inválidos.")
+        return recibos

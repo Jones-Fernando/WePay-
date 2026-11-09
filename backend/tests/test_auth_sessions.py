@@ -1,9 +1,13 @@
 """Testes de invalidação e rotação de sessões de autenticação."""
 
+import hashlib
+
 import pytest
 
 from app import create_app
 from config import Config
+from database.connection import cursor_for, get_connection_context
+from utils.password_utils import check_password
 
 app = create_app()
 
@@ -105,6 +109,93 @@ def test_refresh_rotaciona_token_e_rejeita_reutilizacao(client):
     assert client.get(
         "/api/auth/me", headers=cabecalho_autorizacao(nova_sessao["token"])
     ).status_code == 200
+
+
+def test_login_migra_hash_sha256_legado_para_bcrypt_sem_invalidar_sessao(client):
+    email = "legacy-password-login@example.com"
+    password = "SenhaSegura123!"
+    cadastrar = client.post(
+        "/api/auth/cadastro",
+        json={"nome": "Conta legada", "email": email, "senha": password},
+    )
+    assert cadastrar.status_code == 201
+
+    legacy_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "UPDATE usuarios SET senha = ? WHERE email = ?",
+                (legacy_hash, email),
+            )
+            connection.commit()
+        finally:
+            cursor.close()
+
+    resposta = client.post(
+        "/api/auth/login",
+        json={"email": email, "senha": password},
+    )
+
+    assert resposta.status_code == 200
+    sessao = resposta.get_json()["data"]
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "SELECT senha, auth_version FROM usuarios WHERE email = ?",
+                (email,),
+            )
+            usuario = cursor.fetchone()
+        finally:
+            cursor.close()
+
+    assert usuario["senha"] != legacy_hash
+    assert check_password(password, usuario["senha"]) is True
+    assert usuario["auth_version"] == 0
+    assert client.get(
+        "/api/auth/me",
+        headers=cabecalho_autorizacao(sessao["token"]),
+    ).status_code == 200
+
+
+def test_login_com_senha_incorreta_nao_migra_hash_legado(client):
+    email = "legacy-password-invalid-login@example.com"
+    password = "SenhaSegura123!"
+    cadastrar = client.post(
+        "/api/auth/cadastro",
+        json={"nome": "Conta legada", "email": email, "senha": password},
+    )
+    assert cadastrar.status_code == 201
+
+    legacy_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "UPDATE usuarios SET senha = ? WHERE email = ?",
+                (legacy_hash, email),
+            )
+            connection.commit()
+        finally:
+            cursor.close()
+
+    resposta = client.post(
+        "/api/auth/login",
+        json={"email": email, "senha": "SenhaErrada456!"},
+    )
+
+    assert resposta.status_code == 401
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "SELECT senha FROM usuarios WHERE email = ?",
+                (email,),
+            )
+            assert cursor.fetchone()["senha"] == legacy_hash
+        finally:
+            cursor.close()
 
 
 def test_sessao_web_usa_cookie_http_only_e_rotaciona_refresh(client):

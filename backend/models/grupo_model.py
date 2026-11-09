@@ -29,20 +29,38 @@ class GrupoModel:
                 cursor.close()
 
     @staticmethod
-    def listar_por_usuario(usuario_id):
+    def listar_por_usuario(usuario_id, limit=50, offset=0):
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
                 cursor.execute(
                     """
-                    SELECT g.id, g.nome, g.descricao, g.criado_por,
-                           COALESCE(s.saldo, 0) AS saldo,
-                           COUNT(DISTINCT u2.id) AS participantes
+                    SELECT COUNT(*) AS total
                     FROM grupos g
                     JOIN participantes me
                       ON me.grupo_id = g.id
                      AND me.usuario_id = ?
                      AND me.ativo = 1
+                    """,
+                    (usuario_id,),
+                )
+                total = int(fetch_one(cursor)["total"])
+                cursor.execute(
+                    """
+                    SELECT g.id, g.nome, g.descricao, g.criado_por,
+                           COALESCE(s.saldo, 0) AS saldo,
+                           COUNT(DISTINCT u2.id) AS participantes
+                    FROM (
+                        SELECT g.id, g.nome
+                        FROM grupos g
+                        JOIN participantes me
+                          ON me.grupo_id = g.id
+                         AND me.usuario_id = ?
+                         AND me.ativo = 1
+                        ORDER BY g.nome, g.id
+                        LIMIT ? OFFSET ?
+                    ) pagina
+                    JOIN grupos g ON g.id = pagina.id
                     LEFT JOIN saldos s
                       ON s.grupo_id = g.id
                      AND s.usuario_id = ?
@@ -53,11 +71,16 @@ class GrupoModel:
                       ON u2.id = p2.usuario_id
                      AND u2.excluido_em IS NULL
                     GROUP BY g.id, g.nome, g.descricao, g.criado_por, s.saldo
-                    ORDER BY g.nome
+                    ORDER BY pagina.nome, pagina.id
                     """,
-                    (usuario_id, usuario_id),
+                    (usuario_id, limit, offset, usuario_id),
                 )
-                return fetch_all(cursor)
+                return fetch_all(cursor), {
+                    "limit": limit,
+                    "offset": offset,
+                    "total": total,
+                    "has_more": offset + limit < total,
+                }
             finally:
                 cursor.close()
 

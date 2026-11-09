@@ -1,0 +1,6 @@
+[Unit]
+Description=Report WePay push outbox health check failure for %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -p daemon.crit -t wepay-push-outbox "Health check failed for %i; inspect journalctl -u wepay-push-outbox-health.service"

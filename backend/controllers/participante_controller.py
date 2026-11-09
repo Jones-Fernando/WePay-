@@ -12,7 +12,7 @@ from services.email_service import EmailService
 from services.financeiro_service import FinanceiroService, money
 from utils.jwt_utils import token_hash
 from utils.response_utils import ResponseUtils
-from utils.validators import parse_positive_int
+from utils.validators import parse_pagination, parse_positive_int
 
 
 def _is_admin(grupo_id, usuario_id):
@@ -68,11 +68,20 @@ class ParticipanteController:
 
     @staticmethod
     def listar(current_user_id, grupo_id):
+        try:
+            limit, offset = parse_pagination(
+                request.args.get("limit"), request.args.get("offset")
+            )
+        except ValueError as exc:
+            return ResponseUtils.erro(str(exc))
         if not GrupoModel.buscar_por_id(grupo_id):
             return ResponseUtils.erro("Grupo nao encontrado.", status=404)
         if not ParticipanteModel.buscar(grupo_id, current_user_id):
             return ResponseUtils.erro("Voce nao participa deste grupo.", status=403)
-        return ResponseUtils.sucesso(dados=ParticipanteModel.listar_por_grupo(grupo_id))
+        dados, paginacao = ParticipanteModel.listar_por_grupo_paginado(
+            grupo_id, limit, offset
+        )
+        return ResponseUtils.sucesso(dados=dados, paginacao=paginacao)
 
     @staticmethod
     def buscar(current_user_id, participante_id):

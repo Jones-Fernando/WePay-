@@ -1,5 +1,5 @@
 from datetime import date
-from flask import request
+from flask import current_app, request
 
 from models.grupo_model import GrupoModel
 from models.participante_model import ParticipanteModel
@@ -65,6 +65,11 @@ class PagamentoController:
         except ValueError as exc:
             return ResponseUtils.erro(str(exc), status=400)
         except Exception:
+            current_app.logger.exception(
+                "Falha ao registrar pagamento (grupo_id=%s, usuario_id=%s).",
+                grupo_id,
+                current_user_id,
+            )
             return ResponseUtils.erro("Nao foi possivel registrar o pagamento.", status=500)
 
         return ResponseUtils.sucesso(

@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS despesas (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     grupo_id BIGINT UNSIGNED NOT NULL,
     pagador_id BIGINT UNSIGNED NOT NULL,
+    criado_por BIGINT UNSIGNED NULL,
     descricao VARCHAR(255) NOT NULL,
     categoria VARCHAR(100) NULL,
     observacao VARCHAR(500) NULL,
@@ -56,7 +57,9 @@ CREATE TABLE IF NOT EXISTS despesas (
     CONSTRAINT chk_despesa_valor CHECK (valor > 0),
     CONSTRAINT fk_despesa_grupo FOREIGN KEY (grupo_id) REFERENCES grupos(id) ON DELETE CASCADE,
     CONSTRAINT fk_despesa_pagador FOREIGN KEY (pagador_id) REFERENCES usuarios(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_despesa_criador FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL,
     INDEX idx_despesas_grupo_data (grupo_id, data_despesa),
+    INDEX idx_despesas_criador (criado_por),
     INDEX idx_despesas_vencimento (vencimento)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -132,6 +135,19 @@ CREATE TABLE IF NOT EXISTS categorias (
     CONSTRAINT uq_categoria_usuario_nome UNIQUE (usuario_id, nome),
     CONSTRAINT fk_categoria_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
     INDEX idx_categoria_usuario (usuario_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS gemini_usage_diaria (
+    data_utc DATE NOT NULL,
+    usuario_id BIGINT UNSIGNED NOT NULL,
+    modelo VARCHAR(100) NOT NULL,
+    solicitacoes BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    bytes_imagem BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    alerta_emitido TINYINT(1) NOT NULL DEFAULT 0,
+    atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (data_utc, usuario_id, modelo),
+    INDEX idx_gemini_usage_model_date (modelo, data_utc)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS refresh_tokens (
@@ -212,7 +228,8 @@ CREATE TABLE IF NOT EXISTS push_outbox (
         FOREIGN KEY (notificacao_id) REFERENCES notificacoes(id)
         ON DELETE CASCADE,
     INDEX idx_push_outbox_pendente (status, disponivel_em, id),
-    INDEX idx_push_outbox_reserva (status, reservado_em)
+    INDEX idx_push_outbox_reserva (status, reservado_em),
+    INDEX idx_push_outbox_retencao (status, enviado_em, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS expo_push_tokens (
@@ -224,4 +241,26 @@ CREATE TABLE IF NOT EXISTS expo_push_tokens (
     atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_expo_push_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
     INDEX idx_expo_push_usuario (usuario_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS push_outbox_destinatarios (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    outbox_id BIGINT UNSIGNED NOT NULL,
+    expo_push_token_id BIGINT UNSIGNED NULL,
+    token VARCHAR(255) NOT NULL,
+    status ENUM('pending', 'ticketed', 'provider_accepted', 'failed') NOT NULL DEFAULT 'pending',
+    ticket_id VARCHAR(64) NULL,
+    receipt_check_at DATETIME NULL,
+    receipt_expires_at DATETIME NULL,
+    ultimo_erro VARCHAR(1000) NULL,
+    criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT uq_push_outbox_destinatario UNIQUE (outbox_id, token),
+    CONSTRAINT uq_push_outbox_ticket UNIQUE (ticket_id),
+    CONSTRAINT fk_push_destinatario_outbox
+        FOREIGN KEY (outbox_id) REFERENCES push_outbox(id) ON DELETE CASCADE,
+    CONSTRAINT fk_push_destinatario_token
+        FOREIGN KEY (expo_push_token_id) REFERENCES expo_push_tokens(id)
+        ON DELETE SET NULL,
+    INDEX idx_push_destinatario_status (outbox_id, status, receipt_check_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

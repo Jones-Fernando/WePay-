@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule daily WePay data retention cleanup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=15min
+Persistent=true
+Unit=wepay-data-retention.service
+
+[Install]
+WantedBy=timers.target

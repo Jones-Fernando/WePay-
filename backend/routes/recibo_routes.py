@@ -1,6 +1,7 @@
 
 from flask import Blueprint, request
 
+from config import Config
 from middlewares.auth_middleware import token_required
 from services.gemini_service import (
     ler_recibo,
@@ -9,6 +10,8 @@ from services.gemini_service import (
     normalizar_recibo,
 )
 from utils.response_utils import ResponseUtils
+from utils.rate_limiter import limiter
+from utils.rate_limit_keys import authenticated_user_or_ip
 
 
 recibo_bp = Blueprint("recibo_bp", __name__)
@@ -34,6 +37,14 @@ def assinatura_imagem_valida(imagem: bytes, mime_type: str) -> bool:
 
 @recibo_bp.route("/ler", methods=["POST"])
 @token_required
+@limiter.limit(
+    Config.RATE_LIMIT_RECEIPT_HOURLY,
+    key_func=authenticated_user_or_ip,
+)
+@limiter.limit(
+    Config.RATE_LIMIT_RECEIPT_DAILY,
+    key_func=authenticated_user_or_ip,
+)
 def ler(current_user_id):
     if "imagem" not in request.files:
         return ResponseUtils.erro(
@@ -75,7 +86,9 @@ def ler(current_user_id):
         )
 
     try:
-        dados = normalizar_recibo(ler_recibo(imagem, arquivo.mimetype))
+        dados = normalizar_recibo(
+            ler_recibo(imagem, arquivo.mimetype, current_user_id)
+        )
 
         return ResponseUtils.sucesso(
             dados=dados,

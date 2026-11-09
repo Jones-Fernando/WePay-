@@ -74,6 +74,45 @@ class ParticipanteModel:
                 cursor.close()
 
     @staticmethod
+    def listar_por_grupo_paginado(grupo_id, limit=50, offset=0):
+        with get_connection_context() as conn:
+            cursor = cursor_for(conn)
+            try:
+                cursor.execute(
+                    "SELECT COUNT(*) AS total FROM participantes p "
+                    "JOIN usuarios u ON p.usuario_id = u.id "
+                    "WHERE p.grupo_id = ? AND p.ativo = 1",
+                    (grupo_id,),
+                )
+                total = int(fetch_one(cursor)["total"])
+                cursor.execute(
+                    """
+                    SELECT p.id, p.grupo_id, p.usuario_id, p.papel,
+                           p.criado_em, p.removido_em,
+                           CASE WHEN u.excluido_em IS NULL THEN u.nome
+                                ELSE 'Usuário excluído' END AS nome,
+                           CASE WHEN u.excluido_em IS NULL THEN u.email
+                                ELSE NULL END AS email,
+                           CASE WHEN u.excluido_em IS NULL THEN p.ativo
+                                ELSE 0 END AS ativo
+                    FROM participantes p
+                    JOIN usuarios u ON p.usuario_id = u.id
+                    WHERE p.grupo_id = ? AND p.ativo = 1
+                    ORDER BY ativo DESC, u.nome, p.id
+                    LIMIT ? OFFSET ?
+                    """,
+                    (grupo_id, limit, offset),
+                )
+                return fetch_all(cursor), {
+                    "limit": limit,
+                    "offset": offset,
+                    "total": total,
+                    "has_more": offset + limit < total,
+                }
+            finally:
+                cursor.close()
+
+    @staticmethod
     def remover_por_id(participante_id, conn=None):
         query = (
             "UPDATE participantes SET ativo = 0, removido_em = CURRENT_TIMESTAMP WHERE id = ?"

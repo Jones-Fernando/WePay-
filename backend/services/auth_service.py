@@ -1,5 +1,10 @@
 from models.usuario_model import UsuarioModel
-from utils.password_utils import hash_password, check_password
+from utils.password_utils import (
+    MAX_PASSWORD_BYTES,
+    check_password,
+    hash_password,
+    is_legacy_password_hash,
+)
 from utils.jwt_utils import generate_refresh_token, generate_token
 
 
@@ -25,6 +30,15 @@ class AuthService:
             or not check_password(senha, usuario["senha"])
         ):
             return None, "Credenciais invalidas."
+        if (
+            is_legacy_password_hash(usuario["senha"])
+            and len(senha.encode("utf-8")) <= MAX_PASSWORD_BYTES
+        ):
+            UsuarioModel.atualizar_hash_senha_legado(
+                usuario["id"],
+                usuario["senha"],
+                hash_password(senha),
+            )
         auth_version = int(usuario.get("auth_version", 0))
         token = generate_token(usuario["id"], auth_version)
         refresh_token = generate_refresh_token(usuario["id"], auth_version)

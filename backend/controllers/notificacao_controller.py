@@ -4,6 +4,7 @@ from flask import request
 
 from models.notificacao_model import NotificacaoModel
 from utils.response_utils import ResponseUtils
+from utils.validators import parse_pagination
 
 _TOKEN_EXPO_RE = re.compile(
     r"(?:Expo|Exponent)PushToken\[[A-Za-z0-9._-]{1,200}\]"
@@ -76,8 +77,18 @@ class NotificacaoController:
     @staticmethod
     def listar(current_user_id):
         somente_nao_lidas = request.args.get("nao_lidas", "false").lower() == "true"
+        try:
+            limit, offset = parse_pagination(
+                request.args.get("limit"), request.args.get("offset")
+            )
+        except ValueError as exc:
+            return ResponseUtils.erro(str(exc))
+        dados, paginacao = NotificacaoModel.listar(
+            current_user_id, somente_nao_lidas, limit, offset
+        )
         return ResponseUtils.sucesso(
-            dados=NotificacaoModel.listar(current_user_id, somente_nao_lidas)
+            dados=dados,
+            paginacao=paginacao,
         )
 
     @staticmethod

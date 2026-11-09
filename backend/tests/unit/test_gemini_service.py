@@ -117,6 +117,43 @@ def test_ler_recibo_envia_imagem_e_normaliza_resposta(monkeypatch):
     assert requisicao["config"].temperature == 0
 
 
+def test_ler_recibo_registra_metricas_por_usuario(monkeypatch, caplog):
+    caplog.set_level("INFO")
+    metricas = []
+    monkeypatch.setattr(
+        "services.gemini_service.GeminiUsageModel.registrar_solicitacao",
+        lambda usuario_id, modelo, tamanho: metricas.append(
+            (usuario_id, modelo, tamanho)
+        ),
+    )
+
+    class FakeModels:
+        def generate_content(self, **_kwargs):
+            return type(
+                "GeminiResponse",
+                (),
+                {"text": '{"valor_total":12.5}'},
+            )()
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(Config, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(Config, "GEMINI_MODEL", "test-model")
+    monkeypatch.setattr("services.gemini_service.genai.Client", FakeClient)
+
+    resultado = ler_recibo(b"image-bytes", "image/jpeg", usuario_id=42)
+
+    assert resultado["valor_total"] == 12.5
+    assert metricas == [(42, "test-model", len(b"image-bytes"))]
+    assert any(
+        getattr(record, "event", None) == "gemini_receipt_usage"
+        and record.outcome == "sucesso"
+        for record in caplog.records
+    )
+
+
 @pytest.mark.parametrize(
     ("text", "message"),
     [

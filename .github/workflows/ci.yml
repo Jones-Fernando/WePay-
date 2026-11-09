@@ -59,6 +59,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
-      - run: python -m pip install -r requirements.txt
-      - run: pytest --cov=controllers --cov=models --cov=services --cov=utils --cov=middlewares --cov-report=term-missing --cov-fail-under=90
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: pytest --cov=controllers --cov=models --cov=services --cov=utils --cov=middlewares --cov=routes --cov=database --cov-report=term-missing --cov-report=json:coverage.json
+      - run: python scripts/check_critical_coverage.py coverage.json

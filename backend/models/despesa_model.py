@@ -22,7 +22,8 @@ class DespesaModel:
                 categorias = fetch_all(cursor)
                 cursor.execute(
                     """
-                    SELECT d.id, d.grupo_id, d.pagador_id, d.descricao,
+                    SELECT d.id, d.grupo_id, d.pagador_id, d.criado_por,
+                           d.descricao,
                            d.categoria, d.valor, d.data_despesa,
                            d.vencimento,
                            CAST(d.criado_em AS CHAR) AS criado_em,

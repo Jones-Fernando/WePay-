@@ -3,6 +3,7 @@ from controllers.auth_controller import AuthController
 from middlewares.auth_middleware import token_required
 from config import Config
 from utils.rate_limiter import limiter
+from utils.rate_limit_keys import refresh_user_or_ip
 
 
 auth_bp = Blueprint("auth_bp", __name__)
@@ -16,7 +17,12 @@ auth_bp.route("/cadastro", methods=["POST"], endpoint="registrar_cadastro")(
 auth_bp.route("/login", methods=["POST"], endpoint="login")(
     limiter.limit(Config.RATE_LIMIT_LOGIN)(AuthController.login)
 )
-auth_bp.route("/refresh", methods=["POST"])(AuthController.refresh)
+auth_bp.route("/refresh", methods=["POST"])(
+    limiter.limit(
+        Config.RATE_LIMIT_REFRESH,
+        key_func=refresh_user_or_ip,
+    )(AuthController.refresh)
+)
 auth_bp.route("/esqueci-senha", methods=["POST"])(
     limiter.shared_limit(
         Config.RATE_LIMIT_PASSWORD_RESET_REQUEST,

@@ -1,6 +1,6 @@
 from datetime import date
 
-from flask import request
+from flask import current_app, request
 
 from database.connection import get_connection_context, cursor_for, fetch_one
 from models.grupo_model import GrupoModel
@@ -123,10 +123,18 @@ class DespesaController:
                 percentuais=percentuais,
                 valores=valores,
                 observacao=observacao,
+                criador_id=current_user_id,
             )
+        except PermissionError as exc:
+            return ResponseUtils.erro(str(exc), status=403)
         except ValueError as exc:
             return ResponseUtils.erro(str(exc))
         except Exception:
+            current_app.logger.exception(
+                "Falha ao criar despesa (grupo_id=%s, usuario_id=%s).",
+                grupo_id,
+                current_user_id,
+            )
             return ResponseUtils.erro("Nao foi possivel registrar a despesa.", status=500)
 
         return ResponseUtils.sucesso(
@@ -242,12 +250,20 @@ class DespesaController:
                 percentuais=percentuais,
                 valores=valores,
                 **({"observacao": observacao} if "observacao" in data else {}),
+                ator_id=current_user_id,
             )
+        except PermissionError as exc:
+            return ResponseUtils.erro(str(exc), status=403)
         except LookupError as exc:
             return ResponseUtils.erro(str(exc), status=404)
         except ValueError as exc:
             return ResponseUtils.erro(str(exc))
         except Exception:
+            current_app.logger.exception(
+                "Falha ao atualizar despesa (despesa_id=%s, usuario_id=%s).",
+                despesa_id,
+                current_user_id,
+            )
             return ResponseUtils.erro("Nao foi possivel atualizar a despesa.", status=500)
 
         return ResponseUtils.sucesso(mensagem="Despesa atualizada e saldos recalculados.")
@@ -261,10 +277,17 @@ class DespesaController:
             return ResponseUtils.erro("Voce nao participa deste grupo.", status=403)
 
         try:
-            FinanceiroService.deletar_despesa(despesa_id)
+            FinanceiroService.deletar_despesa(despesa_id, current_user_id)
+        except PermissionError as exc:
+            return ResponseUtils.erro(str(exc), status=403)
         except LookupError as exc:
             return ResponseUtils.erro(str(exc), status=404)
         except Exception:
+            current_app.logger.exception(
+                "Falha ao excluir despesa (despesa_id=%s, usuario_id=%s).",
+                despesa_id,
+                current_user_id,
+            )
             return ResponseUtils.erro("Nao foi possivel excluir a despesa.", status=500)
 
         return ResponseUtils.sucesso(mensagem="Despesa deletada e saldos recalculados.")

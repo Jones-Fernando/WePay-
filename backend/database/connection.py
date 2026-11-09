@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover - dependência obrigatória em runtime
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SCHEMA_FILE = BASE_DIR / "database" / "wepay.sql"
-SCHEMA_VERSION = "2026-11-08_transactional_push_outbox"
+SCHEMA_VERSION = "data_retention"
 _connection_pool: Any = None
 _connection_pool_lock = Lock()
 
@@ -239,6 +239,77 @@ def _apply_group_expense_observation_migration(
     if "observacao" not in columns:
         cursor.execute(
             "ALTER TABLE despesas ADD COLUMN observacao VARCHAR(500) NULL"
+        )
+
+
+def _apply_group_expense_creator_migration(
+    cursor: _MigrationCursor,
+) -> None:
+    columns = _column_metadata(cursor, "despesas")
+    if "criado_por" not in columns:
+        cursor.execute(
+            "ALTER TABLE despesas ADD COLUMN criado_por BIGINT UNSIGNED NULL"
+        )
+    indexes = _index_metadata(cursor, "despesas")
+    if not any(
+        columns and columns[0] == "criado_por"
+        for _, columns in indexes.values()
+    ):
+        cursor.execute(
+            "CREATE INDEX idx_despesas_criador ON despesas (criado_por)"
+        )
+    if not _foreign_keys_for_column(cursor, "despesas", "criado_por"):
+        cursor.execute(
+            "ALTER TABLE despesas ADD CONSTRAINT fk_despesa_criador "
+            "FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE SET NULL"
+        )
+
+
+def _apply_push_outbox_destination_migration(
+    cursor: _MigrationCursor,
+) -> None:
+    columns = _column_metadata(cursor, "push_outbox_destinatarios")
+    status_type = columns.get("status", "").lower()
+    if "provider_accepted" not in status_type:
+        cursor.execute(
+            "ALTER TABLE push_outbox_destinatarios MODIFY COLUMN status "
+            "ENUM('pending', 'ticketed', 'delivered', 'provider_accepted', 'failed') "
+            "NOT NULL DEFAULT 'pending'"
+        )
+        cursor.execute(
+            "UPDATE push_outbox_destinatarios "
+            "SET status = 'provider_accepted' WHERE status = 'delivered'"
+        )
+        cursor.execute(
+            "ALTER TABLE push_outbox_destinatarios MODIFY COLUMN status "
+            "ENUM('pending', 'ticketed', 'provider_accepted', 'failed') "
+            "NOT NULL DEFAULT 'pending'"
+        )
+    if "receipt_expires_at" not in columns:
+        cursor.execute(
+            "ALTER TABLE push_outbox_destinatarios "
+            "ADD COLUMN receipt_expires_at DATETIME NULL"
+        )
+        cursor.execute(
+            """
+            UPDATE push_outbox_destinatarios
+            SET receipt_expires_at = DATE_ADD(
+                COALESCE(receipt_check_at, CURRENT_TIMESTAMP), INTERVAL 1 DAY
+            )
+            WHERE status = 'ticketed'
+            """
+        )
+
+
+def _apply_push_outbox_retention_migration(cursor: _MigrationCursor) -> None:
+    indexes = _index_metadata(cursor, "push_outbox")
+    if not any(
+        columns[:2] == ("status", "enviado_em")
+        for _, columns in indexes.values()
+    ):
+        cursor.execute(
+            "CREATE INDEX idx_push_outbox_retencao "
+            "ON push_outbox (status, enviado_em, id)"
         )
 
 
@@ -589,6 +660,9 @@ def _apply_compatibility_migrations() -> None:
         _apply_account_anonymization_migration(cursor)
         _apply_notification_preferences_migration(cursor)
         _apply_group_expense_observation_migration(cursor)
+        _apply_group_expense_creator_migration(cursor)
+        _apply_push_outbox_destination_migration(cursor)
+        _apply_push_outbox_retention_migration(cursor)
 
         cursor.execute("SHOW COLUMNS FROM refresh_tokens")
         colunas_refresh = {coluna[0] for coluna in cursor.fetchall()}

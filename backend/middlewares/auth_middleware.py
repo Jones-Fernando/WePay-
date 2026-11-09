@@ -1,7 +1,7 @@
 from functools import wraps
 
 import jwt
-from flask import request
+from flask import g, request
 
 from utils.jwt_utils import decode_token, is_access_token_valid
 from utils.response_utils import ResponseUtils
@@ -28,6 +28,7 @@ def token_required(f):
         except (jwt.PyJWTError, ValueError, TypeError):
             return ResponseUtils.erro("Token invalido.", status=401)
 
+        g.authenticated_user_id = current_user_id
         return f(current_user_id, *args, **kwargs)
 
     return decorated
