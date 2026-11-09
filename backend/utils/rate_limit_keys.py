@@ -9,8 +9,8 @@ from utils.jwt_utils import decode_token
 def authenticated_user_or_ip():
     user_id = getattr(g, "authenticated_user_id", None)
     if user_id is not None:
-        return f"user:{user_id}"
-    return f"ip:{get_remote_address()}"
+        return "user:" + str(user_id)
+    return "ip:" + str(get_remote_address())
 
 
 def refresh_user_or_ip():
