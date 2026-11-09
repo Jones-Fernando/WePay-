@@ -34,6 +34,38 @@ def criar_usuario_autenticado(client, email):
     return data, {"Authorization": f"Bearer {data['token']}"}
 
 
+def _mock_expo_connection(monkeypatch, response_body):
+    captured = {}
+
+    class Response:
+        status = 200
+
+        def read(self):
+            return response_body
+
+    class Connection:
+        def __init__(self, host, timeout):
+            captured["host"] = host
+            captured["timeout"] = timeout
+
+        def request(self, method, path, body, headers):
+            captured["method"] = method
+            captured["path"] = path
+            captured["payload"] = json.loads(body)
+            captured["headers"] = headers
+
+        def getresponse(self):
+            return Response()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        "services.notificacao_service.HTTPSConnection", Connection
+    )
+    return captured
+
+
 def test_preferencias_de_notificacao_sao_persistidas(client):
     _, headers = criar_usuario_autenticado(client, "push-preferences@example.com")
 
@@ -256,27 +288,8 @@ def test_worker_reagenda_push_apos_falha_transitoria(client, monkeypatch):
 
 
 def test_push_request_usa_servico_expo(monkeypatch):
-    class Resposta:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def read(self):
-            return b'{"data":[{"status":"ok"}]}'
-
-    capturado = {}
-
-    def fake_urlopen(request, timeout):
-        capturado["url"] = request.full_url
-        capturado["payload"] = json.loads(request.data)
-        capturado["timeout"] = timeout
-        return Resposta()
-
-    monkeypatch.setattr(
-        "services.notificacao_service.urlopen",
-        fake_urlopen,
+    capturado = _mock_expo_connection(
+        monkeypatch, b'{"data":[{"status":"ok"}]}'
     )
     monkeypatch.setattr(
         "services.notificacao_service.Config.EXPO_ACCESS_TOKEN",
@@ -287,25 +300,18 @@ def test_push_request_usa_servico_expo(monkeypatch):
         [{"to": "ExpoPushToken[device]", "title": "Teste"}]
     )
 
-    assert capturado["url"] == "https://exp.host/--/api/v2/push/send"
+    assert capturado["host"] == "exp.host"
+    assert capturado["path"] == "/--/api/v2/push/send"
+    assert capturado["method"] == "POST"
     assert capturado["payload"][0]["title"] == "Teste"
     assert capturado["timeout"] == 5
+    assert capturado["headers"]["Authorization"] == "Bearer expo-test-access"
 
 
 def test_push_rejeita_ticket_com_falha_do_expo(monkeypatch):
-    class RespostaComTicketFalho:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def read(self):
-            return b'{"data":[{"status":"error","message":"DeviceNotRegistered"}]}'
-
-    monkeypatch.setattr(
-        "services.notificacao_service.urlopen",
-        lambda *_args, **_kwargs: RespostaComTicketFalho(),
+    _mock_expo_connection(
+        monkeypatch,
+        b'{"data":[{"status":"error","message":"DeviceNotRegistered"}]}',
     )
     tickets = NotificacaoService._enviar_lote_push(
         [{"to": "ExpoPushToken[device]", "title": "Teste"}]
@@ -314,33 +320,24 @@ def test_push_rejeita_ticket_com_falha_do_expo(monkeypatch):
 
 
 def test_push_consulta_recibos_com_endpoint_do_expo(monkeypatch):
-    class Resposta:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def read(self):
-            return b'{"data":{"ticket-1":{"status":"ok"}}}'
-
-    capturado = {}
-
-    def fake_urlopen(request, timeout):
-        capturado["url"] = request.full_url
-        capturado["payload"] = json.loads(request.data)
-        capturado["timeout"] = timeout
-        return Resposta()
-
-    monkeypatch.setattr("services.notificacao_service.urlopen", fake_urlopen)
+    capturado = _mock_expo_connection(
+        monkeypatch, b'{"data":{"ticket-1":{"status":"ok"}}}'
+    )
     recibos = NotificacaoService._consultar_recibos(["ticket-1"])
 
-    assert capturado == {
-        "url": "https://exp.host/--/api/v2/push/getReceipts",
-        "payload": {"ids": ["ticket-1"]},
-        "timeout": 5,
-    }
+    assert capturado["host"] == "exp.host"
+    assert capturado["path"] == "/--/api/v2/push/getReceipts"
+    assert capturado["method"] == "POST"
+    assert capturado["payload"] == {"ids": ["ticket-1"]}
+    assert capturado["timeout"] == 5
     assert recibos == {"ticket-1": {"status": "ok"}}
+
+
+def test_push_rejeita_endpoint_expo_nao_permitido():
+    with pytest.raises(ValueError, match="Endpoint Expo invalido"):
+        NotificacaoService._post_expo_json(
+            "https://example.invalid/", {}, {}
+        )
 
 
 def test_notificacoes_sao_listadas_e_marcadas_com_escopo_do_usuario(client):

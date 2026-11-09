@@ -216,7 +216,7 @@ class AuthController:
         data = data or {}
         refresh_token = data.get("refresh_token")
         cookie_refresh = request.cookies.get(Config.AUTH_REFRESH_COOKIE_NAME)
-        usa_cookie = not refresh_token and bool(cookie_refresh)
+        usa_cookie = not refresh_token and cookie_refresh not in (None, "")
         if usa_cookie and not _origem_web_permitida():
             resposta = ResponseUtils.erro(
                 "Origem da requisicao invalida.", status=403

@@ -6,7 +6,7 @@ import pytest
 
 os.environ.setdefault("APP_ENV", "testing")
 os.environ.setdefault("DB_NAME", "wepay_test")
-os.environ.setdefault("SECRET_KEY", "test-secret-key")
+os.environ.setdefault("SECRET_KEY", "test-only-secret-key-at-least-32-bytes")
 os.environ.setdefault("ALLOW_EMAIL_TEST", "false")
 
 if os.environ["APP_ENV"].strip().lower() != "testing":

@@ -163,21 +163,25 @@ class NotificacaoModel:
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
-                where = " WHERE usuario_id = ?"
-                params = [usuario_id]
-                if somente_nao_lidas:
-                    where += " AND lida = 0"
+                filtro_nao_lidas = 1 if somente_nao_lidas else 0
                 cursor.execute(
-                    "SELECT COUNT(*) AS total FROM notificacoes" + where,
-                    tuple(params),
+                    """
+                    SELECT COUNT(*) AS total
+                    FROM notificacoes
+                    WHERE usuario_id = ? AND (? = 0 OR lida = 0)
+                    """,
+                    (usuario_id, filtro_nao_lidas),
                 )
                 total = int(fetch_one(cursor)["total"])
                 cursor.execute(
-                    "SELECT id, grupo_id, tipo, titulo, mensagem, lida, criado_em "
-                    "FROM notificacoes"
-                    + where
-                    + " ORDER BY criado_em DESC, id DESC LIMIT ? OFFSET ?",
-                    (*params, limit, offset),
+                    """
+                    SELECT id, grupo_id, tipo, titulo, mensagem, lida, criado_em
+                    FROM notificacoes
+                    WHERE usuario_id = ? AND (? = 0 OR lida = 0)
+                    ORDER BY criado_em DESC, id DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (usuario_id, filtro_nao_lidas, limit, offset),
                 )
                 return fetch_all(cursor), {
                     "limit": limit,

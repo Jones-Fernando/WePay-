@@ -27,7 +27,7 @@ class UsuarioModel:
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
-                cursor.execute(
+                query = (
                     """
                     SELECT id,
                            CASE WHEN excluido_em IS NULL THEN nome
@@ -41,9 +41,24 @@ class UsuarioModel:
                             WHERE s.usuario_id = usuarios.id) AS saldo_total
                     FROM usuarios
                     WHERE id = ?
-                    """ + ("" if incluir_excluido else " AND excluido_em IS NULL"),
-                    (usuario_id,),
+                    """
                 )
+                if not incluir_excluido:
+                    query = """
+                        SELECT id,
+                               CASE WHEN excluido_em IS NULL THEN nome
+                                    ELSE 'Usuário excluído' END AS nome,
+                               CASE WHEN excluido_em IS NULL THEN email
+                                    ELSE NULL END AS email,
+                               CASE WHEN excluido_em IS NULL THEN telefone
+                                    ELSE NULL END AS telefone,
+                               (SELECT COALESCE(SUM(s.saldo), 0)
+                                FROM saldos s
+                                WHERE s.usuario_id = usuarios.id) AS saldo_total
+                        FROM usuarios
+                        WHERE id = ? AND excluido_em IS NULL
+                    """
+                cursor.execute(query, (usuario_id,))
                 return fetch_one(cursor)
             finally:
                 cursor.close()

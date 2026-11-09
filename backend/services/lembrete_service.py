@@ -14,7 +14,15 @@ class LembreteService:
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
-                query = """
+                params = (
+                    usuario_id,
+                    usuario_id,
+                    hoje.isoformat(),
+                    fim.isoformat(),
+                )
+                cursor.execute(
+                    """
+                    SELECT COUNT(DISTINCT d.id) AS total
                     FROM despesas d
                     JOIN grupos g ON g.id = d.grupo_id
                     JOIN participantes p ON p.grupo_id = d.grupo_id
@@ -25,15 +33,7 @@ class LembreteService:
                     WHERE d.vencimento IS NOT NULL
                       AND d.vencimento BETWEEN ? AND ?
                       AND COALESCE(s.saldo, 0) <> 0
-                """
-                params = (
-                    usuario_id,
-                    usuario_id,
-                    hoje.isoformat(),
-                    fim.isoformat(),
-                )
-                cursor.execute(
-                    "SELECT COUNT(DISTINCT d.id) AS total " + query,
+                    """,
                     params,
                 )
                 total = int(cursor.fetchone()["total"])
@@ -48,9 +48,16 @@ class LembreteService:
                         g.nome AS grupo_nome,
                         COALESCE(s.saldo, 0) AS saldo_no_grupo,
                         CASE WHEN d.pagador_id = ? THEN 1 ELSE 0 END AS sou_pagador
-                    """
-                    + query
-                    + """
+                    FROM despesas d
+                    JOIN grupos g ON g.id = d.grupo_id
+                    JOIN participantes p ON p.grupo_id = d.grupo_id
+                                            AND p.usuario_id = ?
+                                            AND p.ativo = 1
+                    LEFT JOIN saldos s ON s.grupo_id = d.grupo_id
+                                      AND s.usuario_id = ?
+                    WHERE d.vencimento IS NOT NULL
+                      AND d.vencimento BETWEEN ? AND ?
+                      AND COALESCE(s.saldo, 0) <> 0
                     ORDER BY d.vencimento ASC, d.id ASC
                     LIMIT ? OFFSET ?
                     """,

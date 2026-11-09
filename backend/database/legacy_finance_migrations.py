@@ -1,5 +1,7 @@
 from typing import Any, Protocol
 
+from database.sql_identifiers import quote_mysql_identifier
+
 
 class MigrationCursor(Protocol):
     def execute(self, operation: str, params: Any = None) -> Any: ...
@@ -12,7 +14,7 @@ class MigrationCursor(Protocol):
 def _columns(
     cursor: MigrationCursor, table: str
 ) -> dict[str, tuple[str, bool, Any]]:
-    cursor.execute(f"SHOW COLUMNS FROM `{table}`")
+    cursor.execute(f"SHOW COLUMNS FROM {quote_mysql_identifier(table)}")
     return {
         str(row[0]): (
             str(row[1]),
@@ -40,7 +42,7 @@ def _legacy_columns_need_adjustment(
 def _indexes(
     cursor: MigrationCursor, table: str
 ) -> dict[str, tuple[bool, tuple[str, ...]]]:
-    cursor.execute(f"SHOW INDEX FROM `{table}`")
+    cursor.execute(f"SHOW INDEX FROM {quote_mysql_identifier(table)}")
     indexes: dict[str, tuple[bool, list[str]]] = {}
     for row in cursor.fetchall():
         name = str(row[2])
@@ -65,10 +67,13 @@ def _ensure_index(
         for existing_unique, existing_columns in _indexes(cursor, table).values()
     ):
         return
-    column_list = ", ".join(f"`{column}`" for column in columns)
+    column_list = ", ".join(
+        quote_mysql_identifier(column) for column in columns
+    )
     kind = "UNIQUE INDEX" if unique else "INDEX"
     cursor.execute(
-        f"ALTER TABLE `{table}` ADD {kind} `{name}` ({column_list})"
+        f"ALTER TABLE {quote_mysql_identifier(table)} ADD {kind} "
+        f"{quote_mysql_identifier(name)} ({column_list})"
     )
 
 
@@ -100,8 +105,10 @@ def _ensure_foreign_key(
     if _foreign_keys_for_column(cursor, table, column):
         return
     cursor.execute(
-        f"ALTER TABLE `{table}` ADD CONSTRAINT `{name}` "
-        f"FOREIGN KEY (`{column}`) REFERENCES `{referenced_table}` (`id`) "
+        f"ALTER TABLE {quote_mysql_identifier(table)} "
+        f"ADD CONSTRAINT {quote_mysql_identifier(name)} "
+        f"FOREIGN KEY ({quote_mysql_identifier(column)}) "
+        f"REFERENCES {quote_mysql_identifier(referenced_table)} (`id`) "
         f"ON DELETE {on_delete}"
     )
 
@@ -173,7 +180,10 @@ def _apply_despesas_migration(cursor: MigrationCursor) -> None:
     }
     for name, definition in additions.items():
         if name not in columns:
-            cursor.execute(f"ALTER TABLE despesas ADD COLUMN `{name}` {definition}")
+            cursor.execute(
+                f"ALTER TABLE despesas ADD COLUMN "
+                f"{quote_mysql_identifier(name)} {definition}"
+            )
 
     if "pagador_participante_id" in columns:
         cursor.execute(
@@ -204,8 +214,9 @@ def _apply_despesas_migration(cursor: MigrationCursor) -> None:
     ):
         if old_column in columns:
             cursor.execute(
-                f"UPDATE despesas SET `{new_column}` = `{old_column}` "
-                f"WHERE `{new_column}` IS NULL"
+                f"UPDATE despesas SET {quote_mysql_identifier(new_column)} = "
+                f"{quote_mysql_identifier(old_column)} "
+                f"WHERE {quote_mysql_identifier(new_column)} IS NULL"
             )
     cursor.execute(
         "UPDATE despesas SET criado_em = CURRENT_TIMESTAMP WHERE criado_em IS NULL"
@@ -233,12 +244,14 @@ def _apply_despesas_migration(cursor: MigrationCursor) -> None:
     }.items():
         if name in columns:
             cursor.execute(
-                f"ALTER TABLE despesas MODIFY COLUMN `{name}` {definition}"
+                f"ALTER TABLE despesas MODIFY COLUMN "
+                f"{quote_mysql_identifier(name)} {definition}"
             )
     for name in ("created_at", "updated_at"):
         if name in columns:
             cursor.execute(
-                f"ALTER TABLE despesas MODIFY COLUMN `{name}` "
+                f"ALTER TABLE despesas MODIFY COLUMN "
+                f"{quote_mysql_identifier(name)} "
                 "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
             )
 
@@ -334,7 +347,8 @@ def _apply_divisoes_migration(cursor: MigrationCursor) -> None:
     for name, definition in additions.items():
         if name not in columns:
             cursor.execute(
-                f"ALTER TABLE despesa_divisoes ADD COLUMN `{name}` {definition}"
+                f"ALTER TABLE despesa_divisoes ADD COLUMN "
+                f"{quote_mysql_identifier(name)} {definition}"
             )
 
     if "participante_id" in columns:
@@ -404,12 +418,14 @@ def _apply_divisoes_migration(cursor: MigrationCursor) -> None:
     ):
         if name in columns:
             cursor.execute(
-                f"ALTER TABLE despesa_divisoes MODIFY COLUMN `{name}` {definition}"
+                f"ALTER TABLE despesa_divisoes MODIFY COLUMN "
+                f"{quote_mysql_identifier(name)} {definition}"
             )
     for name in ("created_at", "updated_at"):
         if name in columns:
             cursor.execute(
-                f"ALTER TABLE despesa_divisoes MODIFY COLUMN `{name}` "
+                f"ALTER TABLE despesa_divisoes MODIFY COLUMN "
+                f"{quote_mysql_identifier(name)} "
                 "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
             )
     cursor.execute(
@@ -475,8 +491,10 @@ def _apply_pagamentos_migration(cursor: MigrationCursor) -> None:
                 SELECT COUNT(*)
                 FROM pagamentos pg
                 LEFT JOIN participantes p
-                  ON p.id = pg.`{old_column}` AND p.grupo_id = pg.grupo_id
-                WHERE pg.`{old_column}` IS NOT NULL AND p.id IS NULL
+                  ON p.id = pg.{quote_mysql_identifier(old_column)}
+                  AND p.grupo_id = pg.grupo_id
+                WHERE pg.{quote_mysql_identifier(old_column)} IS NOT NULL
+                  AND p.id IS NULL
                 """,
             ):
                 raise RuntimeError(
@@ -496,7 +514,10 @@ def _apply_pagamentos_migration(cursor: MigrationCursor) -> None:
     }
     for name, definition in additions.items():
         if name not in columns:
-            cursor.execute(f"ALTER TABLE pagamentos ADD COLUMN `{name}` {definition}")
+            cursor.execute(
+                f"ALTER TABLE pagamentos ADD COLUMN "
+                f"{quote_mysql_identifier(name)} {definition}"
+            )
     for old_column, target_column in (
         ("pagador_participante_id", "pagador_id"),
         ("recebedor_participante_id", "recebedor_id"),
@@ -506,9 +527,10 @@ def _apply_pagamentos_migration(cursor: MigrationCursor) -> None:
                 f"""
                 UPDATE pagamentos pg
                 JOIN participantes p
-                  ON p.id = pg.`{old_column}` AND p.grupo_id = pg.grupo_id
-                SET pg.`{target_column}` = p.usuario_id
-                WHERE pg.`{target_column}` IS NULL
+                  ON p.id = pg.{quote_mysql_identifier(old_column)}
+                  AND p.grupo_id = pg.grupo_id
+                SET pg.{quote_mysql_identifier(target_column)} = p.usuario_id
+                WHERE pg.{quote_mysql_identifier(target_column)} IS NULL
                 """
             )
     if "created_at" in columns:
@@ -536,7 +558,8 @@ def _apply_pagamentos_migration(cursor: MigrationCursor) -> None:
     ):
         if name in columns:
             cursor.execute(
-                f"ALTER TABLE pagamentos MODIFY COLUMN `{name}` "
+                f"ALTER TABLE pagamentos MODIFY COLUMN "
+                f"{quote_mysql_identifier(name)} "
                 "BIGINT UNSIGNED NULL"
             )
     if "metodo" in columns:
@@ -550,7 +573,8 @@ def _apply_pagamentos_migration(cursor: MigrationCursor) -> None:
         )
     for name in ("pagador_id", "recebedor_id"):
         cursor.execute(
-            f"ALTER TABLE pagamentos MODIFY COLUMN `{name}` "
+            f"ALTER TABLE pagamentos MODIFY COLUMN "
+            f"{quote_mysql_identifier(name)} "
             "BIGINT UNSIGNED NOT NULL"
         )
     cursor.execute(

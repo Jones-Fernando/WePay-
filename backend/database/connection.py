@@ -11,6 +11,7 @@ from config import Config
 from database.legacy_finance_migrations import apply_legacy_finance_migrations
 from database.legacy_invite_migrations import apply_legacy_invitation_migration
 from database.legacy_recovery_migrations import apply_legacy_recovery_migration
+from database.sql_identifiers import quote_mysql_identifier
 
 mysql_connector: Any = None
 try:
@@ -66,12 +67,12 @@ def _connect_mysql(database: str | None = None) -> Any:
 
 
 def _ensure_mysql_database() -> None:
-    db_name = Config.DB_NAME.replace("`", "")
+    db_name = quote_mysql_identifier(Config.DB_NAME)
     connection = _connect_mysql()
     try:
         cursor = connection.cursor()
         cursor.execute(
-            f"CREATE DATABASE IF NOT EXISTS `{db_name}` "
+            f"CREATE DATABASE IF NOT EXISTS {db_name} "
             "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
         )
         connection.commit()
@@ -131,14 +132,14 @@ def _record_schema_version() -> None:
 
 
 def _column_metadata(cursor: _MigrationCursor, table: str) -> dict[str, str]:
-    cursor.execute(f"SHOW COLUMNS FROM `{table}`")
+    cursor.execute(f"SHOW COLUMNS FROM {quote_mysql_identifier(table)}")
     return {str(column[0]): str(column[1]) for column in cursor.fetchall()}
 
 
 def _index_metadata(
     cursor: _MigrationCursor, table: str
 ) -> dict[str, tuple[bool, tuple[str, ...]]]:
-    cursor.execute(f"SHOW INDEX FROM `{table}`")
+    cursor.execute(f"SHOW INDEX FROM {quote_mysql_identifier(table)}")
     indexes: dict[str, tuple[bool, list[str]]] = {}
     for row in cursor.fetchall():
         name = str(row[2])
@@ -156,8 +157,10 @@ def _drop_indexes_for_columns(
 ) -> None:
     for name, (_, columns) in _index_metadata(cursor, table).items():
         if name != "PRIMARY" and column_names.intersection(columns):
-            escaped_name = name.replace("`", "``")
-            cursor.execute(f"ALTER TABLE `{table}` DROP INDEX `{escaped_name}`")
+            cursor.execute(
+                f"ALTER TABLE {quote_mysql_identifier(table)} "
+                f"DROP INDEX {quote_mysql_identifier(name)}"
+            )
 
 
 def _foreign_keys_for_column(
@@ -435,9 +438,12 @@ def _apply_participantes_migration(cursor: _MigrationCursor) -> None:
     if legacy_columns:
         _drop_indexes_for_columns(cursor, "participantes", legacy_columns)
         drop_clauses = ", ".join(
-            f"DROP COLUMN `{name}`" for name in sorted(legacy_columns)
+            f"DROP COLUMN {quote_mysql_identifier(name)}"
+            for name in sorted(legacy_columns)
         )
-        cursor.execute(f"ALTER TABLE participantes {drop_clauses}")
+        cursor.execute(
+            f"ALTER TABLE {quote_mysql_identifier('participantes')} {drop_clauses}"
+        )
 
     indexes = _index_metadata(cursor, "participantes")
     if not any(columns == ("grupo_id", "ativo") for _, columns in indexes.values()):
@@ -620,15 +626,18 @@ def _apply_saldos_migration(cursor: _MigrationCursor) -> None:
             for name in _foreign_keys_for_column(
                 cursor, "saldos", "participante_id"
             ):
-                escaped_name = name.replace("`", "``")
                 cursor.execute(
-                    f"ALTER TABLE saldos DROP FOREIGN KEY `{escaped_name}`"
+                    f"ALTER TABLE {quote_mysql_identifier('saldos')} "
+                    f"DROP FOREIGN KEY {quote_mysql_identifier(name)}"
                 )
         _drop_indexes_for_columns(cursor, "saldos", legacy_columns)
         drop_clauses = ", ".join(
-            f"DROP COLUMN `{name}`" for name in sorted(legacy_columns)
+            f"DROP COLUMN {quote_mysql_identifier(name)}"
+            for name in sorted(legacy_columns)
         )
-        cursor.execute(f"ALTER TABLE saldos {drop_clauses}")
+        cursor.execute(
+            f"ALTER TABLE {quote_mysql_identifier('saldos')} {drop_clauses}"
+        )
 
 
 def _apply_compatibility_migrations() -> None:

@@ -35,42 +35,67 @@ class DespesaPessoalModel:
         limit=50,
         offset=0,
     ):
+        categoria_filtro = categoria if categoria else None
+        tipo_filtro = tipo if tipo else None
+        inicio_filtro = data_inicio if data_inicio else None
+        fim_filtro = data_fim if data_fim else None
+        params = (
+            usuario_id,
+            categoria_filtro,
+            categoria_filtro,
+            tipo_filtro,
+            tipo_filtro,
+            inicio_filtro,
+            inicio_filtro,
+            fim_filtro,
+            fim_filtro,
+        )
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
-                where = " WHERE usuario_id = ?"
-                params = [usuario_id]
-                if categoria:
-                    where += " AND categoria = ?"
-                    params.append(categoria)
-                if tipo:
-                    where += " AND tipo = ?"
-                    params.append(tipo)
-                if data_inicio:
-                    where += " AND data_despesa >= ?"
-                    params.append(data_inicio)
-                if data_fim:
-                    where += " AND data_despesa <= ?"
-                    params.append(data_fim)
                 cursor.execute(
-                    "SELECT COUNT(*) AS total FROM despesas_pessoais" + where,
-                    tuple(params),
+                    """
+                    SELECT COUNT(*) AS total
+                    FROM despesas_pessoais
+                    WHERE usuario_id = ?
+                      AND (? IS NULL OR categoria = ?)
+                      AND (? IS NULL OR tipo = ?)
+                      AND (? IS NULL OR data_despesa >= ?)
+                      AND (? IS NULL OR data_despesa <= ?)
+                    """,
+                    params,
                 )
                 total = int(fetch_one(cursor)["total"])
                 cursor.execute(
-                    "SELECT categoria, SUM(valor) AS valor "
-                    "FROM despesas_pessoais" + where +
-                    " GROUP BY categoria ORDER BY categoria",
-                    tuple(params),
+                    """
+                    SELECT categoria, SUM(valor) AS valor
+                    FROM despesas_pessoais
+                    WHERE usuario_id = ?
+                      AND (? IS NULL OR categoria = ?)
+                      AND (? IS NULL OR tipo = ?)
+                      AND (? IS NULL OR data_despesa >= ?)
+                      AND (? IS NULL OR data_despesa <= ?)
+                    GROUP BY categoria
+                    ORDER BY categoria
+                    """,
+                    params,
                 )
                 categorias = fetch_all(cursor)
                 cursor.execute(
-                    "SELECT id, usuario_id, descricao, valor, categoria, tipo, "
-                    "CAST(data_despesa AS CHAR) AS data_despesa, "
-                    "CAST(criado_em AS CHAR) AS criado_em, "
-                    "CAST(atualizado_em AS CHAR) AS atualizado_em "
-                    "FROM despesas_pessoais" + where +
-                    " ORDER BY data_despesa DESC, id DESC LIMIT ? OFFSET ?",
+                    """
+                    SELECT id, usuario_id, descricao, valor, categoria, tipo,
+                           CAST(data_despesa AS CHAR) AS data_despesa,
+                           CAST(criado_em AS CHAR) AS criado_em,
+                           CAST(atualizado_em AS CHAR) AS atualizado_em
+                    FROM despesas_pessoais
+                    WHERE usuario_id = ?
+                      AND (? IS NULL OR categoria = ?)
+                      AND (? IS NULL OR tipo = ?)
+                      AND (? IS NULL OR data_despesa >= ?)
+                      AND (? IS NULL OR data_despesa <= ?)
+                    ORDER BY data_despesa DESC, id DESC
+                    LIMIT ? OFFSET ?
+                    """,
                     (*params, limit, offset),
                 )
                 dados = fetch_all(cursor)

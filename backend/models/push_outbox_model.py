@@ -44,41 +44,63 @@ class PushOutboxModel:
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
-                filtro_outbox = "status = 'failed'"
-                filtro_destinatario = "o.status = 'failed'"
-                params: tuple[int, ...] = ()
                 if outbox_id is not None:
-                    filtro_outbox += " AND id = ?"
-                    filtro_destinatario += " AND o.id = ?"
-                    params = (outbox_id,)
-                cursor.execute(
-                    f"""
-                    UPDATE push_outbox_destinatarios d
-                    JOIN expo_push_tokens t ON t.token = d.token
-                    JOIN push_outbox o ON o.id = d.outbox_id
-                    SET d.status = 'pending',
-                        d.ticket_id = NULL,
-                        d.receipt_check_at = NULL,
-                        d.receipt_expires_at = NULL,
-                        d.ultimo_erro = NULL
-                    WHERE {filtro_destinatario}
-                      AND d.status = 'failed'
-                    """,
-                    params,
-                )
-                cursor.execute(
-                    f"""
-                    UPDATE push_outbox
-                    SET status = 'pending',
-                        tentativas = 0,
-                        disponivel_em = CURRENT_TIMESTAMP,
-                        reservado_em = NULL,
-                        enviado_em = NULL,
-                        ultimo_erro = NULL
-                    WHERE {filtro_outbox}
-                    """,
-                    params,
-                )
+                    cursor.execute(
+                        """
+                        UPDATE push_outbox_destinatarios d
+                        JOIN expo_push_tokens t ON t.token = d.token
+                        JOIN push_outbox o ON o.id = d.outbox_id
+                        SET d.status = 'pending',
+                            d.ticket_id = NULL,
+                            d.receipt_check_at = NULL,
+                            d.receipt_expires_at = NULL,
+                            d.ultimo_erro = NULL
+                        WHERE o.status = 'failed'
+                          AND o.id = ?
+                          AND d.status = 'failed'
+                        """,
+                        (outbox_id,),
+                    )
+                    cursor.execute(
+                        """
+                        UPDATE push_outbox
+                        SET status = 'pending',
+                            tentativas = 0,
+                            disponivel_em = CURRENT_TIMESTAMP,
+                            reservado_em = NULL,
+                            enviado_em = NULL,
+                            ultimo_erro = NULL
+                        WHERE status = 'failed' AND id = ?
+                        """,
+                        (outbox_id,),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE push_outbox_destinatarios d
+                        JOIN expo_push_tokens t ON t.token = d.token
+                        JOIN push_outbox o ON o.id = d.outbox_id
+                        SET d.status = 'pending',
+                            d.ticket_id = NULL,
+                            d.receipt_check_at = NULL,
+                            d.receipt_expires_at = NULL,
+                            d.ultimo_erro = NULL
+                        WHERE o.status = 'failed'
+                          AND d.status = 'failed'
+                        """
+                    )
+                    cursor.execute(
+                        """
+                        UPDATE push_outbox
+                        SET status = 'pending',
+                            tentativas = 0,
+                            disponivel_em = CURRENT_TIMESTAMP,
+                            reservado_em = NULL,
+                            enviado_em = NULL,
+                            ultimo_erro = NULL
+                        WHERE status = 'failed'
+                        """
+                    )
                 reprocessados = cursor.rowcount
                 conn.commit()
                 return reprocessados

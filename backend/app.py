@@ -248,7 +248,8 @@ if __name__ == "__main__":
     app = create_app()
     initialize_database()
     app.run(
-        debug=True,
+        debug=os.getenv("FLASK_DEBUG", "").strip().lower()
+        in {"1", "true", "yes", "on"},
         host=os.getenv("HOST", "127.0.0.1"),
         port=int(os.getenv("PORT", 5000)),
     )

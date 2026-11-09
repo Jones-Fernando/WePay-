@@ -1,14 +1,37 @@
 import json
-from urllib.request import Request, urlopen
+from http.client import HTTPSConnection
 
 from config import Config
 from models.notificacao_model import NotificacaoModel
 
-_EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
-_EXPO_RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts"
+_EXPO_HOST = "exp.host"
+_EXPO_PUSH_PATH = "/--/api/v2/push/send"
+_EXPO_RECEIPTS_PATH = "/--/api/v2/push/getReceipts"
 
 
 class NotificacaoService:
+    @staticmethod
+    def _post_expo_json(path, payload, headers):
+        if path not in {_EXPO_PUSH_PATH, _EXPO_RECEIPTS_PATH}:
+            raise ValueError("Endpoint Expo invalido.")
+        connection = HTTPSConnection(_EXPO_HOST, timeout=5)
+        try:
+            connection.request(
+                "POST",
+                path,
+                body=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+            )
+            response = connection.getresponse()
+            body = response.read()
+            if not 200 <= response.status < 300:
+                raise RuntimeError(
+                    f"Expo Push Service retornou HTTP {response.status}."
+                )
+        finally:
+            connection.close()
+        return json.loads(body.decode("utf-8"))
+
     @staticmethod
     def notificar_nova_despesa(grupo_id, autor_id, descricao, valor, conn):
         from database.connection import cursor_for, fetch_all
@@ -70,14 +93,9 @@ class NotificacaoService:
         }
         if Config.EXPO_ACCESS_TOKEN:
             headers["Authorization"] = f"Bearer {Config.EXPO_ACCESS_TOKEN}"
-        request = Request(
-            _EXPO_PUSH_URL,
-            data=json.dumps(mensagens).encode("utf-8"),
-            headers=headers,
-            method="POST",
+        resultado = NotificacaoService._post_expo_json(
+            _EXPO_PUSH_PATH, mensagens, headers
         )
-        with urlopen(request, timeout=5) as response:
-            resultado = json.loads(response.read().decode("utf-8"))
         if resultado.get("errors"):
             raise RuntimeError("Expo Push Service rejeitou a notificacao.")
         tickets = resultado.get("data")
@@ -99,14 +117,9 @@ class NotificacaoService:
         }
         if Config.EXPO_ACCESS_TOKEN:
             headers["Authorization"] = f"******"
-        request = Request(
-            _EXPO_RECEIPTS_URL,
-            data=json.dumps({"ids": ticket_ids}).encode("utf-8"),
-            headers=headers,
-            method="POST",
+        resultado = NotificacaoService._post_expo_json(
+            _EXPO_RECEIPTS_PATH, {"ids": ticket_ids}, headers
         )
-        with urlopen(request, timeout=5) as response:
-            resultado = json.loads(response.read().decode("utf-8"))
         if resultado.get("errors"):
             raise RuntimeError("Expo Push Service rejeitou a consulta de recibos.")
         recibos = resultado.get("data")

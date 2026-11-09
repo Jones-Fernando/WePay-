@@ -1,5 +1,7 @@
 from typing import Any, Protocol
 
+from database.sql_identifiers import quote_mysql_identifier
+
 
 class MigrationCursor(Protocol):
     def execute(self, operation: str, params: Any = None) -> Any: ...
@@ -39,7 +41,8 @@ def _ensure_index(
     if (column,) in _indexes(cursor).values():
         return
     cursor.execute(
-        f"ALTER TABLE `convites_grupo` ADD INDEX `{name}` (`{column}`)"
+        f"ALTER TABLE `convites_grupo` ADD INDEX "
+        f"{quote_mysql_identifier(name)} ({quote_mysql_identifier(column)})"
     )
 
 
@@ -91,21 +94,25 @@ def apply_legacy_invitation_migration(cursor: MigrationCursor) -> None:
     for name, definition in additions.items():
         if name not in columns:
             cursor.execute(
-                f"ALTER TABLE `convites_grupo` ADD COLUMN `{name}` {definition}"
+                f"ALTER TABLE `convites_grupo` ADD COLUMN "
+                f"{quote_mysql_identifier(name)} {definition}"
             )
 
     for target, source in legacy_sources.items():
         if source in columns:
-            empty_check = f"`{target}` IS NULL"
+            quoted_target = quote_mysql_identifier(target)
+            quoted_source = quote_mysql_identifier(source)
+            empty_check = f"{quoted_target} IS NULL"
             if target == "email":
-                empty_check += f" OR `{target}` = ''"
+                empty_check += f" OR {quoted_target} = ''"
             cursor.execute(
-                f"UPDATE `convites_grupo` SET `{target}` = `{source}` "
+                f"UPDATE `convites_grupo` SET {quoted_target} = {quoted_source} "
                 f"WHERE {empty_check}"
             )
             if not columns[source][1]:
                 cursor.execute(
-                    f"ALTER TABLE `convites_grupo` MODIFY COLUMN `{source}` "
+                    f"ALTER TABLE `convites_grupo` MODIFY COLUMN "
+                    f"{quoted_source} "
                     f"{columns[source][0]} NULL"
                 )
 

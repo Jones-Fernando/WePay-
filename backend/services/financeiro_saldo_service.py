@@ -85,14 +85,18 @@ class FinanceiroSaldoService:
                     (grupo_id, uid, saldo),
                 )
 
-            if saldos:
-                placeholders = ",".join(["?"] * len(saldos))
-                cursor.execute(
-                    f"DELETE FROM saldos WHERE grupo_id = ? AND usuario_id NOT IN ({placeholders})",
-                    (grupo_id, *sorted(saldos)),
-                )
-            else:
-                cursor.execute("DELETE FROM saldos WHERE grupo_id = ?", (grupo_id,))
+            cursor.execute(
+                "SELECT usuario_id FROM saldos WHERE grupo_id = ?",
+                (grupo_id,),
+            )
+            armazenados = fetch_all(cursor)
+            for row in armazenados:
+                usuario_id = int(row["usuario_id"])
+                if usuario_id not in saldos:
+                    cursor.execute(
+                        "DELETE FROM saldos WHERE grupo_id = ? AND usuario_id = ?",
+                        (grupo_id, usuario_id),
+                    )
         finally:
             cursor.close()
 

@@ -1,5 +1,7 @@
 from typing import Any, Protocol
 
+from database.sql_identifiers import quote_mysql_identifier
+
 
 class MigrationCursor(Protocol):
     def execute(self, operation: str, params: Any = None) -> Any: ...
@@ -52,18 +54,22 @@ def apply_legacy_recovery_migration(cursor: MigrationCursor) -> None:
     for name, definition in additions.items():
         if name not in columns:
             cursor.execute(
-                f"ALTER TABLE `recuperacao_tokens` ADD COLUMN `{name}` {definition}"
+                f"ALTER TABLE `recuperacao_tokens` ADD COLUMN "
+                f"{quote_mysql_identifier(name)} {definition}"
             )
 
     for target, source in aliases.items():
         if source in columns:
             cursor.execute(
-                f"UPDATE `recuperacao_tokens` SET `{target}` = `{source}` "
-                f"WHERE `{target}` IS NULL"
+                f"UPDATE `recuperacao_tokens` "
+                f"SET {quote_mysql_identifier(target)} = "
+                f"{quote_mysql_identifier(source)} "
+                f"WHERE {quote_mysql_identifier(target)} IS NULL"
             )
             if not columns[source][1]:
                 cursor.execute(
-                    f"ALTER TABLE `recuperacao_tokens` MODIFY COLUMN `{source}` "
+                    f"ALTER TABLE `recuperacao_tokens` MODIFY COLUMN "
+                    f"{quote_mysql_identifier(source)} "
                     f"{columns[source][0]} NULL"
                 )
 
@@ -108,5 +114,5 @@ def apply_legacy_recovery_migration(cursor: MigrationCursor) -> None:
             )
             cursor.execute(
                 f"ALTER TABLE `recuperacao_tokens` "
-                f"MODIFY COLUMN `{name}` {definition}"
+                f"MODIFY COLUMN {quote_mysql_identifier(name)} {definition}"
             )

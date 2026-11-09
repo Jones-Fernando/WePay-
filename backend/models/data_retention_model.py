@@ -33,6 +33,67 @@ RETENTION_RULES = (
     ),
 )
 
+RETENTION_QUERIES = {
+    "refresh_tokens": (
+        "SELECT COUNT(*) AS total FROM refresh_tokens "
+        "WHERE expires_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY)",
+        """
+        DELETE FROM refresh_tokens
+        WHERE expires_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY)
+        ORDER BY id
+        LIMIT ?
+        """,
+    ),
+    "revoked_tokens": (
+        "SELECT COUNT(*) AS total FROM revoked_tokens "
+        "WHERE expires_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY)",
+        """
+        DELETE FROM revoked_tokens
+        WHERE expires_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY)
+        ORDER BY id
+        LIMIT ?
+        """,
+    ),
+    "recuperacao_tokens": (
+        """
+        SELECT COUNT(*) AS total FROM recuperacao_tokens
+        WHERE expires_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY)
+          AND (usado_em IS NULL OR usado_em < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY))
+        """,
+        """
+        DELETE FROM recuperacao_tokens
+        WHERE expires_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY)
+          AND (usado_em IS NULL OR usado_em < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY))
+        ORDER BY id
+        LIMIT ?
+        """,
+    ),
+    "convites_grupo": (
+        """
+        SELECT COUNT(*) AS total FROM convites_grupo
+        WHERE expires_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 90 DAY)
+          AND (usado_em IS NULL OR usado_em < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 90 DAY))
+        """,
+        """
+        DELETE FROM convites_grupo
+        WHERE expires_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 90 DAY)
+          AND (usado_em IS NULL OR usado_em < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 90 DAY))
+        ORDER BY id
+        LIMIT ?
+        """,
+    ),
+    "push_outbox": (
+        "SELECT COUNT(*) AS total FROM push_outbox "
+        "WHERE status = 'sent' AND enviado_em < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 90 DAY)",
+        """
+        DELETE FROM push_outbox
+        WHERE status = 'sent' AND enviado_em < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 90 DAY)
+        ORDER BY id
+        LIMIT ?
+        """,
+    ),
+}
+
 
 class DataRetentionModel:
     @staticmethod
@@ -41,26 +102,17 @@ class DataRetentionModel:
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
-                for table, condition in RETENTION_RULES:
+                for table, _condition in RETENTION_RULES:
+                    count_query, delete_query = RETENTION_QUERIES[table]
                     if dry_run:
-                        cursor.execute(
-                            f"SELECT COUNT(*) AS total FROM {table} WHERE {condition}"
-                        )
+                        cursor.execute(count_query)
                         row = fetch_one(cursor)
                         counts[table] = int(row["total"])
                         continue
 
                     deleted = 0
                     while True:
-                        cursor.execute(
-                            f"""
-                            DELETE FROM {table}
-                            WHERE {condition}
-                            ORDER BY id
-                            LIMIT ?
-                            """,
-                            (batch_size,),
-                        )
+                        cursor.execute(delete_query, (batch_size,))
                         batch_count = int(cursor.rowcount)
                         if batch_count == 0:
                             break
