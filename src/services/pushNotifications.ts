@@ -3,9 +3,11 @@ import Constants from "expo-constants";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import { AndroidImportance } from "expo-notifications";
+import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
-const PUSH_TOKEN_KEY = "@wepay:expo_push_token";
+const PUSH_TOKEN_KEY = "wepay_expo_push_token";
+const LEGACY_PUSH_TOKEN_KEY = "@wepay:expo_push_token";
 let somAtivado = true;
 
 Notifications.setNotificationHandler({
@@ -74,12 +76,38 @@ export async function obterTokenPush(
   if (!permissao.granted) return null;
 
   const resposta = await Notifications.getExpoPushTokenAsync({ projectId });
-  await AsyncStorage.setItem(PUSH_TOKEN_KEY, resposta.data);
+  await SecureStore.setItemAsync(PUSH_TOKEN_KEY, resposta.data);
   return resposta.data;
 }
 
-export const obterTokenPushSalvo = () =>
-  AsyncStorage.getItem(PUSH_TOKEN_KEY);
+export async function obterTokenPushSalvo(): Promise<string | null> {
+  if (Platform.OS === "web") {
+    await AsyncStorage.removeItem(LEGACY_PUSH_TOKEN_KEY);
+    return null;
+  }
 
-export const limparTokenPushSalvo = () =>
-  AsyncStorage.removeItem(PUSH_TOKEN_KEY);
+  const tokenSeguro = await SecureStore.getItemAsync(PUSH_TOKEN_KEY);
+  if (tokenSeguro !== null) {
+    await AsyncStorage.removeItem(LEGACY_PUSH_TOKEN_KEY);
+    return tokenSeguro;
+  }
+
+  const tokenLegado = await AsyncStorage.getItem(LEGACY_PUSH_TOKEN_KEY);
+  if (tokenLegado !== null) {
+    await SecureStore.setItemAsync(PUSH_TOKEN_KEY, tokenLegado);
+    await AsyncStorage.removeItem(LEGACY_PUSH_TOKEN_KEY);
+  }
+  return tokenLegado;
+}
+
+export async function limparTokenPushSalvo(): Promise<void> {
+  if (Platform.OS === "web") {
+    await AsyncStorage.removeItem(LEGACY_PUSH_TOKEN_KEY);
+    return;
+  }
+
+  await Promise.all([
+    SecureStore.deleteItemAsync(PUSH_TOKEN_KEY),
+    AsyncStorage.removeItem(LEGACY_PUSH_TOKEN_KEY),
+  ]);
+}

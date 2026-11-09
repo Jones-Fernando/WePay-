@@ -71,4 +71,35 @@ describe("date input helpers", () => {
       .toBe("07/11/2026 às 13:05");
     expect(formatDateTimeForDisplay("invalid timestamp")).toBe("invalid timestamp");
   });
+
+  it("supports personal expense record formatting without changing timestamp semantics", () => {
+    const options = {
+      yearFormat: "2-digit" as const,
+      separator: " ",
+      invalidValue: "",
+    };
+    expect(formatDateTimeForDisplay("2026-11-07 13:05:18", options))
+      .toBe("07/11/26 13:05");
+    expect(formatDateTimeForDisplay("invalid timestamp", options)).toBe("");
+  });
+
+  it("converts timestamps with an explicit timezone to the local time", () => {
+    const date = new Date("2026-11-07T23:30:00+02:00");
+    const expected = new Intl.DateTimeFormat("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(date).replace(", ", " ");
+
+    expect(
+      formatDateTimeForDisplay("2026-11-07 23:30:00+02:00", {
+        yearFormat: "2-digit",
+        separator: " ",
+        invalidValue: "",
+      }),
+    ).toBe(expected);
+  });
 });

@@ -1,8 +1,10 @@
 import {
   authApi,
   categoriasApi,
+  gruposApi,
   notificacoesApi,
   pagamentosApi,
+  participantesApi,
 } from "@/services/api";
 import { Platform } from "react-native";
 import {
@@ -143,11 +145,15 @@ describe("categoriasApi", () => {
     it("supports listing all notifications or only unread ones", async () => {
       await notificacoesApi.listar();
       await notificacoesApi.listar(true);
+      await notificacoesApi.listar(true, { limit: 30, offset: 60 });
 
       const calls = jest.mocked(globalThis.fetch).mock.calls;
       expect(calls[0][0]).toEqual(expect.stringMatching(/\/notificacoes$/));
       expect(calls[1][0]).toEqual(
         expect.stringMatching(/\/notificacoes\?nao_lidas=true$/),
+      );
+      expect(calls[2][0]).toEqual(
+        expect.stringMatching(/\/notificacoes\?nao_lidas=true&limit=30&offset=60$/),
       );
     });
 
@@ -206,6 +212,67 @@ describe("categoriasApi", () => {
     const [url, options] = jest.mocked(globalThis.fetch).mock.calls[0];
     expect(url).toEqual(expect.stringMatching(/\/categorias\/12$/));
     expect(options?.method).toBe("DELETE");
+  });
+});
+
+describe("group and participant pagination APIs", () => {
+  beforeEach(() => {
+    mockGetAccessToken.mockResolvedValue("access-token");
+    jest.spyOn(globalThis, "fetch").mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: async () => JSON.stringify({
+        status: "sucesso",
+        data: [],
+        paginacao: { limit: 20, offset: 40, total: 45, has_more: false },
+      }),
+    } as Response);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("requests paginated groups and participants", async () => {
+    await gruposApi.listar({ limit: 20, offset: 40 });
+    await participantesApi.listar(12, { limit: 20, offset: 40 });
+
+    const calls = jest.mocked(globalThis.fetch).mock.calls;
+    expect(calls[0][0]).toEqual(expect.stringMatching(/\/grupos\?limit=20&offset=40$/));
+    expect(calls[1][0]).toEqual(
+      expect.stringMatching(/\/participantes\/grupo\/12\?limit=20&offset=40$/),
+    );
+  });
+
+  it("loads every participant page for operations that need the full group", async () => {
+    jest.mocked(globalThis.fetch)
+      .mockReset()
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        text: async () => JSON.stringify({
+          status: "sucesso",
+          data: [{ id: 1, usuario_id: 1 }],
+          paginacao: { limit: 100, offset: 0, total: 101, has_more: true },
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        text: async () => JSON.stringify({
+          status: "sucesso",
+          data: [{ id: 2, usuario_id: 2 }],
+          paginacao: { limit: 100, offset: 100, total: 101, has_more: false },
+        }),
+      } as Response);
+
+    const participantes = await participantesApi.listarTodos(12);
+
+    expect(participantes).toHaveLength(2);
+    expect(jest.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
+    expect(jest.mocked(globalThis.fetch).mock.calls[1][0]).toEqual(
+      expect.stringMatching(/\/participantes\/grupo\/12\?limit=100&offset=100$/),
+    );
   });
 });
 

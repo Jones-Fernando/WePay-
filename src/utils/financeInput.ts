@@ -100,37 +100,52 @@ export function formatDateForDisplay(
   return new Intl.DateTimeFormat("pt-BR", options).format(date);
 }
 
-export function formatDateTimeForDisplay(value: string): string {
+export function formatDateTimeForDisplay(
+  value: string,
+  options: {
+    yearFormat?: "numeric" | "2-digit";
+    separator?: string;
+    invalidValue?: string;
+  } = {},
+): string {
+  const {
+    yearFormat = "numeric",
+    separator = " às ",
+    invalidValue = value,
+  } = options;
   const match = value.trim().match(
     /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/,
   );
-  if (!match) return value;
+  if (!match) return invalidValue;
 
-  const [, year, month, day, hour, minute, second = "0", timezone] = match;
+  const [, yearText, month, day, hour, minute, second = "0", timezone] = match;
   if (
-    !isValidCalendarDate(Number(year), Number(month), Number(day))
+    !isValidCalendarDate(Number(yearText), Number(month), Number(day))
     || Number(hour) > 23
     || Number(minute) > 59
     || Number(second) > 59
   ) {
-    return value;
+    return invalidValue;
   }
 
   if (!timezone) {
-    return `${day}/${month}/${year} às ${hour}:${minute}`;
+    const displayedYear = yearFormat === "2-digit"
+      ? yearText.slice(-2)
+      : yearText;
+    return `${day}/${month}/${displayedYear}${separator}${hour}:${minute}`;
   }
 
   const timestamp = value.trim()
     .replace(" ", "T")
     .replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
   const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return value;
+  if (Number.isNaN(date.getTime())) return invalidValue;
   return new Intl.DateTimeFormat("pt-BR", {
     day: "2-digit",
     month: "2-digit",
-    year: "numeric",
+    year: yearFormat,
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
-  }).format(date).replace(", ", " às ");
+  }).format(date).replace(", ", separator);
 }

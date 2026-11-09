@@ -1,9 +1,8 @@
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   RefreshControl,
@@ -22,7 +21,12 @@ import {
   DespesaPessoal,
 } from "@/services/api";
 import type { PaginacaoLista } from "@/types/api";
+import { formatDateTimeForDisplay } from "@/utils/financeInput";
 import { formatCurrencyBRL } from "@/utils/financeFormat";
+import {
+  appendUniqueById,
+  createPaginationRequestGate,
+} from "@/utils/paginationRequestGate";
 
 // Identidade visual oficial do WEPAY
 const CORES = {
@@ -82,80 +86,6 @@ function iconeCategoria(categoria: string | null) {
     : "📦";
 }
 
-function dataValida(ano: number, mes: number, dia: number) {
-  if (ano < 1 || mes < 1 || mes > 12) return false;
-
-  const diasNoMes = [
-    31,
-    ano % 4 === 0 && (ano % 100 !== 0 || ano % 400 === 0) ? 29 : 28,
-    31,
-    30,
-    31,
-    30,
-    31,
-    31,
-    30,
-    31,
-    30,
-    31,
-  ];
-
-  return dia >= 1 && dia <= diasNoMes[mes - 1];
-}
-
-function formatarRegistro(criadoEm: string | null | undefined) {
-  const timestamp = criadoEm?.trim();
-  if (!timestamp) return "";
-
-  const partesSemFuso = timestamp.match(
-    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/
-  );
-
-  if (partesSemFuso) {
-    const [, anoTexto, mesTexto, diaTexto, horaTexto, minutoTexto, segundoTexto] =
-      partesSemFuso;
-    const ano = Number(anoTexto);
-    const mes = Number(mesTexto);
-    const dia = Number(diaTexto);
-    const hora = Number(horaTexto);
-    const minuto = Number(minutoTexto);
-    const segundo = Number(segundoTexto ?? 0);
-
-    if (
-      !dataValida(ano, mes, dia) ||
-      hora > 23 ||
-      minuto > 59 ||
-      segundo > 59
-    ) {
-      return "";
-    }
-
-    return `${diaTexto}/${mesTexto}/${anoTexto.slice(-2)} ${horaTexto}:${minutoTexto}`;
-  }
-
-  if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp)) return "";
-
-  const normalizado = timestamp
-    .replace(/^(\d{4}-\d{2}-\d{2}) /, "$1T")
-    .replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
-  const data = new Date(normalizado);
-
-  if (Number.isNaN(data.getTime())) return "";
-
-  const dataLocal = new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "2-digit",
-  }).format(data);
-  const horarioLocal = new Intl.DateTimeFormat("pt-BR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(data);
-
-  return `${dataLocal} ${horarioLocal}`;
-}
-
 function obterMesAtual() {
   return new Date().toLocaleDateString("pt-BR", {
     month: "long",
@@ -167,15 +97,22 @@ export default function DespesasPessoais() {
   const [carregando, setCarregando] = useState(true);
   const [carregandoMais, setCarregandoMais] = useState(false);
   const [atualizando, setAtualizando] = useState(false);
+  const [erroCarregamento, setErroCarregamento] = useState<string | null>(null);
+  const [erroCarregamentoMais, setErroCarregamentoMais] = useState<string | null>(null);
   const [totalMes, setTotalMes] = useState(0);
   const [paginacao, setPaginacao] = useState<PaginacaoLista | null>(null);
   const [categoriasResumo, setCategoriasResumo] = useState<
     { categoria: string | null; valor: number }[]
   >([]);
   const [modalVisivel, setModalVisivel] = useState(false);
+  const requestGate = useRef(createPaginationRequestGate());
 
   // Carrega os dados reais da API
   const carregarDados = useCallback(async (mostrarLoading = true) => {
+    const generation = requestGate.current.beginFirstPage();
+    setCarregandoMais(false);
+    setErroCarregamento(null);
+    setErroCarregamentoMais(null);
     if (mostrarLoading) {
       setCarregando(true);
     } else {
@@ -193,6 +130,7 @@ export default function DespesasPessoais() {
         despesasPessoaisApi.totalMes(),
       ]);
 
+      if (!requestGate.current.isCurrent(generation)) return;
       setDespesas(listagem.data);
       setPaginacao(listagem.paginacao);
       setCategoriasResumo(listagem.paginacao.categorias);
@@ -201,47 +139,59 @@ export default function DespesasPessoais() {
         Number(resumo.data.total_despesas ?? 0)
       );
     } catch (e) {
-      Alert.alert(
-        "Erro",
-        e instanceof Error
-          ? e.message
-          : "Não foi possível carregar suas despesas."
-      );
+      if (requestGate.current.isCurrent(generation)) {
+        setErroCarregamento(
+          e instanceof Error
+            ? e.message
+            : "Não foi possível carregar suas despesas."
+        );
+      }
     } finally {
-      setCarregando(false);
-      setAtualizando(false);
+      if (requestGate.current.isCurrent(generation)) {
+        requestGate.current.finishFirstPage(generation);
+        setCarregando(false);
+        setAtualizando(false);
+      }
     }
   }, []);
 
   const carregarMais = useCallback(async () => {
-    if (!paginacao?.has_more || carregandoMais) return;
+    if (!paginacao?.has_more) return;
+    const ticket = requestGate.current.beginNextPage();
+    if (!ticket) return;
     setCarregandoMais(true);
+    setErroCarregamentoMais(null);
     try {
       const resposta = await despesasPessoaisApi.listar({
         tipo: "despesa",
-        limit: TAMANHO_PAGINA,
-        offset: despesas.length,
+        limit: paginacao.limit,
+        offset: paginacao.offset + paginacao.limit,
       });
-      setDespesas((atuais) => [...atuais, ...resposta.data]);
+      if (!requestGate.current.isCurrentPage(ticket)) return;
+      setDespesas((atuais) => appendUniqueById(atuais, resposta.data));
       setPaginacao(resposta.paginacao);
     } catch (erro) {
-      Alert.alert(
-        "Erro",
-        erro instanceof Error
-          ? erro.message
-          : "Não foi possível carregar mais despesas."
-      );
+      if (requestGate.current.isCurrentPage(ticket)) {
+        setErroCarregamentoMais(
+          erro instanceof Error
+            ? erro.message
+            : "Não foi possível carregar mais despesas."
+        );
+      }
     } finally {
-      setCarregandoMais(false);
+      if (requestGate.current.isCurrentPage(ticket)) {
+        requestGate.current.finishNextPage(ticket);
+        setCarregandoMais(false);
+      }
     }
-  }, [carregandoMais, despesas.length, paginacao]);
+  }, [paginacao]);
 
   // Atualiza sempre que a tela receber foco
   useFocusEffect(
     useCallback(() => {
-      carregarDados();
-
-      return undefined;
+      requestGate.current.activate();
+      void carregarDados();
+      return () => requestGate.current.invalidate();
     }, [carregarDados])
   );
 
@@ -366,6 +316,19 @@ export default function DespesasPessoais() {
         </View>
 
         {/* Lista de despesas */}
+        {erroCarregamento && despesas.length > 0 && (
+          <View style={styles.erroInline} accessibilityRole="alert">
+            <Text style={styles.erroTexto}>{erroCarregamento}</Text>
+            <Pressable
+              onPress={() => void carregarDados(false)}
+              disabled={atualizando}
+              accessibilityRole="button"
+              accessibilityLabel="Tentar carregar despesas novamente"
+            >
+              <Text style={styles.erroAcao}>Tentar novamente</Text>
+            </Pressable>
+          </View>
+        )}
         {carregando ? (
           <View style={styles.estado}>
             <ActivityIndicator
@@ -376,6 +339,18 @@ export default function DespesasPessoais() {
             <Text style={styles.estadoTexto}>
               Carregando despesas...
             </Text>
+          </View>
+        ) : erroCarregamento && despesas.length === 0 ? (
+          <View style={styles.estadoErro} accessibilityRole="alert">
+            <Text style={styles.vazioTitulo}>Não foi possível carregar as despesas</Text>
+            <Text style={styles.vazioTexto}>{erroCarregamento}</Text>
+            <Pressable
+              style={styles.botaoTentarNovamente}
+              onPress={() => void carregarDados()}
+              accessibilityRole="button"
+            >
+              <Text style={styles.textoCarregarMais}>Tentar novamente</Text>
+            </Pressable>
           </View>
         ) : despesas.length === 0 ? (
           <View style={styles.vazio}>
@@ -393,7 +368,11 @@ export default function DespesasPessoais() {
         ) : (
           <View style={styles.listaDespesas}>
             {despesas.map((despesa) => {
-              const registro = formatarRegistro(despesa.criado_em);
+              const registro = formatDateTimeForDisplay(despesa.criado_em ?? "", {
+                yearFormat: "2-digit",
+                separator: " ",
+                invalidValue: "",
+              });
 
               return (
                 <Pressable
@@ -448,8 +427,18 @@ export default function DespesasPessoais() {
             onPress={() => void carregarMais()}
             disabled={carregandoMais}
             accessibilityRole="button"
+            accessibilityLabel={
+              erroCarregamentoMais
+                ? "Tentar carregar mais despesas novamente"
+                : "Carregar mais despesas"
+            }
           >
-            {carregandoMais ? (
+            {erroCarregamentoMais ? (
+              <View style={styles.erroPaginacao} accessibilityRole="alert">
+                <Text style={styles.erroTexto}>{erroCarregamentoMais}</Text>
+                <Text style={styles.erroAcao}>Toque para tentar novamente</Text>
+              </View>
+            ) : carregandoMais ? (
               <ActivityIndicator color={CORES.accentDark} />
             ) : (
               <Text style={styles.textoCarregarMais}>Carregar mais despesas</Text>
@@ -697,6 +686,43 @@ const styles = StyleSheet.create({
     color: CORES.accentDark,
     fontSize: 13,
     fontWeight: "700",
+  },
+  erroInline: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#FCE8E6",
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  erroPaginacao: {
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+  },
+  erroTexto: {
+    color: "#A72F2F",
+    fontSize: 12,
+    textAlign: "center",
+  },
+  erroAcao: {
+    color: "#A72F2F",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  estadoErro: {
+    paddingTop: 48,
+    paddingHorizontal: 25,
+    alignItems: "center",
+  },
+  botaoTentarNovamente: {
+    minHeight: 44,
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: "#DDF7EE",
+    borderRadius: 12,
   },
 
   cardDespesaConteudo: {

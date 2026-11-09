@@ -245,10 +245,17 @@ export const categoriasApi = {
 };
 
 export const notificacoesApi = {
-  listar: (somenteNaoLidas = false) => {
-    const query = somenteNaoLidas ? "?nao_lidas=true" : "";
-    return request<{ status: string; data: Notificacao[] }>(
-      `/notificacoes${query}`,
+  listar: (
+    somenteNaoLidas = false,
+    params?: { limit?: number; offset?: number },
+  ) => {
+    const query = new URLSearchParams();
+    if (somenteNaoLidas) query.append("nao_lidas", "true");
+    if (params?.limit !== undefined) query.append("limit", String(params.limit));
+    if (params?.offset !== undefined) query.append("offset", String(params.offset));
+    const qs = query.toString();
+    return request<{ status: string; data: Notificacao[]; paginacao: Paginacao }>(
+      `/notificacoes${qs ? `?${qs}` : ""}`,
     );
   },
 
@@ -356,8 +363,15 @@ export const despesasPessoaisApi = {
 // ─── Grupos ───────────────────────────────────────────────────────────────────
 
 export const gruposApi = {
-  listar: () =>
-    request<{ status: string; data: Grupo[] }>("/grupos"),
+  listar: (params?: { limit?: number; offset?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.limit !== undefined) query.append("limit", String(params.limit));
+    if (params?.offset !== undefined) query.append("offset", String(params.offset));
+    const qs = query.toString();
+    return request<{ status: string; data: Grupo[]; paginacao: Paginacao }>(
+      `/grupos${qs ? `?${qs}` : ""}`,
+    );
+  },
 
   buscar: (id: number) =>
     request<{ status: string; data: Grupo }>(`/grupos/${id}`),
@@ -381,8 +395,30 @@ export const gruposApi = {
 // ─── Participantes ────────────────────────────────────────────────────────────
 
 export const participantesApi = {
-  listar: (grupoId: number) =>
-    request<{ status: string; data: Participante[] }>(`/participantes/grupo/${grupoId}`),
+  listar: (grupoId: number, params?: { limit?: number; offset?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.limit !== undefined) query.append("limit", String(params.limit));
+    if (params?.offset !== undefined) query.append("offset", String(params.offset));
+    const qs = query.toString();
+    return request<{
+      status: string;
+      data: Participante[];
+      paginacao: Paginacao;
+    }>(`/participantes/grupo/${grupoId}${qs ? `?${qs}` : ""}`);
+  },
+
+  listarTodos: async (grupoId: number) => {
+    const participantes: Participante[] = [];
+    let offset = 0;
+    let temMais = true;
+    while (temMais) {
+      const resposta = await participantesApi.listar(grupoId, { limit: 100, offset });
+      participantes.push(...resposta.data);
+      temMais = resposta.paginacao.has_more;
+      offset += resposta.paginacao.limit;
+    }
+    return participantes;
+  },
 
   buscar: (id: number) =>
     request<{

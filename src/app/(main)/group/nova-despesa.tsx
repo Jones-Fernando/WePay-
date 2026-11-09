@@ -140,7 +140,7 @@ export default function NovaDespesaGrupo() {
   useEffect(() => {
     if (!groupId || !Number.isInteger(Number(groupId))) return;
     let ativo = true;
-    participantesApi.listar(Number(groupId)).then(({ data }) => {
+    participantesApi.listarTodos(Number(groupId)).then((data) => {
       if (!ativo) return;
       const lista = data.filter((item) => item.ativo).map((item) => ({
         id: String(item.usuario_id),

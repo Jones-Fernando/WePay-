@@ -66,7 +66,7 @@ export default function Home() {
     try {
       const [resumo, gruposResposta, despesasResposta] = await Promise.all([
         dashboardApi.obter(),
-        gruposApi.listar(),
+        gruposApi.listar({ limit: 3, offset: 0 }),
         despesasPessoaisApi.listar({ tipo: "despesa", limit: 3, offset: 0 }),
       ]);
       if (!telaAtiva.current) return;

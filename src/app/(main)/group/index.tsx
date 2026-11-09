@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -13,6 +13,11 @@ import {
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { gruposApi, Grupo } from "@/services/api";
+import type { Paginacao } from "@/types/api";
+import {
+  appendUniqueById,
+  createPaginationRequestGate,
+} from "@/utils/paginationRequestGate";
 
 const CORES = {
   paper: "#F5FBF7",
@@ -40,8 +45,13 @@ export default function ListaGrupos() {
   const [busca, setBusca] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [atualizando, setAtualizando] = useState(false);
+  const [carregandoMais, setCarregandoMais] = useState(false);
+  const [paginacao, setPaginacao] = useState<Paginacao | null>(null);
+  const gate = useRef(createPaginationRequestGate()).current;
 
   const carregar = useCallback(async (mostrarLoading = true) => {
+    gate.activate();
+    const generation = gate.beginFirstPage();
     if (mostrarLoading) {
       setCarregando(true);
     } else {
@@ -49,25 +59,62 @@ export default function ListaGrupos() {
     }
 
     try {
-      const resposta = await gruposApi.listar();
+      const resposta = await gruposApi.listar({ limit: 50, offset: 0 });
+      if (!gate.isCurrent(generation)) return;
       setGrupos(resposta.data);
+      setPaginacao(resposta.paginacao);
     } catch (erro) {
-      Alert.alert(
-        "Erro",
-        erro instanceof Error
-          ? erro.message
-          : "Não foi possível carregar os grupos."
-      );
+      if (gate.isCurrent(generation)) {
+        Alert.alert(
+          "Erro",
+          erro instanceof Error
+            ? erro.message
+            : "Não foi possível carregar os grupos."
+        );
+      }
     } finally {
-      setCarregando(false);
-      setAtualizando(false);
+      gate.finishFirstPage(generation);
+      if (gate.isCurrent(generation)) {
+        setCarregando(false);
+        setAtualizando(false);
+      }
     }
-  }, []);
+  }, [gate]);
+
+  const carregarMais = useCallback(async () => {
+    if (!paginacao?.has_more) return;
+    const ticket = gate.beginNextPage();
+    if (!ticket) return;
+    setCarregandoMais(true);
+    try {
+      const resposta = await gruposApi.listar({
+        limit: paginacao.limit,
+        offset: paginacao.offset + paginacao.limit,
+      });
+      if (!gate.isCurrentPage(ticket)) return;
+      setGrupos((atuais) => appendUniqueById(atuais, resposta.data));
+      setPaginacao(resposta.paginacao);
+    } catch (erro) {
+      if (gate.isCurrentPage(ticket)) {
+        Alert.alert(
+          "Erro",
+          erro instanceof Error
+            ? erro.message
+            : "Não foi possível carregar mais grupos."
+        );
+      }
+    } finally {
+      gate.finishNextPage(ticket);
+      if (gate.isCurrent(ticket.generation)) setCarregandoMais(false);
+    }
+  }, [gate, paginacao]);
 
   useFocusEffect(
     useCallback(() => {
-      carregar();
-    }, [carregar])
+      gate.activate();
+      void carregar();
+      return () => gate.invalidate();
+    }, [carregar, gate])
   );
 
   const gruposFiltrados = useMemo(() => {
@@ -122,9 +169,9 @@ export default function ListaGrupos() {
                 <Text style={styles.resumoLabel}>Grupos ativos</Text>
               </View>
               <View style={styles.resumoLinhaValor}>
-                <Text style={styles.resumoValor}>{grupos.length}</Text>
+                <Text style={styles.resumoValor}>{paginacao?.total ?? grupos.length}</Text>
                 <Text style={styles.resumoNota}>
-                  {grupos.length === 1
+                  {(paginacao?.total ?? grupos.length) === 1
                     ? "grupo para acompanhar"
                     : "grupos para acompanhar"}
                 </Text>
@@ -165,6 +212,8 @@ export default function ListaGrupos() {
             showsVerticalScrollIndicator={false}
             style={styles.flatList}
             contentContainerStyle={styles.lista}
+            onEndReached={() => void carregarMais()}
+            onEndReachedThreshold={0.4}
             refreshControl={
               <RefreshControl
                 refreshing={atualizando}
@@ -177,7 +226,9 @@ export default function ListaGrupos() {
                 <View style={styles.linhaTitulo}>
                   <Text style={styles.secaoTitulo}>Seus grupos</Text>
                   <Text style={styles.quantidade}>
-                    {gruposFiltrados.length}
+                    {busca.trim()
+                      ? gruposFiltrados.length
+                      : paginacao?.total ?? gruposFiltrados.length}
                   </Text>
                 </View>
               ) : undefined
@@ -204,10 +255,20 @@ export default function ListaGrupos() {
                       : "Nenhum grupo criado"}
                   </Text>
                   <Text style={styles.vazioTexto}>
-                    {busca
-                      ? "Tente pesquisar por outro nome."
-                      : "Toque no botão + para criar seu primeiro grupo."}
+                    {busca && paginacao?.has_more
+                      ? "Carregue mais grupos para continuar a busca."
+                      : busca
+                        ? "Tente pesquisar por outro nome."
+                        : "Toque no botão + para criar seu primeiro grupo."}
                   </Text>
+                  {busca && paginacao?.has_more && (
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      onPress={() => void carregarMais()}
+                    >
+                      <Text style={styles.carregarMaisBusca}>Carregar mais grupos</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               )
             }
@@ -237,6 +298,11 @@ export default function ListaGrupos() {
                 </View>
               </TouchableOpacity>
             )}
+            ListFooterComponent={
+              carregandoMais ? (
+                <ActivityIndicator color={CORES.accentDark} style={styles.estado} />
+              ) : undefined
+            }
           />
         </View>
 
@@ -513,6 +579,12 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 17,
     marginTop: 7,
+  },
+  carregarMaisBusca: {
+    color: CORES.accentDark,
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 12,
   },
   fabContainer: {
     position: "absolute",

@@ -27,13 +27,18 @@ npx tsc --noEmit
 npm test -- --runInBand
 ```
 
+Os testes de telas usam `test-renderer` para montar componentes e exercitar
+handlers com o estado React real. Ao criar novos fluxos financeiros, cubra
+validação, carregamento, erro e navegação junto com as chamadas de API.
+
 ## Sessão e privacidade
 
-No Android e iOS, os tokens de sessão são guardados no armazenamento seguro do
-sistema por meio de `expo-secure-store`. Tokens existentes no AsyncStorage são
-migrados para esse armazenamento na primeira leitura. Na web, onde o SecureStore
-nativo não está disponível, o access token fica apenas em memória e o refresh
-token é mantido em cookie `HttpOnly` pelo backend.
+No Android e iOS, os tokens de sessão e de push são guardados no armazenamento
+seguro do sistema por meio de `expo-secure-store`. Tokens existentes no
+AsyncStorage são migrados para esse armazenamento na primeira leitura. Na web,
+onde o SecureStore nativo não está disponível, o access token fica apenas em
+memória e o refresh token é mantido em cookie `HttpOnly` pelo backend; o app web
+não registra tokens de push.
 
 O cliente renova a sessão uma vez após uma resposta 401 e compartilha uma única
 renovação entre requisições simultâneas. Falhas de conexão não apagam tokens que

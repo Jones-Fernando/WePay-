@@ -1,8 +1,8 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  FlatList,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -10,31 +10,70 @@ import {
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { notificacoesApi } from "@/services/api";
-import type { Notificacao } from "@/types/api";
+import type { Notificacao, Paginacao } from "@/types/api";
 import { formatDateTimeForDisplay } from "@/utils/financeInput";
+import {
+  appendUniqueById,
+  createPaginationRequestGate,
+} from "@/utils/paginationRequestGate";
 
 export default function NotificacoesScreen() {
   const [notificacoes, setNotificacoes] = useState<Notificacao[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [processandoId, setProcessandoId] = useState<number | null>(null);
+  const [carregandoMais, setCarregandoMais] = useState(false);
+  const [paginacao, setPaginacao] = useState<Paginacao | null>(null);
+  const gate = useRef(createPaginationRequestGate()).current;
 
   const carregar = useCallback(async () => {
+    gate.activate();
+    const generation = gate.beginFirstPage();
     setCarregando(true);
     setErro(null);
     try {
-      const resposta = await notificacoesApi.listar();
+      const resposta = await notificacoesApi.listar(false, { limit: 50, offset: 0 });
+      if (!gate.isCurrent(generation)) return;
       setNotificacoes(resposta.data);
+      setPaginacao(resposta.paginacao);
     } catch (falha) {
-      setErro(falha instanceof Error ? falha.message : "Não foi possível carregar as notificações.");
+      if (gate.isCurrent(generation)) {
+        setErro(falha instanceof Error ? falha.message : "Não foi possível carregar as notificações.");
+      }
     } finally {
-      setCarregando(false);
+      gate.finishFirstPage(generation);
+      if (gate.isCurrent(generation)) setCarregando(false);
     }
-  }, []);
+  }, [gate]);
+
+  const carregarMais = useCallback(async () => {
+    if (!paginacao?.has_more) return;
+    const ticket = gate.beginNextPage();
+    if (!ticket) return;
+    setCarregandoMais(true);
+    try {
+      const resposta = await notificacoesApi.listar(false, {
+        limit: paginacao.limit,
+        offset: paginacao.offset + paginacao.limit,
+      });
+      if (!gate.isCurrentPage(ticket)) return;
+      setNotificacoes((atuais) => appendUniqueById(atuais, resposta.data));
+      setPaginacao(resposta.paginacao);
+    } catch (falha) {
+      if (gate.isCurrentPage(ticket)) {
+        setErro(falha instanceof Error ? falha.message : "Não foi possível carregar mais notificações.");
+      }
+    } finally {
+      gate.finishNextPage(ticket);
+      if (gate.isCurrent(ticket.generation)) setCarregandoMais(false);
+    }
+  }, [gate, paginacao]);
 
   useFocusEffect(useCallback(() => {
+    gate.activate();
     void carregar();
-  }, [carregar]));
+    return () => gate.invalidate();
+  }, [carregar, gate]));
 
   async function abrirNotificacao(notificacao: Notificacao) {
     if (processandoId !== null) return;
@@ -86,15 +125,22 @@ export default function NotificacoesScreen() {
 
       {erro && <Text accessibilityRole="alert" style={styles.error}>{erro}</Text>}
 
-      {carregando ? (
-        <ActivityIndicator color="#00A17A" style={styles.loader} />
-      ) : notificacoes.length === 0 ? (
-        <Text style={styles.empty}>Você ainda não tem notificações.</Text>
-      ) : (
-        <ScrollView contentContainerStyle={styles.list}>
-          {notificacoes.map((notificacao) => (
+      <FlatList
+        data={carregando ? [] : notificacoes}
+        keyExtractor={(item) => String(item.id)}
+        contentContainerStyle={styles.list}
+        onEndReached={() => void carregarMais()}
+        onEndReachedThreshold={0.4}
+        ListEmptyComponent={carregando ? (
+          <ActivityIndicator color="#00A17A" style={styles.loader} />
+        ) : (
+          <Text style={styles.empty}>Você ainda não tem notificações.</Text>
+        )}
+        ListFooterComponent={carregandoMais ? (
+          <ActivityIndicator color="#00A17A" style={styles.cardLoader} />
+        ) : undefined}
+        renderItem={({ item: notificacao }) => (
             <TouchableOpacity
-              key={notificacao.id}
               accessibilityRole="button"
               onPress={() => void abrirNotificacao(notificacao)}
               disabled={processandoId !== null}
@@ -110,9 +156,8 @@ export default function NotificacoesScreen() {
                 <ActivityIndicator color="#00A17A" style={styles.cardLoader} />
               )}
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
+        )}
+      />
     </SafeAreaView>
   );
 }
