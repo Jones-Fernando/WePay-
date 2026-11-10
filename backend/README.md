@@ -27,7 +27,8 @@ administrador ativo.
    do MySQL (padrão: 5; máximo: 32 por processo).
 4. Use `APP_ENV=development`, `testing` ou `production`. Valores desconhecidos
    interrompem a inicialização.
-5. Em produção, defina uma `SECRET_KEY` aleatória com pelo menos 32 caracteres,
+5. O entrypoint WSGI aceita somente `APP_ENV=production`. Em produção, defina
+   explicitamente uma `SECRET_KEY` exclusiva e aleatória com pelo menos 32 caracteres,
    configure explicitamente `RATE_LIMIT_STORAGE_URI` para storage compartilhado
    (por exemplo, `redis://host:6379/0`) e use URLs HTTPS. A aplicação falha na
    inicialização se a configuração estiver ausente ou usar `memory://`.
