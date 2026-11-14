@@ -231,7 +231,7 @@ Os testes usam exclusivamente MySQL em um banco separado (`wepay_test`). A suít
 
 ```bash
 ruff check .
-pytest --cov=controllers --cov=models --cov=services --cov=utils --cov=middlewares --cov=routes --cov=database --cov-report=term-missing --cov-report=json:coverage.json
+python -m pytest --cov=controllers --cov=models --cov=services --cov=utils --cov=middlewares --cov=routes --cov=database --cov-report=term-missing --cov-report=json:coverage.json
 python scripts/check_critical_coverage.py coverage.json
 ```
 

@@ -64,5 +64,5 @@ jobs:
             backend/requirements-dev.txt
       - run: python -m pip install -r requirements-dev.txt
       - run: ruff check .
-      - run: pytest --cov=controllers --cov=models --cov=services --cov=utils --cov=middlewares --cov=routes --cov=database --cov-report=term-missing --cov-report=json:coverage.json
+      - run: python -m pytest --cov=controllers --cov=models --cov=services --cov=utils --cov=middlewares --cov=routes --cov=database --cov-report=term-missing --cov-report=json:coverage.json
       - run: python scripts/check_critical_coverage.py coverage.json
