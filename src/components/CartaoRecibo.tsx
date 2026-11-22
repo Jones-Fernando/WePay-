@@ -8,7 +8,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Despesa } from '../types/despesa';
-import { Cores } from '../constants/Cores';
+import { useAppTheme } from '@/hooks/useAppTheme';
 
 interface CartaoReciboProps {
   despesa: Despesa;
@@ -16,6 +16,8 @@ interface CartaoReciboProps {
 }
 
 export const CartaoRecibo: React.FC<CartaoReciboProps> = ({ despesa, onPress }) => {
+  const cores = useAppTheme();
+  const estilos = criarEstilos(cores);
   // Formatação monetária padrão em Real Brasileiro (R$)
   const valorFormatado = new Intl.NumberFormat('pt-BR', {
     style: 'currency',
@@ -32,7 +34,7 @@ export const CartaoRecibo: React.FC<CartaoReciboProps> = ({ despesa, onPress }) 
       <View 
         style={[
           estilos.indicadorTipo, 
-          { backgroundColor: despesa.ehPessoal ? Cores.subtexto : Cores.destaque }
+          { backgroundColor: despesa.ehPessoal ? cores.subtexto : cores.destaque }
         ]} 
       />
 
@@ -58,21 +60,21 @@ export const CartaoRecibo: React.FC<CartaoReciboProps> = ({ despesa, onPress }) 
   );
 };
 
-const estilos = StyleSheet.create({
+const criarEstilos = (cores: ReturnType<typeof useAppTheme>) => StyleSheet.create({
   card: {
-    backgroundColor: Cores.cartaoFundo,
+    backgroundColor: cores.cartaoFundo,
     borderRadius: 12,
     flexDirection: 'row',
     marginVertical: 6,
     overflow: 'hidden',
     // Configuração de Sombra para iOS e Android
-    shadowColor: Cores.tinta,
+    shadowColor: cores.tinta,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
     shadowRadius: 6,
     elevation: 2,
     borderWidth: 1,
-    borderColor: Cores.borda,
+    borderColor: cores.borda,
   },
   indicadorTipo: {
     width: 6,
@@ -89,19 +91,19 @@ const estilos = StyleSheet.create({
   titulo: {
     fontSize: 16,
     fontWeight: '600',
-    color: Cores.tinta,
+    color: cores.tinta,
     flex: 1,
     marginRight: 8,
   },
   valor: {
     fontSize: 16,
     fontWeight: '700',
-    color: Cores.tinta,
+    color: cores.tinta,
   },
   linhaPicotada: {
     borderStyle: 'dashed',
     borderWidth: 0.5,
-    borderColor: Cores.borda,
+    borderColor: cores.borda,
     marginVertical: 10,
   },
   rodape: {
@@ -111,14 +113,14 @@ const estilos = StyleSheet.create({
   },
   infoTexto: {
     fontSize: 12,
-    color: Cores.subtexto,
+    color: cores.subtexto,
   },
   infoDestaque: {
     fontWeight: '600',
-    color: Cores.tinta,
+    color: cores.tinta,
   },
   data: {
     fontSize: 12,
-    color: Cores.subtexto,
+    color: cores.subtexto,
   },
 });

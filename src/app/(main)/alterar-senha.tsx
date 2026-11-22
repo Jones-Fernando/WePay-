@@ -1,3 +1,5 @@
+import { useAppTheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 /*
  * WEPAY — ALTERAR SENHA
  */
@@ -11,16 +13,17 @@ import {
   StyleSheet,
   SafeAreaView,
   ScrollView,
-  Alert,
 } from "react-native";
 import { router } from "expo-router";
 import { authApi } from "@/services/api";
 import { useUsuario } from "@/contexts/UsuarioContext";
-import { MIN_PASSWORD_LENGTH } from "@/constants/password";
-
-import { Cores } from "../../constants/Cores";
+import { validarSenhaNova } from "@/constants/password";
+import { Alert } from "@/services/feedback";
+import { useFieldFocus } from "@/hooks/useFieldFocus";
 
 export default function AlterarSenha() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
   const { logout } = useUsuario();
   const [senhaAtual, setSenhaAtual] =
     useState("");
@@ -30,7 +33,11 @@ export default function AlterarSenha() {
 
   const [confirmacao, setConfirmacao] =
     useState("");
+  const [mostrarSenhaAtual, setMostrarSenhaAtual] = useState(false);
+  const [mostrarNovaSenha, setMostrarNovaSenha] = useState(false);
+  const [mostrarConfirmacao, setMostrarConfirmacao] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const { focusedField, focusHandlers } = useFieldFocus();
 
   async function salvar() {
     if (!senhaAtual || !novaSenha || !confirmacao) {
@@ -41,11 +48,9 @@ export default function AlterarSenha() {
       return;
     }
 
-    if (novaSenha.length < MIN_PASSWORD_LENGTH) {
-      Alert.alert(
-        "Atenção",
-        `A nova senha deve possuir pelo menos ${MIN_PASSWORD_LENGTH} caracteres.`
-      );
+    const erroSenha = validarSenhaNova(novaSenha);
+    if (erroSenha) {
+      Alert.alert("Atenção", erroSenha);
       return;
     }
 
@@ -114,40 +119,88 @@ export default function AlterarSenha() {
           Senha atual
         </Text>
 
-        <TextInput
-          style={styles.input}
-          value={senhaAtual}
-          onChangeText={setSenhaAtual}
-          secureTextEntry
-          placeholder="Digite sua senha atual"
-          placeholderTextColor={Cores.textoSuave}
-        />
+        <View
+          style={[
+            styles.passwordContainer,
+            focusedField === "senhaAtual" && styles.focusedField,
+          ]}
+        >
+          <TextInput
+            style={styles.passwordInput}
+            value={senhaAtual}
+            onChangeText={setSenhaAtual}
+            {...focusHandlers("senhaAtual")}
+            secureTextEntry={!mostrarSenhaAtual}
+            placeholder="Digite sua senha atual"
+            placeholderTextColor={Cores.textoSuave}
+          />
+          <TouchableOpacity
+            onPress={() => setMostrarSenhaAtual((valor) => !valor)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.showPassword}>
+              {mostrarSenhaAtual ? "Ocultar" : "Mostrar"}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         <Text style={styles.label}>
           Nova senha
         </Text>
 
-        <TextInput
-          style={styles.input}
-          value={novaSenha}
-          onChangeText={setNovaSenha}
-          secureTextEntry
-          placeholder="Digite a nova senha"
-          placeholderTextColor={Cores.textoSuave}
-        />
+        <View
+          style={[
+            styles.passwordContainer,
+            focusedField === "novaSenha" && styles.focusedField,
+          ]}
+        >
+          <TextInput
+            style={styles.passwordInput}
+            value={novaSenha}
+            onChangeText={setNovaSenha}
+            {...focusHandlers("novaSenha")}
+            secureTextEntry={!mostrarNovaSenha}
+            placeholder="Digite a nova senha"
+            placeholderTextColor={Cores.textoSuave}
+          />
+          <TouchableOpacity
+            onPress={() => setMostrarNovaSenha((valor) => !valor)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.showPassword}>
+              {mostrarNovaSenha ? "Ocultar" : "Mostrar"}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         <Text style={styles.label}>
           Confirmar nova senha
         </Text>
 
-        <TextInput
-          style={styles.input}
-          value={confirmacao}
-          onChangeText={setConfirmacao}
-          secureTextEntry
-          placeholder="Repita a nova senha"
-          placeholderTextColor={Cores.textoSuave}
-        />
+        <View
+          style={[
+            styles.passwordContainer,
+            focusedField === "confirmacao" && styles.focusedField,
+          ]}
+        >
+          <TextInput
+            style={styles.passwordInput}
+            value={confirmacao}
+            onChangeText={setConfirmacao}
+            {...focusHandlers("confirmacao")}
+            secureTextEntry={!mostrarConfirmacao}
+            placeholder="Repita a nova senha"
+            placeholderTextColor={Cores.textoSuave}
+          />
+          <TouchableOpacity
+            onPress={() => setMostrarConfirmacao((valor) => !valor)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.showPassword}>
+              {mostrarConfirmacao ? "Ocultar" : "Mostrar"}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         <TouchableOpacity
           style={[styles.primaryButton, salvando && { opacity: 0.6 }]}
@@ -163,7 +216,7 @@ export default function AlterarSenha() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Cores.fundo,
@@ -185,7 +238,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 12,
-    backgroundColor: Cores.branco,
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
     borderColor: Cores.borda,
     justifyContent: "center",
@@ -237,14 +290,34 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
 
-  input: {
+  passwordContainer: {
     height: 52,
     backgroundColor: Cores.campo,
     borderWidth: 1,
     borderColor: Cores.borda,
     borderRadius: 12,
-    paddingHorizontal: 15,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: 15,
+    paddingRight: 12,
+  },
+  passwordInput: {
+    flex: 1,
     color: Cores.texto,
+    fontSize: 14,
+    height: "100%",
+    borderRadius: 12,
+    outlineStyle: "solid",
+    outlineWidth: 0,
+  },
+  showPassword: {
+    color: Cores.textoPositivo,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  focusedField: {
+    borderWidth: 2,
+    borderColor: Cores.textoPositivo,
   },
 
   primaryButton: {
@@ -257,7 +330,7 @@ const styles = StyleSheet.create({
   },
 
   primaryButtonText: {
-    color: Cores.texto,
+    color: Cores.textoSobrePrincipal,
     fontWeight: "700",
     fontSize: 15,
   },

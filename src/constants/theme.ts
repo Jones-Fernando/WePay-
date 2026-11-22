@@ -6,21 +6,24 @@
 import '@/global.css';
 
 import { Platform } from 'react-native';
+import { CoresPorTema } from '@/constants/Cores';
 
 export const Colors = {
   light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
+    text: CoresPorTema.light.texto,
+    background: CoresPorTema.light.fundo,
+    backgroundElement: CoresPorTema.light.cartaoFundo,
+    backgroundSelected: CoresPorTema.light.superficieVerdeSelecionada,
+    textSecondary: CoresPorTema.light.textoSuave,
+    primary: CoresPorTema.light.principalEscuro,
   },
   dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
+    text: CoresPorTema.dark.texto,
+    background: CoresPorTema.dark.fundo,
+    backgroundElement: CoresPorTema.dark.cartaoFundo,
+    backgroundSelected: CoresPorTema.dark.superficieVerdeSelecionada,
+    textSecondary: CoresPorTema.dark.textoSuave,
+    primary: CoresPorTema.dark.principalEscuro,
   },
 } as const;
 

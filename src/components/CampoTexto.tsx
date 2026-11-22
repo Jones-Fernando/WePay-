@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 import {
   StyleSheet,
@@ -8,7 +8,7 @@ import {
   View,
 } from 'react-native';
 
-import { Cores } from '../constants/Cores';
+import { useAppTheme } from '@/hooks/useAppTheme';
 
 /**
  * ============================================================
@@ -44,6 +44,9 @@ export default function CampoTexto({
   erro = false,
   ...props
 }: CampoTextoProps) {
+  const cores = useAppTheme();
+  const styles = criarEstilos(cores);
+  const [focado, setFocado] = useState(false);
   return (
     <View style={styles.container}>
 
@@ -64,8 +67,17 @@ export default function CampoTexto({
       */}
       <TextInput
         {...props}
+        onFocus={(event) => {
+          setFocado(true);
+          props.onFocus?.(event);
+        }}
+        onBlur={(event) => {
+          setFocado(false);
+          props.onBlur?.(event);
+        }}
         style={[
           styles.input,
+          focado && !erro && styles.inputFocado,
           erro && styles.inputErro,
           props.style,
         ]}
@@ -80,7 +92,7 @@ export default function CampoTexto({
  * ============================================================
  */
 
-const styles = StyleSheet.create({
+const criarEstilos = (cores: ReturnType<typeof useAppTheme>) => StyleSheet.create({
   container: {
     width: '100%',
     marginBottom: 18,
@@ -90,7 +102,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     fontSize: 14,
     fontWeight: '700',
-    color: Cores.textoSecundario,
+    color: cores.textoSecundario,
   },
 
   input: {
@@ -100,19 +112,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
 
     borderWidth: 1,
-    borderColor: Cores.borda,
+    borderColor: cores.borda,
     borderRadius: 12,
 
-    backgroundColor: Cores.fundoCampo,
+    backgroundColor: cores.fundoCampo,
 
     fontSize: 15,
-    color: Cores.texto,
+    color: cores.texto,
+    outlineStyle: 'solid',
+    outlineWidth: 0,
+  },
+
+  inputFocado: {
+    borderWidth: 2,
+    borderColor: cores.textoPositivo,
   },
 
   /**
    * Aparência aplicada quando existe erro.
    */
   inputErro: {
-    borderColor: Cores.negativo,
+    borderColor: cores.negativo,
   },
 });

@@ -7,7 +7,7 @@ import {
   Text,
 } from 'react-native';
 
-import { Cores } from '../constants/Cores';
+import { useAppTheme } from '@/hooks/useAppTheme';
 
 /**
  * ============================================================
@@ -49,6 +49,8 @@ export default function Botao({
   carregando = false,
   disabled = false,
 }: BotaoProps) {
+  const cores = useAppTheme();
+  const styles = criarEstilos(cores);
   /**
    * O botão fica desabilitado quando:
    *
@@ -84,7 +86,7 @@ export default function Botao({
          */
         <ActivityIndicator
           size="small"
-          color={Cores.branco}
+          color={cores.textoSobreAcao}
         />
       ) : (
         /**
@@ -104,7 +106,7 @@ export default function Botao({
  * ============================================================
  */
 
-const styles = StyleSheet.create({
+const criarEstilos = (cores: ReturnType<typeof useAppTheme>) => StyleSheet.create({
   botao: {
     width: '100%',
     minHeight: 54,
@@ -114,7 +116,7 @@ const styles = StyleSheet.create({
 
     borderRadius: 12,
 
-    backgroundColor: Cores.principal,
+    backgroundColor: cores.principal,
   },
 
   botaoPressionado: {
@@ -128,6 +130,6 @@ const styles = StyleSheet.create({
   texto: {
     fontSize: 16,
     fontWeight: '800',
-    color: Cores.branco,
+    color: cores.textoSobreAcao,
   },
 });

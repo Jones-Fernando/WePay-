@@ -1,3 +1,5 @@
+import { useAppTheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -18,6 +20,8 @@ import {
 } from "@/utils/paginationRequestGate";
 
 export default function NotificacoesScreen() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
   const [notificacoes, setNotificacoes] = useState<Notificacao[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -87,9 +91,20 @@ export default function NotificacoesScreen() {
           ),
         );
       }
-      if (notificacao.grupo_id !== null) {
+      if (notificacao.tipo === "nova_despesa" && notificacao.referencia_id) {
         router.push({
-          pathname: "/(main)/group/despesas-grupo",
+          pathname: "/(main)/group/detalhes-despesa",
+          params: {
+            id: String(notificacao.referencia_id),
+            groupId: String(notificacao.grupo_id),
+            grupoNome: notificacao.grupo_nome ?? "",
+          },
+        });
+      } else if (notificacao.grupo_id !== null) {
+        router.push({
+          pathname: notificacao.tipo === "cobranca"
+            ? "/(main)/group/saldos"
+            : "/(main)/group/despesas-grupo",
           params: { groupId: String(notificacao.grupo_id) },
         });
       }
@@ -99,6 +114,28 @@ export default function NotificacoesScreen() {
       setProcessandoId(null);
     }
   }
+
+  async function marcarTodasLidas() {
+    if (processandoId !== null) return;
+    setProcessandoId(-1);
+    setErro(null);
+    try {
+      await notificacoesApi.marcarTodasLidas();
+      setNotificacoes((atuais) =>
+        atuais.map((item) => ({ ...item, lida: true })),
+      );
+    } catch (falha) {
+      setErro(
+        falha instanceof Error
+          ? falha.message
+          : "Não foi possível marcar as notificações como lidas.",
+      );
+    } finally {
+      setProcessandoId(null);
+    }
+  }
+
+  const possuiNaoLidas = notificacoes.some((item) => !item.lida);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -123,6 +160,17 @@ export default function NotificacoesScreen() {
         </TouchableOpacity>
       </View>
 
+      {possuiNaoLidas && (
+        <TouchableOpacity
+          accessibilityRole="button"
+          style={styles.markAll}
+          onPress={() => void marcarTodasLidas()}
+          disabled={processandoId !== null}
+        >
+          <Text style={styles.markAllText}>Marcar todas como lidas</Text>
+        </TouchableOpacity>
+      )}
+
       {erro && <Text accessibilityRole="alert" style={styles.error}>{erro}</Text>}
 
       <FlatList
@@ -132,12 +180,12 @@ export default function NotificacoesScreen() {
         onEndReached={() => void carregarMais()}
         onEndReachedThreshold={0.4}
         ListEmptyComponent={carregando ? (
-          <ActivityIndicator color="#00A17A" style={styles.loader} />
+          <ActivityIndicator color={Cores.textoPositivo} style={styles.loader} />
         ) : (
           <Text style={styles.empty}>Você ainda não tem notificações.</Text>
         )}
         ListFooterComponent={carregandoMais ? (
-          <ActivityIndicator color="#00A17A" style={styles.cardLoader} />
+          <ActivityIndicator color={Cores.textoPositivo} style={styles.cardLoader} />
         ) : undefined}
         renderItem={({ item: notificacao }) => (
             <TouchableOpacity
@@ -153,7 +201,7 @@ export default function NotificacoesScreen() {
               <Text style={styles.message}>{notificacao.mensagem}</Text>
               <Text style={styles.date}>{formatDateTimeForDisplay(notificacao.criado_em)}</Text>
               {processandoId === notificacao.id && (
-                <ActivityIndicator color="#00A17A" style={styles.cardLoader} />
+                <ActivityIndicator color={Cores.textoPositivo} style={styles.cardLoader} />
               )}
             </TouchableOpacity>
         )}
@@ -162,8 +210,8 @@ export default function NotificacoesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5FBF7" },
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: Cores.fundo },
   header: {
     minHeight: 64,
     flexDirection: "row",
@@ -177,39 +225,41 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
   },
-  backText: { color: "#0B3B33", fontSize: 30, lineHeight: 34 },
-  title: { color: "#0B3B33", fontSize: 18, fontWeight: "700" },
+  backText: { color: Cores.texto, fontSize: 30, lineHeight: 34 },
+  title: { color: Cores.texto, fontSize: 18, fontWeight: "700" },
   refresh: { minWidth: 64, alignItems: "flex-end", paddingVertical: 10 },
-  refreshText: { color: "#00A17A", fontSize: 12, fontWeight: "700" },
+  refreshText: { color: Cores.textoPositivo, fontSize: 12, fontWeight: "700" },
+  markAll: { alignSelf: "flex-end", marginHorizontal: 18, paddingVertical: 8 },
+  markAllText: { color: Cores.textoPositivo, fontSize: 12, fontWeight: "700" },
   list: { padding: 18, paddingTop: 8, paddingBottom: 30 },
   card: {
     padding: 16,
     marginBottom: 10,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
-    backgroundColor: "#FFFFFF",
+    borderColor: Cores.borda,
+    backgroundColor: Cores.cartaoFundo,
   },
-  unread: { borderColor: "#00C896", backgroundColor: "#F1FBF7" },
+  unread: { borderColor: Cores.principal, backgroundColor: Cores.superficieVerde },
   cardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  cardTitle: { flex: 1, color: "#0B3B33", fontSize: 15, fontWeight: "700" },
-  unreadDot: { width: 8, height: 8, marginLeft: 10, borderRadius: 4, backgroundColor: "#00A17A" },
-  message: { marginTop: 8, color: "#46685F", fontSize: 13, lineHeight: 19 },
-  date: { marginTop: 10, color: "#819B94", fontSize: 11 },
+  cardTitle: { flex: 1, color: Cores.texto, fontSize: 15, fontWeight: "700" },
+  unreadDot: { width: 8, height: 8, marginLeft: 10, borderRadius: 4, backgroundColor: Cores.principalEscuro },
+  message: { marginTop: 8, color: Cores.textoSecundario, fontSize: 13, lineHeight: 19 },
+  date: { marginTop: 10, color: Cores.textoSuave, fontSize: 11 },
   loader: { marginTop: 48 },
   cardLoader: { marginTop: 10 },
-  empty: { padding: 28, color: "#6B8F86", textAlign: "center" },
+  empty: { padding: 28, color: Cores.textoSuave, textAlign: "center" },
   error: {
     marginHorizontal: 18,
     marginTop: 8,
     padding: 12,
     borderRadius: 10,
-    color: "#A72F2F",
-    backgroundColor: "#FCE8E6",
+    color: Cores.textoNegativo,
+    backgroundColor: Cores.superficieNegativa,
     fontSize: 13,
   },
 });

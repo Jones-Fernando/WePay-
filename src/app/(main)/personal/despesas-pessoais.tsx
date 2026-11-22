@@ -1,3 +1,5 @@
+import { useAppTheme, useAppThemeScheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 
 import React, { useCallback, useMemo, useRef, useState } from "react";
 
@@ -23,25 +25,16 @@ import {
 import type { PaginacaoLista } from "@/types/api";
 import { formatDateTimeForDisplay } from "@/utils/financeInput";
 import { formatCurrencyBRL } from "@/utils/financeFormat";
+import { CATEGORIAS_PESSOAIS } from "@/constants/financeCategories";
+import { useCategoriasFinanceiras } from "@/hooks/useCategoriasFinanceiras";
+import type { CategoriaOpcao } from "@/constants/financeCategories";
+import { IconeCategoria } from "@/components/IconeCategoria";
 import {
   appendUniqueById,
   createPaginationRequestGate,
 } from "@/utils/paginationRequestGate";
 
 // Identidade visual oficial do WEPAY
-const CORES = {
-  paper: "#F5FBF7",
-  ink: "#0B3B33",
-  inkSoft: "#12483F",
-  surface: "#FFFFFF",
-  accent: "#00C896",
-  accentDark: "#00A17A",
-  coral: "#FF6B5C",
-  muted: "#6B8F86",
-  line: "#E1EEE8",
-  field: "#F0F8F4",
-};
-
 // Ícones das categorias
 const ICONES: Record<string, string> = {
   Alimentação: "🛒",
@@ -80,9 +73,14 @@ const CORES_CATEGORIA: Record<string, string> = {
 
 const TAMANHO_PAGINA = 50;
 
-function iconeCategoria(categoria: string | null) {
+function iconeCategoria(
+  categoria: string | null,
+  categorias: readonly CategoriaOpcao[],
+) {
   return categoria
-    ? ICONES[categoria] ?? "📦"
+    ? categorias.find((item) => item.nome === categoria)?.icone
+      ?? ICONES[categoria]
+      ?? "📦"
     : "📦";
 }
 
@@ -93,6 +91,13 @@ function obterMesAtual() {
 }
 
 export default function DespesasPessoais() {
+  const CORES = useAppTheme();
+  const styles = createStyles(CORES);
+  const esquema = useAppThemeScheme();
+  const { categorias: categoriasFinanceiras } = useCategoriasFinanceiras(
+    "pessoal",
+    CATEGORIAS_PESSOAIS,
+  );
   const [despesas, setDespesas] = useState<DespesaPessoal[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [carregandoMais, setCarregandoMais] = useState(false);
@@ -248,7 +253,7 @@ export default function DespesasPessoais() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar
-        barStyle="dark-content"
+        barStyle={esquema === "dark" ? "light-content" : "dark-content"}
       />
 
       {/* Cabeçalho */}
@@ -269,7 +274,7 @@ export default function DespesasPessoais() {
           </Text>
 
           <Text style={styles.subtitulo}>
-            Fora dos grupos — só seu controle
+            Seu controle financeiro pessoal
           </Text>
         </View>
       </View>
@@ -386,12 +391,10 @@ export default function DespesasPessoais() {
                   }
                 >
                   <View style={styles.iconeDespesa}>
-                    <Text
-                      style={styles.iconeDespesaEmoji}
-                      accessible={false}
-                    >
-                      {iconeCategoria(despesa.categoria)}
-                    </Text>
+                    <IconeCategoria
+                      icone={iconeCategoria(despesa.categoria, categoriasFinanceiras)}
+                      tamanho={23}
+                    />
                   </View>
 
                   <View style={styles.cardDespesaConteudo}>
@@ -559,7 +562,7 @@ export default function DespesasPessoais() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (CORES: PaletaSemantica) => StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: CORES.paper,
@@ -691,7 +694,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    backgroundColor: "#FCE8E6",
+    backgroundColor: CORES.superficieNegativa,
     padding: 12,
     borderRadius: 10,
     marginBottom: 12,
@@ -702,12 +705,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   erroTexto: {
-    color: "#A72F2F",
+    color: CORES.textoNegativo,
     fontSize: 12,
     textAlign: "center",
   },
   erroAcao: {
-    color: "#A72F2F",
+    color: CORES.textoNegativo,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -721,7 +724,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 16,
     marginTop: 12,
-    backgroundColor: "#DDF7EE",
+    backgroundColor: CORES.superficieVerdeSelecionada,
     borderRadius: 12,
   },
 
@@ -754,16 +757,9 @@ const styles = StyleSheet.create({
   iconeDespesa: {
     width: 42,
     height: 42,
-    borderRadius: 13,
-    backgroundColor: CORES.field,
+    backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
-  },
-
-  iconeDespesaEmoji: {
-    fontSize: 23,
-    lineHeight: 28,
-    textAlign: "center",
   },
 
   // Estados

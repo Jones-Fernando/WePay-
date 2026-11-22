@@ -1,7 +1,8 @@
+import { useAppTheme, useAppThemeScheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
   SafeAreaView,
   StatusBar,
@@ -12,10 +13,14 @@ import {
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { router, useLocalSearchParams } from "expo-router";
+import { Alert, showFeedback } from "@/services/feedback";
 
 import { lerReciboComIa } from "@/services/leitorIaServico";
 
 export default function LerRecibo() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
+  const esquema = useAppThemeScheme();
   const params = useLocalSearchParams<{
     origem?: string;
     modo?: string;
@@ -62,6 +67,11 @@ export default function LerRecibo() {
     setAnalisando(true);
     try {
       const dados = await lerReciboComIa(imagem);
+      showFeedback(
+        "success",
+        "Recibo lido",
+        "Revise os dados extraídos antes de salvar.",
+      );
       router.push({
         pathname: "/(main)/receipt-reader/confirmar-recibo",
         params: {
@@ -88,7 +98,7 @@ export default function LerRecibo() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={esquema === "dark" ? "light-content" : "dark-content"} />
       <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity style={styles.botaoVoltar} onPress={() => router.back()}>
@@ -109,7 +119,7 @@ export default function LerRecibo() {
 
           <View style={styles.botoesImagem}>
             <TouchableOpacity style={[styles.botao, styles.botaoFlex]} onPress={tirarFoto} disabled={analisando}>
-              <Text style={styles.botaoTexto}>📷 Tirar foto</Text>
+              <Text style={styles.botaoTextoPrincipal}>📷 Tirar foto</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.botao, styles.botaoFlex, styles.botaoSecundario]} onPress={selecionarImagem} disabled={analisando}>
               <Text style={styles.botaoTexto}>🖼️ {imagem ? "Trocar" : "Galeria"}</Text>
@@ -124,7 +134,7 @@ export default function LerRecibo() {
             disabled={!imagem || analisando}
           >
             {analisando
-              ? <ActivityIndicator color="#0B3B33" />
+              ? <ActivityIndicator color={Cores.texto} />
               : <Text style={styles.botaoTexto}>Analisar recibo</Text>}
           </TouchableOpacity>
         </View>
@@ -133,25 +143,26 @@ export default function LerRecibo() {
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#F5FBF7" },
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: Cores.fundo },
   container: { flex: 1, paddingHorizontal: 20 },
   header: { flexDirection: "row", alignItems: "center", paddingTop: 12, paddingBottom: 18 },
-  botaoVoltar: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#FFFFFF", justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: "#E1EEE8" },
-  iconeVoltar: { fontSize: 32, color: "#0B3B33", lineHeight: 34, marginTop: -3 },
-  titulo: { flex: 1, textAlign: "center", fontSize: 22, fontWeight: "700", color: "#0B3B33" },
+  botaoVoltar: { width: 42, height: 42, borderRadius: 21, backgroundColor: Cores.cartaoFundo, justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: Cores.borda },
+  iconeVoltar: { fontSize: 32, color: Cores.texto, lineHeight: 34, marginTop: -3 },
+  titulo: { flex: 1, textAlign: "center", fontSize: 22, fontWeight: "700", color: Cores.texto },
   espaco: { width: 42 },
-  card: { flex: 1, backgroundColor: "#FFFFFF", borderRadius: 20, padding: 24, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#E1EEE8" },
+  card: { flex: 1, backgroundColor: Cores.cartaoFundo, borderRadius: 20, padding: 24, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: Cores.borda },
   icone: { fontSize: 48, marginBottom: 16 },
-  texto: { fontSize: 18, fontWeight: "700", color: "#0B3B33", textAlign: "center" },
-  subtexto: { marginTop: 10, fontSize: 13, color: "#6B8F86", textAlign: "center", lineHeight: 20 },
+  texto: { fontSize: 18, fontWeight: "700", color: Cores.texto, textAlign: "center" },
+  subtexto: { marginTop: 10, fontSize: 13, color: Cores.textoSuave, textAlign: "center", lineHeight: 20 },
   previa: { width: "100%", height: 180, resizeMode: "contain", marginTop: 20, borderRadius: 12 },
   botoesImagem: { flexDirection: "row", gap: 10, marginTop: 24 },
   botaoFlex: { flex: 1 },
-  botaoSecundario: { backgroundColor: "#E8F9F2", borderWidth: 1, borderColor: "#00C896" },
-  botao: { backgroundColor: "#00C896", paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, alignItems: "center" },
-  botaoAnalisar: { marginTop: 16, backgroundColor: "#BDF3DF", width: "100%", alignItems: "center" },
-  textoAnalisando: { marginTop: 16, fontSize: 12, color: "#6B8F86", textAlign: "center" },
+  botaoSecundario: { backgroundColor: Cores.superficieVerde, borderWidth: 1, borderColor: Cores.principal },
+  botao: { backgroundColor: Cores.principal, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, alignItems: "center" },
+  botaoAnalisar: { marginTop: 16, backgroundColor: Cores.superficieVerdeSelecionada, width: "100%", alignItems: "center" },
+  textoAnalisando: { marginTop: 16, fontSize: 12, color: Cores.textoSuave, textAlign: "center" },
   botaoDesabilitado: { opacity: 0.5 },
-  botaoTexto: { color: "#0B3B33", fontWeight: "700" },
+  botaoTexto: { color: Cores.texto, fontWeight: "700" },
+  botaoTextoPrincipal: { color: Cores.textoSobrePrincipal, fontWeight: "700" },
 });

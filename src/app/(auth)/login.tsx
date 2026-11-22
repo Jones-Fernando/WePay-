@@ -1,3 +1,5 @@
+import { useAppTheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 /*
  * WEPAY — LOGIN
  * Migrado de src/app/index.tsx para src/app/(auth)/login.tsx.
@@ -16,14 +18,17 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   ActivityIndicator,
 } from "react-native";
 
 import { router, useLocalSearchParams } from "expo-router";
 import { useUsuario } from "@/contexts/UsuarioContext";
+import { Alert } from "@/services/feedback";
+import { ApiError } from "@/services/api";
 
 export default function Index() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
   const { login } = useUsuario();
   const { convite } = useLocalSearchParams<{ convite?: string }>();
   const conviteToken = Array.isArray(convite) ? convite[0] : convite;
@@ -31,6 +36,9 @@ export default function Index() {
   const [senha, setSenha] = useState("");
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [carregando, setCarregando] = useState(false);
+  const [campoFocado, setCampoFocado] = useState<"email" | "senha" | null>(
+    null,
+  );
 
   async function entrar() {
     const emailLimpo = email.trim();
@@ -58,6 +66,14 @@ export default function Index() {
         router.replace("/(main)/home");
       }
     } catch (erro) {
+      if (erro instanceof ApiError && erro.status === 401) {
+        Alert.alert(
+          "Erro no login",
+          "O e-mail ou a senha não conferem. Confira os dois e tente novamente.",
+        );
+        return;
+      }
+
       Alert.alert(
         "Erro",
         erro instanceof Error ? erro.message : "Não foi possível fazer login."
@@ -106,11 +122,18 @@ export default function Index() {
           <View style={styles.form}>
             {/* E-mail */}
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                campoFocado === "email" && styles.focusedField,
+              ]}
               placeholder="E-mail"
-              placeholderTextColor="#6B8F86"
+              placeholderTextColor={Cores.textoSuave}
               value={email}
               onChangeText={setEmail}
+              onFocus={() => setCampoFocado("email")}
+              onBlur={() =>
+                setCampoFocado((campo) => (campo === "email" ? null : campo))
+              }
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
@@ -120,13 +143,22 @@ export default function Index() {
             />
 
             {/* Senha */}
-            <View style={styles.passwordContainer}>
+            <View
+              style={[
+                styles.passwordContainer,
+                campoFocado === "senha" && styles.focusedField,
+              ]}
+            >
               <TextInput
                 style={styles.passwordInput}
                 placeholder="Senha"
-                placeholderTextColor="#6B8F86"
+                placeholderTextColor={Cores.textoSuave}
                 value={senha}
                 onChangeText={setSenha}
+                onFocus={() => setCampoFocado("senha")}
+                onBlur={() =>
+                  setCampoFocado((campo) => (campo === "senha" ? null : campo))
+                }
                 secureTextEntry={!mostrarSenha}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -139,6 +171,10 @@ export default function Index() {
               <TouchableOpacity
                 onPress={() => setMostrarSenha((valor) => !valor)}
                 activeOpacity={0.7}
+                onFocus={() => setCampoFocado("senha")}
+                onBlur={() =>
+                  setCampoFocado((campo) => (campo === "senha" ? null : campo))
+                }
               >
                 <Text style={styles.showPassword}>
                   {mostrarSenha ? "Ocultar" : "Mostrar"}
@@ -165,7 +201,7 @@ export default function Index() {
               disabled={carregando}
             >
               {carregando ? (
-                <ActivityIndicator color="#0B3B33" />
+                <ActivityIndicator color={Cores.texto} />
               ) : (
                 <Text style={styles.primaryButtonText}>Entrar</Text>
               )}
@@ -202,10 +238,10 @@ export default function Index() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F5FBF7",
+    backgroundColor: Cores.fundo,
   },
 
   keyboard: {
@@ -226,20 +262,20 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 16,
-    backgroundColor: "#00C896",
+    backgroundColor: Cores.principal,
     justifyContent: "center",
     alignItems: "center",
   },
 
   logoText: {
-    color: "#0B3B33",
+    color: Cores.textoSobrePrincipal,
     fontSize: 30,
     fontWeight: "700",
   },
 
   // Títulos
   title: {
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 25,
     fontWeight: "600",
     marginTop: 22,
@@ -247,7 +283,7 @@ const styles = StyleSheet.create({
   },
 
   subtitle: {
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     fontSize: 14,
     marginTop: 7,
     textAlign: "center",
@@ -262,22 +298,29 @@ const styles = StyleSheet.create({
 
   input: {
     height: 52,
-    backgroundColor: "#F0F8F4",
+    backgroundColor: Cores.fundoCampo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
     borderRadius: 12,
     paddingHorizontal: 15,
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 14,
     marginBottom: 11,
+    outlineStyle: "solid",
+    outlineWidth: 0,
+  },
+
+  focusedField: {
+    borderWidth: 2,
+    borderColor: Cores.textoPositivo,
   },
 
   // Senha
   passwordContainer: {
     height: 52,
-    backgroundColor: "#F0F8F4",
+    backgroundColor: Cores.fundoCampo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
     borderRadius: 12,
     flexDirection: "row",
     alignItems: "center",
@@ -287,13 +330,16 @@ const styles = StyleSheet.create({
 
   passwordInput: {
     flex: 1,
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 14,
     height: "100%",
+    borderRadius: 12,
+    outlineStyle: "solid",
+    outlineWidth: 0,
   },
 
   showPassword: {
-    color: "#00A17A",
+    color: Cores.textoPositivo,
     fontSize: 11,
     fontWeight: "600",
   },
@@ -305,7 +351,7 @@ const styles = StyleSheet.create({
   },
 
   forgot: {
-    color: "#00A17A",
+    color: Cores.textoPositivo,
     fontSize: 12,
     fontWeight: "600",
   },
@@ -313,7 +359,7 @@ const styles = StyleSheet.create({
   // Botão entrar
   primaryButton: {
     height: 52,
-    backgroundColor: "#00C896",
+    backgroundColor: Cores.principal,
     borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
@@ -321,7 +367,7 @@ const styles = StyleSheet.create({
   },
 
   primaryButtonText: {
-    color: "#0B3B33",
+    color: Cores.textoSobrePrincipal,
     fontSize: 15,
     fontWeight: "700",
   },
@@ -337,11 +383,11 @@ const styles = StyleSheet.create({
   divider: {
     flex: 1,
     height: 1,
-    backgroundColor: "#E1EEE8",
+    backgroundColor: Cores.superficieVerde,
   },
 
   or: {
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     fontSize: 12,
     marginHorizontal: 10,
   },
@@ -354,12 +400,12 @@ const styles = StyleSheet.create({
   },
 
   registerText: {
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     fontSize: 13,
   },
 
   registerLink: {
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 13,
     fontWeight: "700",
     marginLeft: 5,

@@ -2,6 +2,7 @@ import {
   formatDateForInput,
   formatDateForDisplay,
   formatDateTimeForDisplay,
+  formatCurrencyInput,
   normalizeDateInput,
   parseCurrencyInput,
   parseDateInputToDate,
@@ -27,6 +28,18 @@ describe("parseCurrencyInput", () => {
   );
 });
 
+describe("formatCurrencyInput", () => {
+  it.each([
+    ["1", "0,01"],
+    ["1234", "12,34"],
+    ["123456", "1.234,56"],
+    ["1.234,56", "1.234,56"],
+    ["", ""],
+  ])("formats %s as Brazilian currency %s", (input, expected) => {
+    expect(formatCurrencyInput(input)).toBe(expected);
+  });
+});
+
 describe("date input helpers", () => {
   it.each([
     ["07/11/2026", "2026-11-07"],
@@ -49,8 +62,11 @@ describe("date input helpers", () => {
     expect(parseDateInputToDate("2026-02-29")).toBeNull();
   });
 
-  it("normalizes valid ISO dates while preserving unrecognized receipt text", () => {
+  it("normalizes ISO timestamps and GMT date strings while preserving unknown text", () => {
     expect(normalizeDateInput("2026-11-07")).toBe("07/11/2026");
+    expect(normalizeDateInput("2026-11-07T00:00:00.000Z")).toBe("07/11/2026");
+    expect(normalizeDateInput("Sat Nov 07 2026 00:00:00 GMT+0000 (UTC)"))
+      .toBe("07/11/2026");
     expect(normalizeDateInput("data desconhecida")).toBe("data desconhecida");
   });
 

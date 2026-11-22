@@ -13,8 +13,12 @@ iOS e web.
    notificações push nativas.
 4. Inicie o backend e execute `npx expo start`.
 
-Em um celular na rede local, use o IP do computador no `EXPO_PUBLIC_API_URL`;
-`localhost` aponta para o próprio celular. Em produção, use HTTPS.
+Em um celular na rede local, use o IP atual do computador no
+`EXPO_PUBLIC_API_URL`; `localhost` aponta para o próprio celular. Para esses
+testes, configure também o backend com `HOST=0.0.0.0` e inclua a origem do
+frontend em `CORS_ORIGINS`. Se o IP do computador mudar, atualize o `.env` e
+reinicie o Expo para carregar a nova URL. Restrinja o acesso ao firewall/rede
+local. Em produção, use HTTPS.
 
 Senhas novas devem ter pelo menos 12 caracteres. Senhas existentes continuam
 válidas para login.

@@ -1,3 +1,5 @@
+import { useAppTheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 /**
  * WEPAY — ROTA NÃO ENCONTRADA
  */
@@ -6,6 +8,8 @@ import { Link, Stack } from "expo-router";
 import { StyleSheet, Text, View } from "react-native";
 
 export default function NotFoundScreen() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
   return (
     <>
       <Stack.Screen options={{ title: "Página não encontrada" }} />
@@ -20,27 +24,27 @@ export default function NotFoundScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
   container: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 24,
-    backgroundColor: "#F5FBF7",
+    backgroundColor: Cores.fundo,
   },
   titulo: {
     fontSize: 22,
     fontWeight: "700",
-    color: "#0B3B33",
+    color: Cores.texto,
   },
   texto: {
     marginTop: 8,
     textAlign: "center",
-    color: "#6B8F86",
+    color: Cores.textoSuave,
   },
   link: {
     marginTop: 18,
-    color: "#00A17A",
+    color: Cores.textoPositivo,
     fontWeight: "700",
   },
 });

@@ -1,3 +1,5 @@
+import { useAppTheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 /*
  * WEPAY — CONFIGURAÇÕES
  *
@@ -18,18 +20,21 @@ import {
   SafeAreaView,
   ScrollView,
   Switch,
-  Alert,
   Modal,
   TextInput,
 } from "react-native";
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 
-import { Cores } from "../../constants/Cores";
 import { useUsuario } from "@/contexts/UsuarioContext";
+import { Alert } from "@/services/feedback";
 import { usePreferencias } from "@/contexts/PreferenciasContext";
 import { authApi } from "@/services/api";
+import { useFieldFocus } from "@/hooks/useFieldFocus";
+import { ExternalLink } from "@/components/external-link";
 
 export default function Configuracoes() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
   const { logout } = useUsuario();
   const {
     preferencias,
@@ -38,9 +43,11 @@ export default function Configuracoes() {
   } = usePreferencias();
 
   const [modalExclusao, setModalExclusao] = useState(false);
+  const [modalTema, setModalTema] = useState(false);
   const [senhaAtual, setSenhaAtual] = useState("");
   const [erroExclusao, setErroExclusao] = useState("");
   const [excluindo, setExcluindo] = useState(false);
+  const { focusedField, focusHandlers } = useFieldFocus();
 
   function excluirConta() {
     Alert.alert(
@@ -93,28 +100,12 @@ export default function Configuracoes() {
   }
 
   function selecionarTema() {
-    Alert.alert(
-      "Tema",
-      "Escolha o tema do aplicativo.",
-      [
-        {
-          text: "Sistema",
-          onPress: () => void atualizarPreferencias({ tema: "Sistema" }),
-        },
-        {
-          text: "Claro",
-          onPress: () => void atualizarPreferencias({ tema: "Claro" }),
-        },
-        {
-          text: "Escuro",
-          onPress: () => void atualizarPreferencias({ tema: "Escuro" }),
-        },
-        {
-          text: "Cancelar",
-          style: "cancel",
-        },
-      ]
-    );
+    setModalTema(true);
+  }
+
+  function selecionarOpcaoTema(tema: "Sistema" | "Claro" | "Escuro") {
+    setModalTema(false);
+    void atualizarPreferencias({ tema });
   }
 
   return (
@@ -143,11 +134,62 @@ export default function Configuracoes() {
           <View style={styles.row}>
             <View style={styles.rowContent}>
               <Text style={styles.rowTitle}>
-                Notificações
+                Novas despesas
               </Text>
 
               <Text style={styles.rowDescription}>
-                Receber alertas de novas despesas em grupos.
+                Avisar quando uma despesa for criada em um grupo.
+              </Text>
+            </View>
+
+            <Switch
+              value={preferencias.despesas}
+              onValueChange={(despesas) =>
+                void atualizarPreferencias({ despesas })
+              }
+              disabled={carregandoPreferencias}
+              trackColor={{
+                false: Cores.borda,
+                true: Cores.principal,
+              }}
+              thumbColor={Cores.branco}
+            />
+          </View>
+
+          <View style={styles.separator} />
+
+          <View style={styles.row}>
+            <View style={styles.rowContent}>
+              <Text style={styles.rowTitle}>
+                Lembretes de cobrança
+              </Text>
+
+              <Text style={styles.rowDescription}>
+                Receber lembretes de valores pendentes nos grupos.
+              </Text>
+            </View>
+
+            <Switch
+              value={preferencias.cobrancas}
+              onValueChange={(cobrancas) =>
+                void atualizarPreferencias({ cobrancas })
+              }
+              disabled={carregandoPreferencias}
+              trackColor={{
+                false: Cores.borda,
+                true: Cores.principal,
+              }}
+              thumbColor={Cores.branco}
+            />
+          </View>
+
+          <View style={styles.separator} />
+
+          <View style={styles.row}>
+            <View style={styles.rowContent}>
+              <Text style={styles.rowTitle}>Push no dispositivo</Text>
+              <Text style={styles.rowDescription}>
+                Mostrar avisos mesmo quando o app estiver fechado.
               </Text>
             </View>
 
@@ -169,10 +211,7 @@ export default function Configuracoes() {
 
           <View style={styles.row}>
             <View style={styles.rowContent}>
-              <Text style={styles.rowTitle}>
-                Sons
-              </Text>
-
+              <Text style={styles.rowTitle}>Sons</Text>
               <Text style={styles.rowDescription}>
                 Ativar sons das notificações push.
               </Text>
@@ -205,6 +244,21 @@ export default function Configuracoes() {
             </Text>
             <Text style={styles.rowDescription}>
               Gerencie as categorias de despesas pessoais e em grupo.
+            </Text>
+          </View>
+          <Text style={styles.arrow}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.optionCard}
+          onPress={() =>
+            router.push("/(main)/group/gerenciar-icones-capa" as Href)
+          }
+        >
+          <View>
+            <Text style={styles.rowTitle}>Ícones de capa dos grupos</Text>
+            <Text style={styles.rowDescription}>
+              Escolha quais ícones ficam disponíveis ao criar ou editar grupos.
             </Text>
           </View>
           <Text style={styles.arrow}>›</Text>
@@ -258,10 +312,70 @@ export default function Configuracoes() {
           </Text>
 
           <Text style={styles.deleteDescription}>
-            Seus dados pessoais serão removidos e o histórico financeiro compartilhado será anonimizado.
+            Disponível somente quando não houver saldo em dívida. Seus dados pessoais serão removidos e o histórico financeiro compartilhado será anonimizado.
           </Text>
         </TouchableOpacity>
+
+        <ExternalLink
+          href="https://icons8.com.br/icon/CYgFsQyxgTod/pizza-emoji"
+          style={styles.credit}
+        >
+          Ícones de categoria: Icons8
+        </ExternalLink>
       </ScrollView>
+
+      <Modal
+        visible={modalTema}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalTema(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Tema do aplicativo</Text>
+            <Text style={styles.modalDescription}>
+              Escolha como o WePay deve aparecer neste dispositivo.
+            </Text>
+            {([
+              ["Sistema", "Usa a aparência do dispositivo."],
+              ["Claro", "Mantém as cores claras do WePay."],
+              ["Escuro", "Fundo preto, cartões grafite e textos claros."],
+            ] as const).map(([tema, descricao]) => {
+              const selecionado = preferencias.tema === tema;
+              return (
+                <TouchableOpacity
+                  key={tema}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: selecionado }}
+                  style={[
+                    styles.themeOption,
+                    selecionado && styles.themeOptionSelected,
+                  ]}
+                  onPress={() => selecionarOpcaoTema(tema)}
+                >
+                  <View style={styles.themeOptionCopy}>
+                    <Text style={styles.themeOptionTitle}>{tema}</Text>
+                    <Text style={styles.themeOptionDescription}>
+                      {descricao}
+                    </Text>
+                  </View>
+                  {selecionado ? (
+                    <Text style={styles.themeOptionCheck}>✓</Text>
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })}
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setModalTema(false)}
+              >
+                <Text style={styles.cancelButtonText}>Fechar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={modalExclusao}
@@ -278,7 +392,10 @@ export default function Configuracoes() {
               A exclusão é permanente. Informe sua senha atual para continuar.
             </Text>
             <TextInput
-              style={styles.passwordInput}
+              style={[
+                styles.passwordInput,
+                focusedField === "senhaAtual" && styles.focusedField,
+              ]}
               value={senhaAtual}
               onChangeText={setSenhaAtual}
               placeholder="Senha atual"
@@ -290,6 +407,7 @@ export default function Configuracoes() {
               textContentType="password"
               editable={!excluindo}
               returnKeyType="done"
+              {...focusHandlers("senhaAtual")}
               onSubmitEditing={confirmarExclusao}
             />
             {erroExclusao ? (
@@ -322,7 +440,7 @@ export default function Configuracoes() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Cores.fundo,
@@ -330,11 +448,12 @@ const styles = StyleSheet.create({
 
   scroll: {
     paddingHorizontal: 20,
-    paddingBottom: 40,
+    paddingTop: 4,
+    paddingBottom: 48,
   },
 
   header: {
-    height: 65,
+    height: 68,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -344,7 +463,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 12,
-    backgroundColor: Cores.branco,
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
     borderColor: Cores.borda,
     justifyContent: "center",
@@ -370,27 +489,28 @@ const styles = StyleSheet.create({
     color: Cores.texto,
     fontSize: 13,
     fontWeight: "700",
-    marginTop: 25,
-    marginBottom: 10,
+    marginTop: 28,
+    marginBottom: 12,
   },
 
   card: {
-    backgroundColor: Cores.branco,
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
     borderColor: Cores.borda,
     borderRadius: 16,
-    paddingHorizontal: 15,
+    paddingHorizontal: 17,
   },
 
   row: {
-    minHeight: 72,
+    minHeight: 82,
     flexDirection: "row",
     alignItems: "center",
+    paddingVertical: 10,
   },
 
   rowContent: {
     flex: 1,
-    paddingRight: 12,
+    paddingRight: 16,
   },
 
   rowTitle: {
@@ -406,18 +526,29 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
+  credit: {
+    color: Cores.textoSuave,
+    fontSize: 10,
+    textAlign: "center",
+    marginTop: 22,
+    marginBottom: 8,
+  },
+
   separator: {
     height: 1,
     backgroundColor: Cores.borda,
+    marginVertical: 2,
   },
 
   optionCard: {
-    minHeight: 60,
-    backgroundColor: Cores.branco,
+    minHeight: 68,
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
     borderColor: Cores.borda,
     borderRadius: 14,
     paddingHorizontal: 15,
+    paddingVertical: 10,
+    marginBottom: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -429,12 +560,12 @@ const styles = StyleSheet.create({
   },
 
   deleteCard: {
-    backgroundColor: Cores.branco,
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
     borderColor: Cores.negativo,
     borderRadius: 14,
-    padding: 16,
-    marginTop: 15,
+    padding: 18,
+    marginTop: 18,
   },
 
   deleteTitle: {
@@ -446,8 +577,8 @@ const styles = StyleSheet.create({
   deleteDescription: {
     color: Cores.textoSuave,
     fontSize: 12,
-    marginTop: 5,
-    lineHeight: 18,
+    marginTop: 7,
+    lineHeight: 19,
   },
 
   modalOverlay: {
@@ -458,7 +589,7 @@ const styles = StyleSheet.create({
   },
 
   modalCard: {
-    backgroundColor: Cores.branco,
+    backgroundColor: Cores.cartaoFundo,
     borderRadius: 18,
     padding: 20,
   },
@@ -476,6 +607,47 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
+  themeOption: {
+    minHeight: 62,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: Cores.borda,
+    borderRadius: 12,
+    backgroundColor: Cores.cartaoFundo,
+    paddingHorizontal: 14,
+    marginTop: 10,
+  },
+
+  themeOptionSelected: {
+    borderColor: Cores.bordaDestaque,
+    backgroundColor: Cores.superficieMintSuave,
+  },
+
+  themeOptionCopy: {
+    flex: 1,
+  },
+
+  themeOptionTitle: {
+    color: Cores.texto,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  themeOptionDescription: {
+    color: Cores.textoSuave,
+    fontSize: 12,
+    marginTop: 3,
+  },
+
+  themeOptionCheck: {
+    color: Cores.textoPositivo,
+    fontSize: 20,
+    fontWeight: "700",
+    marginLeft: 12,
+  },
+
   passwordInput: {
     minHeight: 50,
     borderWidth: 1,
@@ -484,6 +656,13 @@ const styles = StyleSheet.create({
     color: Cores.texto,
     paddingHorizontal: 14,
     marginTop: 16,
+    outlineStyle: "solid",
+    outlineWidth: 0,
+  },
+
+  focusedField: {
+    borderWidth: 2,
+    borderColor: Cores.textoPositivo,
   },
 
   deleteError: {
