@@ -6,9 +6,11 @@ from database.connection import get_connection_context, cursor_for, fetch_one
 from models.grupo_model import GrupoModel
 from models.participante_model import ParticipanteModel
 from models.despesa_model import DespesaModel
+from models.categoria_model import CategoriaModel
 from services.financeiro_service import FinanceiroService, money
 from utils.response_utils import ResponseUtils
 from utils.validators import (
+    MAX_PARTICIPANTS_PER_GROUP,
     parse_money,
     parse_iso_date,
     parse_pagination,
@@ -31,6 +33,10 @@ class DespesaController:
             raise ValueError("Tipo de divisao invalido.")
         if not isinstance(participantes, list):
             raise ValueError("Participantes deve ser uma lista de IDs.")
+        if len(participantes) > MAX_PARTICIPANTS_PER_GROUP:
+            raise ValueError(
+                f"A divisao pode ter no maximo {MAX_PARTICIPANTS_PER_GROUP} participantes."
+            )
         participantes = [
             parse_positive_int(item, "participante")
             for item in participantes
@@ -96,7 +102,9 @@ class DespesaController:
             return ResponseUtils.erro("Voce nao participa deste grupo.", status=403)
         if not ParticipanteModel.buscar(grupo_id, pagador_id):
             return ResponseUtils.erro("Pagador deve ser participante ativo do grupo.", status=400)
-
+        categoria_id = CategoriaModel.buscar_id(
+            current_user_id, categoria, "grupo"
+        )
         try:
             divisao_tipo, participantes, percentuais, valores = (
                 DespesaController._dados_divisao(data)
@@ -124,6 +132,7 @@ class DespesaController:
                 valores=valores,
                 observacao=observacao,
                 criador_id=current_user_id,
+                categoria_id=categoria_id,
             )
         except PermissionError as exc:
             return ResponseUtils.erro(str(exc), status=403)
@@ -212,7 +221,13 @@ class DespesaController:
             return ResponseUtils.erro(str(exc))
         if not ParticipanteModel.buscar(grupo_id, pagador_id):
             return ResponseUtils.erro("Pagador deve ser participante ativo do grupo.", status=400)
-
+        categoria_id = despesa.get("categoria_id")
+        if categoria != despesa.get("categoria") or (
+            categoria and categoria_id is None
+        ):
+            categoria_id = CategoriaModel.buscar_id(
+                current_user_id, categoria, "grupo"
+            )
         try:
             valor = parse_money(data.get("valor"))
             data_despesa = parse_iso_date(
@@ -251,6 +266,7 @@ class DespesaController:
                 valores=valores,
                 **({"observacao": observacao} if "observacao" in data else {}),
                 ator_id=current_user_id,
+                categoria_id=categoria_id,
             )
         except PermissionError as exc:
             return ResponseUtils.erro(str(exc), status=403)

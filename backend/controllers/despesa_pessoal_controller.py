@@ -2,6 +2,7 @@ from datetime import date, timedelta
 from flask import request
 
 from models.despesa_pessoal_model import DespesaPessoalModel
+from models.categoria_model import CategoriaModel
 from utils.response_utils import ResponseUtils
 from utils.validators import parse_money, parse_iso_date, parse_pagination
 
@@ -39,6 +40,9 @@ class DespesaPessoalController:
         except ValueError as exc:
             return ResponseUtils.erro(str(exc))
 
+        categoria_id = CategoriaModel.buscar_id(
+            current_user_id, categoria, "pessoal"
+        )
         item_id = DespesaPessoalModel.criar(
             current_user_id,
             descricao,
@@ -46,6 +50,7 @@ class DespesaPessoalController:
             categoria,
             tipo,
             data_despesa,
+            categoria_id,
         )
         return ResponseUtils.sucesso(
             dados={"id": item_id},
@@ -135,8 +140,17 @@ class DespesaPessoalController:
         except ValueError as exc:
             return ResponseUtils.erro(str(exc))
 
+        categoria_id = CategoriaModel.buscar_id(
+            current_user_id, categoria, "pessoal"
+        )
         DespesaPessoalModel.atualizar(
-            despesa_id, descricao, valor, categoria, tipo, data_despesa
+            despesa_id,
+            descricao,
+            valor,
+            categoria,
+            tipo,
+            data_despesa,
+            categoria_id,
         )
         return ResponseUtils.sucesso(mensagem="Transacao pessoal atualizada.")
 

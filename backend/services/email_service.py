@@ -1,16 +1,35 @@
 import logging
 import smtplib
+import ssl
 from html import escape
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from urllib.parse import urlencode
 
 from config import Config
+from models.email_outbox_model import EmailOutboxModel
 
 logger = logging.getLogger(__name__)
 
 
 class EmailService:
+    @staticmethod
+    def agendar_recuperacao_senha(
+        usuario_id: int,
+        recuperacao_token_id: int,
+        email_destino: str,
+        token: str,
+        connection,
+    ) -> bool:
+        EmailOutboxModel.enfileirar(
+            usuario_id,
+            recuperacao_token_id,
+            email_destino,
+            token,
+            connection,
+        )
+        return True
+
     @staticmethod
     def _frontend_link(route: str, params: dict[str, str]) -> str:
         base_url = Config.FRONTEND_URL.rstrip("/")
@@ -31,14 +50,20 @@ class EmailService:
             mensagem.attach(MIMEText(corpo_html, "html", "utf-8"))
 
         try:
+            tls_context = ssl.create_default_context()
             if Config.EMAIL_PORT == 465:
-                with smtplib.SMTP_SSL(Config.EMAIL_SERVER, Config.EMAIL_PORT, timeout=15) as servidor:
+                with smtplib.SMTP_SSL(
+                    Config.EMAIL_SERVER,
+                    Config.EMAIL_PORT,
+                    timeout=15,
+                    context=tls_context,
+                ) as servidor:
                     servidor.login(Config.EMAIL_REMETENTE, Config.EMAIL_SENHA_APP)
                     servidor.sendmail(Config.EMAIL_REMETENTE, email_destino, mensagem.as_string())
             else:
                 with smtplib.SMTP(Config.EMAIL_SERVER, Config.EMAIL_PORT, timeout=15) as servidor:
                     servidor.ehlo()
-                    servidor.starttls()
+                    servidor.starttls(context=tls_context)
                     servidor.ehlo()
                     servidor.login(Config.EMAIL_REMETENTE, Config.EMAIL_SENHA_APP)
                     servidor.sendmail(Config.EMAIL_REMETENTE, email_destino, mensagem.as_string())
@@ -49,7 +74,15 @@ class EmailService:
 
     @staticmethod
     def enviar_recuperacao_senha(email_destino: str, token: str) -> bool:
-        link = EmailService._frontend_link("redefinir-senha", {"token": token})
+        if Config.PASSWORD_RESET_URL:
+            link = (
+                f"{Config.PASSWORD_RESET_URL.rstrip('/')}"
+                f"?{urlencode({'token': token})}"
+            )
+        else:
+            link = EmailService._frontend_link(
+                "redefinir-senha", {"token": token}
+            )
         link_html = escape(link, quote=True)
         texto = (
             "Olá!\n\n"

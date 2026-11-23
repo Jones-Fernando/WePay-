@@ -7,17 +7,33 @@
  */
 
 import { Stack } from "expo-router";
+import { StatusBar } from "react-native";
 import { UsuarioProvider } from "@/contexts/UsuarioContext";
 import { PreferenciasProvider } from "@/contexts/PreferenciasContext";
+import { ToastProvider } from "@/components/feedback/ToastProvider";
+import { useAppThemeScheme } from "@/hooks/useAppTheme";
+
+function AppChrome() {
+  const scheme = useAppThemeScheme();
+
+  return (
+    <StatusBar
+      barStyle={scheme === "dark" ? "light-content" : "dark-content"}
+    />
+  );
+}
 
 export default function MainLayout() {
   return (
     <UsuarioProvider>
       <PreferenciasProvider>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(main)" />
-        </Stack>
+        <ToastProvider>
+          <AppChrome />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(main)" />
+          </Stack>
+        </ToastProvider>
       </PreferenciasProvider>
     </UsuarioProvider>
   );

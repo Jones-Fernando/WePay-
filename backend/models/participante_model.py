@@ -1,4 +1,5 @@
 from database.connection import get_connection_context, cursor_for, fetch_one, fetch_all
+from utils.validators import MAX_PARTICIPANTS_PER_GROUP
 
 
 class ParticipanteModel:
@@ -7,6 +8,30 @@ class ParticipanteModel:
         if conn is not None:
             cursor = cursor_for(conn)
             try:
+                cursor.execute(
+                    "SELECT id FROM grupos WHERE id = ? FOR UPDATE",
+                    (grupo_id,),
+                )
+                if not fetch_one(cursor):
+                    raise LookupError("Grupo nao encontrado.")
+                cursor.execute(
+                    "SELECT ativo FROM participantes "
+                    "WHERE grupo_id = ? AND usuario_id = ?",
+                    (grupo_id, usuario_id),
+                )
+                participante = fetch_one(cursor)
+                if not participante or not int(participante["ativo"]):
+                    cursor.execute(
+                        "SELECT COUNT(*) AS total FROM participantes p "
+                        "JOIN usuarios u ON u.id = p.usuario_id "
+                        "WHERE p.grupo_id = ? AND p.ativo = 1 "
+                        "AND u.excluido_em IS NULL",
+                        (grupo_id,),
+                    )
+                    if int(fetch_one(cursor)["total"]) >= MAX_PARTICIPANTS_PER_GROUP:
+                        raise ValueError(
+                            f"O grupo pode ter no maximo {MAX_PARTICIPANTS_PER_GROUP} participantes."
+                        )
                 cursor.execute(
                     """
                     INSERT INTO participantes (grupo_id, usuario_id, papel, ativo)
@@ -93,6 +118,8 @@ class ParticipanteModel:
                                 ELSE 'Usuário excluído' END AS nome,
                            CASE WHEN u.excluido_em IS NULL THEN u.email
                                 ELSE NULL END AS email,
+                           CASE WHEN u.excluido_em IS NULL THEN u.avatar_url
+                                ELSE NULL END AS avatar_url,
                            CASE WHEN u.excluido_em IS NULL THEN p.ativo
                                 ELSE 0 END AS ativo
                     FROM participantes p

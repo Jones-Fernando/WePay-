@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import { useAppTheme, useAppThemeScheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
+import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -13,16 +14,87 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
+import { IconeCategoria } from "@/components/IconeCategoria";
+import { GROUP_COVER_ICONS } from "@/constants/groupCoverIcons";
 import { gruposApi } from "@/services/api";
+import { Alert } from "@/services/feedback";
+import { useFieldFocus } from "@/hooks/useFieldFocus";
 
 const NOME_MIN_LENGTH = 2;
 const DESCRICAO_MAX_LENGTH = 200;
 
+function iniciais(nome: string) {
+  return nome
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((parte) => parte[0])
+    .join("")
+    .toUpperCase();
+}
+
 export default function NovoGrupo() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
+  const esquema = useAppThemeScheme();
   const [nome, setNome] = useState("");
   const [descricao, setDescricao] = useState("");
+  const [icone, setIcone] = useState<string | null>(null);
+  const [opcoesIcone, setOpcoesIcone] = useState<
+    (typeof GROUP_COVER_ICONS)[number][]
+  >([]);
+  const [carregandoIcones, setCarregandoIcones] = useState(true);
+  const [erroIcones, setErroIcones] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
+  const { focusedField, focusHandlers } = useFieldFocus();
+
+  const carregarIcones = useCallback(
+    async (estaAtiva: () => boolean = () => true) => {
+      setCarregandoIcones(true);
+      setErroIcones(null);
+      try {
+        const resposta = await gruposApi.listarIconesCapa();
+        if (!estaAtiva()) return;
+
+        const iconesAtivos = new Set(
+          resposta.data.icones
+            .filter((opcao) => opcao.origem === "padrao")
+            .map((opcao) => opcao.icone),
+        );
+        const opcoesVisiveis = GROUP_COVER_ICONS.filter((opcao) =>
+          iconesAtivos.has(opcao.icone),
+        );
+        setOpcoesIcone(opcoesVisiveis);
+        setIcone((atual) => {
+          if (atual && iconesAtivos.has(atual)) return atual;
+          if (iconesAtivos.has("👥")) return "👥";
+          return opcoesVisiveis[0]?.icone ?? null;
+        });
+      } catch (falha) {
+        if (estaAtiva()) {
+          setErroIcones(
+            falha instanceof Error
+              ? falha.message
+              : "Não foi possível carregar os ícones de capa.",
+          );
+        }
+      } finally {
+        if (estaAtiva()) setCarregandoIcones(false);
+      }
+    },
+    [],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let ativo = true;
+      void carregarIcones(() => ativo);
+      return () => {
+        ativo = false;
+      };
+    }, [carregarIcones]),
+  );
 
   const nomeTrimado = nome.trim();
   const descricaoTrimada = descricao.trim();
@@ -66,6 +138,7 @@ export default function NovoGrupo() {
       await gruposApi.criar({
         nome: titulo,
         descricao: descricaoTrimada || undefined,
+        icone,
       });
       Alert.alert(
         "Grupo criado",
@@ -84,7 +157,7 @@ export default function NovoGrupo() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={esquema === "dark" ? "light-content" : "dark-content"} />
       <KeyboardAvoidingView
         style={styles.teclado}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -114,8 +187,14 @@ export default function NovoGrupo() {
             </View>
 
             <View style={styles.introducao}>
-              <View style={styles.iconeGrupo}>
-                <Text style={styles.emojiGrupo}>👥</Text>
+              <View style={styles.iconeGrupo} accessible={false}>
+                {icone ? (
+                  <IconeCategoria icone={icone} tamanho={24} />
+                ) : (
+                  <Text style={styles.emojiGrupo}>
+                    {iniciais(nome) || "GR"}
+                  </Text>
+                )}
               </View>
               <View style={styles.introducaoTexto}>
                 <Text style={styles.introducaoTitulo}>
@@ -130,11 +209,16 @@ export default function NovoGrupo() {
             <View style={styles.campo}>
               <Text style={styles.label}>Nome do grupo</Text>
               <TextInput
-                style={[styles.input, erroNome ? styles.inputErro : null]}
+                style={[
+                  styles.input,
+                  erroNome ? styles.inputErro : null,
+                  !erroNome && focusedField === "nome" && styles.focusedField,
+                ]}
                 value={nome}
                 onChangeText={setNome}
+                {...focusHandlers("nome")}
                 placeholder="Ex.: Viagem para Bahia"
-                placeholderTextColor="#8AA69E"
+                placeholderTextColor={Cores.placeholder}
                 autoCapitalize="sentences"
                 returnKeyType="next"
                 maxLength={80}
@@ -148,11 +232,17 @@ export default function NovoGrupo() {
             <View style={styles.campo}>
               <Text style={styles.label}>Descrição (opcional)</Text>
               <TextInput
-                style={[styles.input, styles.inputDescricao, erroDescricao ? styles.inputErro : null]}
+                style={[
+                  styles.input,
+                  styles.inputDescricao,
+                  erroDescricao ? styles.inputErro : null,
+                  !erroDescricao && focusedField === "descricao" && styles.focusedField,
+                ]}
                 value={descricao}
                 onChangeText={setDescricao}
+                {...focusHandlers("descricao")}
                 placeholder="Ex.: Despesas da viagem de julho"
-                placeholderTextColor="#8AA69E"
+                placeholderTextColor={Cores.placeholder}
                 autoCapitalize="sentences"
                 multiline
                 maxLength={DESCRICAO_MAX_LENGTH + 20}
@@ -162,6 +252,70 @@ export default function NovoGrupo() {
               <Text style={[styles.ajudaCampo, erroDescricao ? styles.erroTexto : null]}>
                 {erroDescricao || `Máximo de ${DESCRICAO_MAX_LENGTH} caracteres.`}
               </Text>
+            </View>
+
+            <View style={styles.campo}>
+              <Text style={styles.label}>Ícone da capa</Text>
+              <Text style={styles.ajudaCampo}>
+                Escolha um ícone para identificar o grupo. Você poderá alterá-lo
+                depois.
+              </Text>
+              {carregandoIcones ? (
+                <View style={styles.carregandoIcones}>
+                  <ActivityIndicator color={Cores.accentDark} />
+                </View>
+              ) : erroIcones ? (
+                <View style={styles.erroIcones}>
+                  <Text style={[styles.ajudaCampo, styles.erroTexto]}>
+                    {erroIcones}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => void carregarIcones()}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.tentarNovamente}>Tentar novamente</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : opcoesIcone.length === 0 ? (
+                <Text style={styles.ajudaCampo}>
+                  Nenhum ícone está disponível. Você ainda pode usar as iniciais
+                  do grupo.
+                </Text>
+              ) : null}
+              <View style={styles.gradeIcones}>
+                <TouchableOpacity
+                  style={[
+                    styles.opcaoIcone,
+                    icone === null && styles.opcaoIconeSelecionada,
+                  ]}
+                  onPress={() => setIcone(null)}
+                  activeOpacity={0.75}
+                  accessibilityRole="radio"
+                  accessibilityLabel="Usar as iniciais do grupo, sem ícone"
+                  accessibilityState={{ selected: icone === null }}
+                >
+                  <Text style={styles.opcaoSemIcone}>Aa</Text>
+                </TouchableOpacity>
+                {opcoesIcone.map((opcao) => {
+                  const selecionado = icone === opcao.icone;
+                  return (
+                    <TouchableOpacity
+                      key={opcao.icone}
+                      style={[
+                        styles.opcaoIcone,
+                        selecionado && styles.opcaoIconeSelecionada,
+                      ]}
+                      onPress={() => setIcone(opcao.icone)}
+                      activeOpacity={0.75}
+                      accessibilityRole="radio"
+                      accessibilityLabel={`Ícone ${opcao.label}`}
+                      accessibilityState={{ selected: selecionado }}
+                    >
+                      <IconeCategoria icone={opcao.icone} tamanho={22} />
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
 
             <View style={styles.aviso}>
@@ -186,7 +340,7 @@ export default function NovoGrupo() {
             >
               {salvando ? (
                 <View style={styles.carregando}>
-                  <ActivityIndicator color="#0B3B33" />
+                  <ActivityIndicator color={Cores.texto} />
                   <Text style={styles.botaoSalvarTexto}>Criando grupo...</Text>
                 </View>
               ) : (
@@ -209,8 +363,8 @@ export default function NovoGrupo() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5FBF7" },
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: Cores.fundo },
   teclado: { flex: 1 },
   conteudo: { flexGrow: 1, paddingHorizontal: 20, paddingBottom: 30 },
   formulario: { width: "100%", maxWidth: 620, alignSelf: "center" },
@@ -224,23 +378,23 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
   },
-  voltar: { fontSize: 32, color: "#0B3B33", marginTop: -3 },
+  voltar: { fontSize: 32, color: Cores.texto, marginTop: -3 },
   headerTexto: { flex: 1 },
-  titulo: { fontSize: 22, fontWeight: "700", color: "#0B3B33" },
-  subtitulo: { fontSize: 12, color: "#6B8F86", marginTop: 4, lineHeight: 17 },
+  titulo: { fontSize: 22, fontWeight: "700", color: Cores.texto },
+  subtitulo: { fontSize: 12, color: Cores.textoSuave, marginTop: 4, lineHeight: 17 },
   introducao: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#E8F9F2",
+    backgroundColor: Cores.superficieVerde,
     borderWidth: 1,
-    borderColor: "#C9EFE1",
+    borderColor: Cores.bordaDestaque,
     borderRadius: 16,
     padding: 14,
     marginBottom: 25,
@@ -249,47 +403,84 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 15,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
   },
-  emojiGrupo: { fontSize: 23 },
+  emojiGrupo: { fontSize: 15, fontWeight: "700", color: Cores.texto },
   introducaoTexto: { flex: 1 },
   introducaoTitulo: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#0B3B33",
+    color: Cores.texto,
     marginBottom: 3,
   },
-  introducaoSubtitulo: { fontSize: 11, color: "#6B8F86", lineHeight: 16 },
+  introducaoSubtitulo: { fontSize: 11, color: Cores.textoSuave, lineHeight: 16 },
   campo: { marginBottom: 20 },
   label: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#0B3B33",
+    color: Cores.texto,
     marginBottom: 8,
   },
   input: {
     minHeight: 52,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
-    borderRadius: 13,
+    borderColor: Cores.borda,
+    borderRadius: 12,
     paddingHorizontal: 15,
     fontSize: 14,
-    color: "#0B3B33",
+    color: Cores.texto,
+    outlineStyle: "solid",
+    outlineWidth: 0,
   },
-  ajudaCampo: { fontSize: 11, color: "#6B8F86", marginTop: 7, lineHeight: 16 },
-  erroTexto: { color: "#B42318" },
-  inputErro: { borderColor: "#D92D20" },
+  focusedField: { borderWidth: 2, borderColor: Cores.textoPositivo },
+  ajudaCampo: { fontSize: 11, color: Cores.textoSuave, marginTop: 7, lineHeight: 16 },
+  erroTexto: { color: Cores.textoNegativo },
+  carregandoIcones: { paddingVertical: 12, alignItems: "flex-start" },
+  erroIcones: { marginTop: 2 },
+  tentarNovamente: {
+    color: Cores.textoPositivo,
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 6,
+  },
+  inputErro: { borderColor: Cores.negativo },
   inputDescricao: { height: 112, paddingTop: 14 },
+  gradeIcones: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 10,
+  },
+  opcaoIcone: {
+    width: 46,
+    height: 46,
+    borderWidth: 1,
+    borderColor: Cores.borda,
+    borderRadius: 12,
+    backgroundColor: Cores.cartaoFundo,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  opcaoIconeSelecionada: {
+    borderWidth: 2,
+    borderColor: Cores.textoPositivo,
+    backgroundColor: Cores.superficieVerdeSelecionada,
+  },
+  opcaoSemIcone: {
+    color: Cores.textoSuave,
+    fontSize: 12,
+    fontWeight: "700",
+  },
   aviso: {
     flexDirection: "row",
     alignItems: "flex-start",
-    backgroundColor: "#E8F9F2",
+    backgroundColor: Cores.superficieVerde,
     borderWidth: 1,
-    borderColor: "#C9EFE1",
+    borderColor: Cores.bordaDestaque,
     borderRadius: 15,
     padding: 15,
     marginTop: 1,
@@ -299,29 +490,29 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 11,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 11,
   },
-  avisoIconeTexto: { fontSize: 18, color: "#00A17A" },
+  avisoIconeTexto: { fontSize: 18, color: Cores.textoPositivo },
   avisoConteudo: { flex: 1 },
   avisoTitulo: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#0B3B33",
+    color: Cores.texto,
     marginBottom: 4,
   },
-  avisoTexto: { fontSize: 11, color: "#6B8F86", lineHeight: 17 },
+  avisoTexto: { fontSize: 11, color: Cores.textoSuave, lineHeight: 17 },
   botaoSalvar: {
     height: 54,
-    backgroundColor: "#00C896",
+    backgroundColor: Cores.principal,
     borderRadius: 15,
     justifyContent: "center",
     alignItems: "center",
     marginTop: 2,
   },
-  botaoSalvarTexto: { fontSize: 15, fontWeight: "700", color: "#0B3B33" },
+  botaoSalvarTexto: { fontSize: 15, fontWeight: "700", color: Cores.textoSobrePrincipal },
   carregando: { flexDirection: "row", alignItems: "center", gap: 9 },
   botaoDesabilitado: { opacity: 0.6 },
   botaoCancelar: {
@@ -330,5 +521,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 5,
   },
-  botaoCancelarTexto: { fontSize: 13, fontWeight: "600", color: "#6B8F86" },
+  botaoCancelarTexto: { fontSize: 13, fontWeight: "600", color: Cores.textoSuave },
 });

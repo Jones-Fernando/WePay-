@@ -47,6 +47,16 @@ export function parseCurrencyInput(value: string): number {
   return Number(normalized);
 }
 
+export function formatCurrencyInput(value: string): string {
+  const digits = value.replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+  if (!digits) return "";
+
+  const normalized = digits.padStart(3, "0");
+  const integer = normalized.slice(0, -2).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  const cents = normalized.slice(-2);
+  return `${integer},${cents}`;
+}
+
 export function parseDateInputToIso(value: string): string | null {
   const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (iso) {
@@ -79,10 +89,31 @@ export function parseDateInputToDate(value: string): Date | null {
 }
 
 export function normalizeDateInput(value: string): string {
+  const isoDate = value.match(/^(\d{4}-\d{2}-\d{2})(?:T|$)/);
+  if (isoDate) {
+    const iso = parseDateInputToIso(isoDate[1]);
+    if (iso) {
+      const [year, month, day] = iso.split("-");
+      return `${day}/${month}/${year}`;
+    }
+    return value;
+  }
+
   const iso = parseDateInputToIso(value);
-  if (!iso) return value;
-  const [year, month, day] = iso.split("-");
-  return `${day}/${month}/${year}`;
+  if (iso) {
+    const [year, month, day] = iso.split("-");
+    return `${day}/${month}/${year}`;
+  }
+
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) return value;
+
+  if (/\b(?:GMT|UTC)\b/i.test(value)) {
+    const day = String(parsedDate.getUTCDate()).padStart(2, "0");
+    const month = String(parsedDate.getUTCMonth() + 1).padStart(2, "0");
+    return `${day}/${month}/${parsedDate.getUTCFullYear()}`;
+  }
+  return formatDateForInput(parsedDate);
 }
 
 export function formatDateForDisplay(

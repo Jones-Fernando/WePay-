@@ -1,20 +1,40 @@
 from database.connection import get_connection_context, cursor_for, fetch_one, fetch_all
 
+_CATEGORIA_RESOLVIDA = (
+    "COALESCE("
+    "CONVERT(c.nome USING utf8mb4) COLLATE utf8mb4_unicode_ci, "
+    "CONVERT(dp.categoria USING utf8mb4) COLLATE utf8mb4_unicode_ci)"
+)
+_FILTRO_CATEGORIA = (
+    f"(? IS NULL OR {_CATEGORIA_RESOLVIDA} = "
+    "CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci)"
+)
+
 
 class DespesaPessoalModel:
     @staticmethod
-    def criar(usuario_id, descricao, valor, categoria=None, tipo="despesa", data_despesa=None):
+    def criar(
+        usuario_id,
+        descricao,
+        valor,
+        categoria=None,
+        tipo="despesa",
+        data_despesa=None,
+        categoria_id=None,
+    ):
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
                 cursor.execute(
-                    "INSERT INTO despesas_pessoais (usuario_id, descricao, valor, categoria, tipo, data_despesa) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO despesas_pessoais "
+                    "(usuario_id, descricao, valor, categoria, categoria_id, tipo, data_despesa) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         usuario_id,
                         descricao,
                         valor,
                         categoria,
+                        categoria_id,
                         tipo,
                         data_despesa,
                     ),
@@ -54,46 +74,52 @@ class DespesaPessoalModel:
             cursor = cursor_for(conn)
             try:
                 cursor.execute(
-                    """
+                    f"""
                     SELECT COUNT(*) AS total
-                    FROM despesas_pessoais
-                    WHERE usuario_id = ?
-                      AND (? IS NULL OR categoria = ?)
-                      AND (? IS NULL OR tipo = ?)
-                      AND (? IS NULL OR data_despesa >= ?)
-                      AND (? IS NULL OR data_despesa <= ?)
+                    FROM despesas_pessoais dp
+                    LEFT JOIN categorias c ON c.id = dp.categoria_id
+                    WHERE dp.usuario_id = ?
+                      AND {_FILTRO_CATEGORIA}
+                      AND (? IS NULL OR dp.tipo = ?)
+                      AND (? IS NULL OR dp.data_despesa >= ?)
+                      AND (? IS NULL OR dp.data_despesa <= ?)
                     """,
                     params,
                 )
                 total = int(fetch_one(cursor)["total"])
                 cursor.execute(
-                    """
-                    SELECT categoria, SUM(valor) AS valor
-                    FROM despesas_pessoais
-                    WHERE usuario_id = ?
-                      AND (? IS NULL OR categoria = ?)
-                      AND (? IS NULL OR tipo = ?)
-                      AND (? IS NULL OR data_despesa >= ?)
-                      AND (? IS NULL OR data_despesa <= ?)
-                    GROUP BY categoria
-                    ORDER BY categoria
+                    f"""
+                    SELECT {_CATEGORIA_RESOLVIDA} AS categoria,
+                           SUM(dp.valor) AS valor
+                    FROM despesas_pessoais dp
+                    LEFT JOIN categorias c ON c.id = dp.categoria_id
+                    WHERE dp.usuario_id = ?
+                      AND {_FILTRO_CATEGORIA}
+                      AND (? IS NULL OR dp.tipo = ?)
+                      AND (? IS NULL OR dp.data_despesa >= ?)
+                      AND (? IS NULL OR dp.data_despesa <= ?)
+                    GROUP BY {_CATEGORIA_RESOLVIDA}
+                    ORDER BY {_CATEGORIA_RESOLVIDA}
                     """,
                     params,
                 )
                 categorias = fetch_all(cursor)
                 cursor.execute(
-                    """
-                    SELECT id, usuario_id, descricao, valor, categoria, tipo,
-                           CAST(data_despesa AS CHAR) AS data_despesa,
-                           CAST(criado_em AS CHAR) AS criado_em,
-                           CAST(atualizado_em AS CHAR) AS atualizado_em
-                    FROM despesas_pessoais
-                    WHERE usuario_id = ?
-                      AND (? IS NULL OR categoria = ?)
-                      AND (? IS NULL OR tipo = ?)
-                      AND (? IS NULL OR data_despesa >= ?)
-                      AND (? IS NULL OR data_despesa <= ?)
-                    ORDER BY data_despesa DESC, id DESC
+                    f"""
+                    SELECT dp.id, dp.usuario_id, dp.descricao, dp.valor,
+                           {_CATEGORIA_RESOLVIDA} AS categoria,
+                           dp.categoria_id, dp.tipo,
+                           CAST(dp.data_despesa AS CHAR) AS data_despesa,
+                           CAST(dp.criado_em AS CHAR) AS criado_em,
+                           CAST(dp.atualizado_em AS CHAR) AS atualizado_em
+                    FROM despesas_pessoais dp
+                    LEFT JOIN categorias c ON c.id = dp.categoria_id
+                    WHERE dp.usuario_id = ?
+                      AND {_FILTRO_CATEGORIA}
+                      AND (? IS NULL OR dp.tipo = ?)
+                      AND (? IS NULL OR dp.data_despesa >= ?)
+                      AND (? IS NULL OR dp.data_despesa <= ?)
+                    ORDER BY dp.data_despesa DESC, dp.id DESC
                     LIMIT ? OFFSET ?
                     """,
                     (*params, limit, offset),
@@ -117,20 +143,48 @@ class DespesaPessoalModel:
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
-                cursor.execute("SELECT * FROM despesas_pessoais WHERE id = ?", (despesa_id,))
+                cursor.execute(
+                    f"""
+                    SELECT dp.id, dp.usuario_id, dp.descricao, dp.valor,
+                           {_CATEGORIA_RESOLVIDA} AS categoria,
+                           dp.categoria_id, dp.tipo, dp.data_despesa,
+                           dp.criado_em, dp.atualizado_em
+                    FROM despesas_pessoais dp
+                    LEFT JOIN categorias c ON c.id = dp.categoria_id
+                    WHERE dp.id = ?
+                    """,
+                    (despesa_id,),
+                )
                 return fetch_one(cursor)
             finally:
                 cursor.close()
 
     @staticmethod
-    def atualizar(despesa_id, descricao, valor, categoria, tipo, data_despesa):
+    def atualizar(
+        despesa_id,
+        descricao,
+        valor,
+        categoria,
+        tipo,
+        data_despesa,
+        categoria_id=None,
+    ):
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
                 cursor.execute(
                     "UPDATE despesas_pessoais SET descricao = ?, valor = ?, categoria = ?, "
-                    "tipo = ?, data_despesa = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?",
-                    (descricao, valor, categoria, tipo, data_despesa, despesa_id),
+                    "categoria_id = ?, tipo = ?, data_despesa = ?, "
+                    "atualizado_em = CURRENT_TIMESTAMP WHERE id = ?",
+                    (
+                        descricao,
+                        valor,
+                        categoria,
+                        categoria_id,
+                        tipo,
+                        data_despesa,
+                        despesa_id,
+                    ),
                 )
                 conn.commit()
             finally:

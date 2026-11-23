@@ -1,24 +1,31 @@
+import { useAppTheme, useAppThemeScheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator, SafeAreaView, ScrollView, View, Text, TextInput,
-  TouchableOpacity, StyleSheet, StatusBar, Alert,
+  TouchableOpacity, StyleSheet, StatusBar,
 } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { despesasGrupoApi } from "@/services/api";
+import { Alert } from "@/services/feedback";
+import { useFieldFocus } from "@/hooks/useFieldFocus";
 import type { DespesaGrupo } from "@/types/api";
 import { CATEGORIAS_GRUPO } from "@/constants/financeCategories";
 import { useCategoriasFinanceiras } from "@/hooks/useCategoriasFinanceiras";
+import CalendarioData from "@/components/CalendarioData";
+import { IconeCategoria } from "@/components/IconeCategoria";
 import {
-  formatDateForInput,
+  normalizeDateInput,
   parseCurrencyInput,
-  parseDateInputToDate,
   parseDateInputToIso,
 } from "@/utils/financeInput";
 
 type CampoFormulario = "descricao" | "valor" | "data";
 
 export default function EditarDespesaGrupo() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
+  const esquema = useAppThemeScheme();
   const params = useLocalSearchParams();
   const { categorias, erro: erroCategorias } = useCategoriasFinanceiras("grupo", CATEGORIAS_GRUPO);
   const id = String(params.id ?? "");
@@ -34,6 +41,7 @@ export default function EditarDespesaGrupo() {
   const [categoria, setCategoria] = useState("Alimentação");
   const [observacao, setObservacao] = useState(String(params.observacao ?? ""));
   const [mostrarSeletorData, setMostrarSeletorData] = useState(false);
+  const { focusedField, focusHandlers } = useFieldFocus();
   const [camposVisitados, setCamposVisitados] = useState<Record<CampoFormulario, boolean>>({
     descricao: false,
     valor: false,
@@ -45,14 +53,11 @@ export default function EditarDespesaGrupo() {
     data: null,
   });
 
-  function selecionarData(_evento: DateTimePickerEvent, dataSelecionada?: Date) {
+  function selecionarData(dataSelecionada: string) {
     setMostrarSeletorData(false);
-    if (dataSelecionada) {
-      const novaData = formatDateForInput(dataSelecionada);
-      setData(novaData);
-      setCamposVisitados((atuais) => ({ ...atuais, data: true }));
-      setErros((atuais) => ({ ...atuais, data: validarCampo("data", novaData) }));
-    }
+    setData(dataSelecionada);
+    setCamposVisitados((atuais) => ({ ...atuais, data: true }));
+    setErros((atuais) => ({ ...atuais, data: validarCampo("data", dataSelecionada) }));
   }
 
   function validarCampo(campo: CampoFormulario, valorCampo: string): string | null {
@@ -98,7 +103,7 @@ export default function EditarDespesaGrupo() {
         setDespesaOriginal(item);
         setDescricao(item.descricao);
         setValor(Number(item.valor).toFixed(2).replace(".", ","));
-        setData(item.data_despesa.slice(8, 10) + "/" + item.data_despesa.slice(5, 7) + "/" + item.data_despesa.slice(0, 4));
+        setData(normalizeDateInput(item.data_despesa));
         setCategoria(item.categoria || "Outros");
       } catch (erro) {
         if (ativo) setErroCarregamento(erro instanceof Error ? erro.message : "Não foi possível carregar a despesa.");
@@ -142,7 +147,7 @@ export default function EditarDespesaGrupo() {
   if (carregando) {
     return (
       <SafeAreaView style={[styles.container, styles.estado]}>
-        <ActivityIndicator color="#00A17A" />
+        <ActivityIndicator color={Cores.textoPositivo} />
       </SafeAreaView>
     );
   }
@@ -162,7 +167,7 @@ export default function EditarDespesaGrupo() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={esquema === "dark" ? "light-content" : "dark-content"} />
       <ScrollView contentContainerStyle={styles.conteudo}>
         <TouchableOpacity onPress={() => router.back()} style={styles.voltar}>
           <Text style={styles.voltarTexto}>‹  Voltar</Text>
@@ -172,15 +177,25 @@ export default function EditarDespesaGrupo() {
         <Text style={styles.subtitulo}>Atualize os dados da despesa compartilhada.</Text>
 
         <Text style={styles.label}>Descrição</Text>
-        <TextInput style={[styles.input, erros.descricao && styles.inputComErro]} value={descricao}
+        <TextInput style={[
+          styles.input,
+          erros.descricao && styles.inputComErro,
+          !erros.descricao && focusedField === "descricao" && styles.focusedField,
+        ]} value={descricao}
           onChangeText={(texto) => atualizarCampo("descricao", texto)}
-          onBlur={() => visitarCampo("descricao", descricao)} placeholder="Descrição" />
+          {...focusHandlers("descricao", () => visitarCampo("descricao", descricao))}
+          placeholder="Descrição" />
         {erros.descricao && <Text style={styles.erroCampo}>{erros.descricao}</Text>}
 
         <Text style={styles.label}>Valor total (R$)</Text>
-        <TextInput style={[styles.input, erros.valor && styles.inputComErro]} value={valor}
+        <TextInput style={[
+          styles.input,
+          erros.valor && styles.inputComErro,
+          !erros.valor && focusedField === "valor" && styles.focusedField,
+        ]} value={valor}
           onChangeText={(texto) => atualizarCampo("valor", texto)}
-          onBlur={() => visitarCampo("valor", valor)} keyboardType="decimal-pad" placeholder="0,00" />
+          {...focusHandlers("valor", () => visitarCampo("valor", valor))}
+          keyboardType="decimal-pad" placeholder="0,00" />
         {erros.valor && <Text style={styles.erroCampo}>{erros.valor}</Text>}
 
         <Text style={styles.label}>Data</Text>
@@ -190,22 +205,20 @@ export default function EditarDespesaGrupo() {
         </TouchableOpacity>
         {erros.data && <Text style={styles.erroCampo}>{erros.data}</Text>}
         {mostrarSeletorData && (
-          <DateTimePicker
-            value={parseDateInputToDate(data) ?? new Date()}
-            mode="date"
-            display="default"
-            locale="pt-BR"
-            maximumDate={new Date()}
-            onChange={selecionarData}
+          <CalendarioData
+            value={data}
+            onClose={() => setMostrarSeletorData(false)}
+            onSelectDate={selecionarData}
           />
         )}
 
         <Text style={styles.label}>Categoria</Text>
         <View style={styles.categorias}>
-          {categorias.map(({ nome }) => (
+          {categorias.map(({ nome, icone }) => (
             <TouchableOpacity key={nome}
               onPress={() => setCategoria(nome)}
               style={[styles.categoria, categoria === nome && styles.categoriaAtiva]}>
+              <IconeCategoria icone={icone} tamanho={15} style={{ marginRight: 5 }} />
               <Text style={[styles.categoriaTexto, categoria === nome && styles.categoriaTextoAtivo]}>{nome}</Text>
             </TouchableOpacity>
           ))}
@@ -213,9 +226,14 @@ export default function EditarDespesaGrupo() {
         {erroCategorias && <Text style={styles.erroCampo}>{erroCategorias}</Text>}
 
         <Text style={styles.label}>Observação (opcional)</Text>
-        <TextInput style={[styles.input, styles.observacao]} value={observacao}
+        <TextInput style={[
+          styles.input,
+          styles.observacao,
+          focusedField === "observacao" && styles.focusedField,
+        ]} value={observacao}
           onChangeText={setObservacao} multiline maxLength={500}
-          placeholder="Informações adicionais" />
+          placeholder="Informações adicionais"
+          {...focusHandlers("observacao")} />
 
         <TouchableOpacity style={styles.salvar} onPress={salvar} disabled={salvando}>
           <Text style={styles.salvarTexto}>{salvando ? "Salvando..." : "Salvar alterações"}</Text>
@@ -229,30 +247,31 @@ export default function EditarDespesaGrupo() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5FBF7" },
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: Cores.fundo },
   estado: { alignItems: "center", justifyContent: "center", padding: 24 },
-  erroCarregamento: { color: "#6B8F86", fontSize: 14, textAlign: "center", marginBottom: 20 },
+  erroCarregamento: { color: Cores.textoSuave, fontSize: 14, textAlign: "center", marginBottom: 20 },
   conteudo: { padding: 20, paddingBottom: 35 },
   voltar: { marginBottom: 18 },
-  voltarTexto: { color: "#0B3B33", fontSize: 14, fontWeight: "700" },
-  titulo: { color: "#0B3B33", fontSize: 24, fontWeight: "800" },
-  subtitulo: { color: "#6B8F86", fontSize: 12, lineHeight: 19, marginTop: 5, marginBottom: 25 },
-  label: { color: "#0B3B33", fontSize: 13, fontWeight: "700", marginBottom: 8, marginTop: 5 },
-  input: { minHeight: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 13, paddingHorizontal: 14, fontSize: 14, color: "#0B3B33", marginBottom: 18 },
-  inputComErro: { borderColor: "#D64545" },
-  erroCampo: { color: "#D64545", fontSize: 12, marginTop: -12, marginBottom: 14 },
-  seletorData: { height: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 13, paddingHorizontal: 14, justifyContent: "center", marginBottom: 18 },
-  textoSeletorData: { color: "#0B3B33", fontSize: 14 },
-  placeholderSeletorData: { color: "#8AA69E" },
+  voltarTexto: { color: Cores.texto, fontSize: 14, fontWeight: "700" },
+  titulo: { color: Cores.texto, fontSize: 24, fontWeight: "800" },
+  subtitulo: { color: Cores.textoSuave, fontSize: 12, lineHeight: 19, marginTop: 5, marginBottom: 25 },
+  label: { color: Cores.texto, fontSize: 13, fontWeight: "700", marginBottom: 8, marginTop: 5 },
+  input: { minHeight: 52, backgroundColor: Cores.cartaoFundo, borderWidth: 1, borderColor: Cores.borda, borderRadius: 12, paddingHorizontal: 14, fontSize: 14, color: Cores.texto, marginBottom: 18, outlineStyle: "solid", outlineWidth: 0 },
+  focusedField: { borderWidth: 2, borderColor: Cores.textoPositivo },
+  inputComErro: { borderColor: Cores.negativo },
+  erroCampo: { color: Cores.textoNegativo, fontSize: 12, marginTop: -12, marginBottom: 14 },
+  seletorData: { height: 52, backgroundColor: Cores.cartaoFundo, borderWidth: 1, borderColor: Cores.borda, borderRadius: 12, paddingHorizontal: 14, justifyContent: "center", marginBottom: 18 },
+  textoSeletorData: { color: Cores.texto, fontSize: 14 },
+  placeholderSeletorData: { color: Cores.placeholder },
   categorias: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 18 },
-  categoria: { paddingHorizontal: 12, paddingVertical: 10, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 12 },
-  categoriaAtiva: { backgroundColor: "#DDF7EE", borderColor: "#00C896" },
-  categoriaTexto: { color: "#6B8F86", fontSize: 11, fontWeight: "600" },
-  categoriaTextoAtivo: { color: "#0B3B33" },
+  categoria: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, backgroundColor: Cores.cartaoFundo, borderWidth: 1, borderColor: Cores.borda, borderRadius: 12 },
+  categoriaAtiva: { backgroundColor: Cores.superficieVerdeSelecionada, borderColor: Cores.principal },
+  categoriaTexto: { color: Cores.textoSuave, fontSize: 11, fontWeight: "600" },
+  categoriaTextoAtivo: { color: Cores.texto },
   observacao: { minHeight: 90, paddingTop: 12, textAlignVertical: "top" },
-  salvar: { minHeight: 52, backgroundColor: "#00C896", borderRadius: 15, alignItems: "center", justifyContent: "center", marginTop: 5 },
-  salvarTexto: { color: "#FFFFFF", fontWeight: "800" },
+  salvar: { minHeight: 52, backgroundColor: Cores.principal, borderRadius: 15, alignItems: "center", justifyContent: "center", marginTop: 5 },
+  salvarTexto: { color: Cores.textoSobreAcao, fontWeight: "800" },
   cancelar: { minHeight: 46, alignItems: "center", justifyContent: "center", marginTop: 8 },
-  cancelarTexto: { color: "#6B8F86", fontWeight: "700" },
+  cancelarTexto: { color: Cores.textoSuave, fontWeight: "700" },
 });

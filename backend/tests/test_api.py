@@ -1,10 +1,18 @@
 import pytest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
+from contextlib import nullcontext
 from io import BytesIO
+from threading import Barrier
 
 from app import create_app
 from database.connection import cursor_for, get_connection_context, initialize_database
+from database.group_cover_icons import (
+    AVAILABLE_GROUP_COVER_ICONS,
+    DEFAULT_GROUP_COVER_ICONS,
+)
 from utils.password_utils import hash_password
+from utils.rate_limiter import limiter
 
 app = create_app()
 
@@ -28,6 +36,123 @@ def test_root(client):
     response = client.get("/")
     assert response.status_code == 200
     assert response.get_json()["projeto"] == "wepay"
+
+
+def test_installment_creation_endpoint_is_removed(client):
+    response = client.post("/api/parcelamentos/pessoais", json={})
+
+    assert response.status_code == 404
+
+
+def test_liveness_does_not_query_dependencies(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.get_connection_context",
+        lambda: pytest.fail("Liveness must not connect to the database."),
+    )
+    monkeypatch.setattr(
+        type(limiter.storage),
+        "check",
+        lambda _storage: pytest.fail("Liveness must not check rate-limit storage."),
+    )
+
+    response = client.get("/health/live")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "Online"}
+
+
+def test_readiness_checks_database_and_rate_limit_storage(client, monkeypatch):
+    class Cursor:
+        def __init__(self):
+            self.query = None
+
+        def execute(self, query):
+            self.query = query
+
+        def fetchone(self):
+            return (1,)
+
+        def close(self):
+            return None
+
+    class Connection:
+        def __init__(self):
+            self.cursor_instance = Cursor()
+
+        def cursor(self):
+            return self.cursor_instance
+
+    connection = Connection()
+    storage_checks = []
+    monkeypatch.setattr(
+        "app.get_connection_context",
+        lambda: nullcontext(connection),
+    )
+    monkeypatch.setattr(
+        type(limiter.storage),
+        "check",
+        lambda _storage: storage_checks.append(True) or True,
+    )
+
+    response = client.get("/health/ready")
+    legacy_response = client.get("/health")
+
+    assert response.status_code == 200
+    assert legacy_response.status_code == 200
+    assert response.get_json() == {
+        "status": "Online",
+        "database": "Online",
+        "rate_limit_storage": "Online",
+    }
+    assert legacy_response.get_json() == response.get_json()
+    assert connection.cursor_instance.query == "SELECT 1"
+    assert storage_checks == [True, True]
+
+
+@pytest.mark.parametrize("failed_dependency", ["database", "rate_limit_storage"])
+def test_readiness_returns_503_when_required_dependency_fails(
+    client, monkeypatch, failed_dependency
+):
+    class Cursor:
+        def execute(self, _query):
+            return None
+
+        def fetchone(self):
+            return (1,)
+
+        def close(self):
+            return None
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+    if failed_dependency == "database":
+        def fail_database():
+            raise OSError("database unavailable")
+
+        monkeypatch.setattr("app.get_connection_context", fail_database)
+    else:
+        monkeypatch.setattr(
+            "app.get_connection_context",
+            lambda: nullcontext(Connection()),
+        )
+
+    storage_ok = failed_dependency != "rate_limit_storage"
+    monkeypatch.setattr(
+        type(limiter.storage),
+        "check",
+        lambda _storage: storage_ok,
+    )
+
+    response = client.get("/health/ready")
+
+    assert response.status_code == 503
+    assert response.get_json() == {
+        "status": "indisponivel",
+        "database": "erro" if failed_dependency == "database" else "Online",
+        "rate_limit_storage": "erro" if not storage_ok else "Online",
+    }
 
 
 def test_group_creation_rejects_malformed_participant_ids(client):
@@ -116,6 +241,32 @@ def test_personal_expense_endpoints_reject_non_object_json(client):
 def test_auth_required(client):
     response = client.get("/api/grupos")
     assert response.status_code == 401
+    assert client.delete("/api/grupos/999999").status_code == 401
+
+
+def test_payment_routes_require_authentication_for_create_and_list(
+    client, monkeypatch
+):
+    def controller_must_not_run(*_args, **_kwargs):
+        pytest.fail("Payment controller must not run without authentication.")
+
+    monkeypatch.setattr(
+        "routes.pagamento_routes.PagamentoController.criar",
+        staticmethod(controller_must_not_run),
+    )
+    monkeypatch.setattr(
+        "routes.pagamento_routes.PagamentoController.listar",
+        staticmethod(controller_must_not_run),
+    )
+
+    create_response = client.post(
+        "/api/pagamentos",
+        json={"grupo_id": 1, "recebedor_id": 2, "valor": 10},
+    )
+    list_response = client.get("/api/pagamentos/grupo/1")
+
+    assert create_response.status_code == 401
+    assert list_response.status_code == 401
 
 
 def test_invalid_expense_and_payment_ids_return_400(client):
@@ -270,10 +421,46 @@ def test_payment_api_records_and_lists_group_payment(client):
             "metodo": "Pix",
             "observacao": "Pagamento da conta compartilhada",
         },
-        headers=debtor_headers,
+        headers={
+            **debtor_headers,
+            "Idempotency-Key": "payment-api-retry-001",
+        },
     )
     assert pagamento.status_code == 201
     pagamento_id = pagamento.get_json()["data"]["id"]
+    repetido = client.post(
+        "/api/pagamentos",
+        json={
+            "grupo_id": grupo_id,
+            "recebedor_id": user_ids[0],
+            "valor": 50,
+            "data_pagamento": date.today().isoformat(),
+            "metodo": "Pix",
+            "observacao": "Pagamento da conta compartilhada",
+        },
+        headers={
+            **debtor_headers,
+            "Idempotency-Key": "payment-api-retry-001",
+        },
+    )
+    conflito = client.post(
+        "/api/pagamentos",
+        json={
+            "grupo_id": grupo_id,
+            "recebedor_id": user_ids[0],
+            "valor": 49,
+            "data_pagamento": date.today().isoformat(),
+            "metodo": "Pix",
+            "observacao": "Pagamento da conta compartilhada",
+        },
+        headers={
+            **debtor_headers,
+            "Idempotency-Key": "payment-api-retry-001",
+        },
+    )
+    assert repetido.status_code == 201
+    assert repetido.get_json() == pagamento.get_json()
+    assert conflito.status_code == 409
 
     historico = client.get(
         f"/api/pagamentos/grupo/{grupo_id}", headers=owner_headers
@@ -323,6 +510,113 @@ def test_payment_api_records_and_lists_group_payment(client):
         saldo["saldo"] == 0
         for saldo in saldos.get_json()["data"]["saldos"]
     )
+
+
+def test_concurrent_payment_api_requests_with_same_key_create_once(client):
+    emails = ("payment-concurrent-owner@example.com", "payment-concurrent-debtor@example.com")
+    tokens = []
+    user_ids = []
+    for index, email in enumerate(emails):
+        cadastrar_usuario(client, f"Concurrent Payment User {index}", email)
+        login = client.post(
+            "/api/auth/login",
+            json={"email": email, "senha": "SenhaSegura123!"},
+        ).get_json()["data"]
+        tokens.append(login["token"])
+        user_ids.append(login["user"]["id"])
+
+    owner_headers = {"Authorization": f"Bearer {tokens[0]}"}
+    debtor_headers = {"Authorization": f"Bearer {tokens[1]}"}
+    grupo = client.post(
+        "/api/grupos",
+        json={"nome": "Grupo pagamento concorrente", "participantes": [user_ids[1]]},
+        headers=owner_headers,
+    )
+    assert grupo.status_code == 201
+    grupo_id = grupo.get_json()["data"]["id"]
+
+    despesa = client.post(
+        "/api/despesas",
+        json={
+            "grupo_id": grupo_id,
+            "pagador_id": user_ids[0],
+            "descricao": "Despesa concorrente",
+            "valor": 60,
+            "participantes": user_ids,
+        },
+        headers=owner_headers,
+    )
+    assert despesa.status_code == 201
+
+    payload = {
+        "grupo_id": grupo_id,
+        "recebedor_id": user_ids[0],
+        "valor": 10,
+        "data_pagamento": date.today().isoformat(),
+        "metodo": "Pix",
+        "observacao": "Pagamento idempotente concorrente",
+    }
+    headers = {
+        **debtor_headers,
+        "Idempotency-Key": "payment-api-concurrent-001",
+    }
+    barrier = Barrier(2)
+
+    def submit_payment(_):
+        request_client = create_app().test_client()
+        barrier.wait(timeout=5)
+        response = request_client.post(
+            "/api/pagamentos",
+            json=payload,
+            headers=headers,
+        )
+        return response.status_code, response.get_json()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(submit_payment, range(2)))
+
+    assert [status for status, _ in results] == [201, 201]
+    assert results[0][1] == results[1][1]
+
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM pagamentos
+                WHERE grupo_id = ? AND pagador_id = ?
+                  AND idempotency_key = ?
+                """,
+                (grupo_id, user_ids[1], headers["Idempotency-Key"]),
+            )
+            assert cursor.fetchone()["total"] == 1
+            cursor.execute(
+                "SELECT saldo FROM saldos WHERE grupo_id = ? AND usuario_id = ?",
+                (grupo_id, user_ids[1]),
+            )
+            assert cursor.fetchone()["saldo"] == -20
+        finally:
+            cursor.close()
+
+
+def test_payment_api_rejects_malformed_idempotency_keys(client):
+    email = "invalid-idempotency-key@example.com"
+    cadastrar_usuario(client, "Invalid Idempotency Key", email)
+    login = client.post(
+        "/api/auth/login",
+        json={"email": email, "senha": "SenhaSegura123!"},
+    ).get_json()["data"]
+    response = client.post(
+        "/api/pagamentos",
+        json={"grupo_id": 1, "recebedor_id": 2, "valor": 10},
+        headers={
+            "Authorization": f"Bearer {login['token']}",
+            "Idempotency-Key": "invalid key",
+        },
+    )
+
+    assert response.status_code == 400
 
 
 def test_payment_api_rejects_invalid_fields_and_membership(client):
@@ -476,6 +770,97 @@ def test_dashboard_and_due_reminders_include_group_and_personal_expenses(client)
         ).status_code == 400
 
 
+def test_dashboard_pendencias_separates_receivables_and_payables_by_group(client):
+    emails = (
+        "dashboard-pendencias-owner@example.com",
+        "dashboard-pendencias-member@example.com",
+    )
+    tokens = []
+    user_ids = []
+    for index, email in enumerate(emails):
+        cadastrar_usuario(client, f"Pendencias User {index}", email)
+        login = client.post(
+            "/api/auth/login",
+            json={"email": email, "senha": "SenhaSegura123!"},
+        ).get_json()["data"]
+        tokens.append(login["token"])
+        user_ids.append(login["user"]["id"])
+
+    owner_headers = {"Authorization": f"Bearer {tokens[0]}"}
+    member_headers = {"Authorization": f"Bearer {tokens[1]}"}
+    hoje = date.today().isoformat()
+
+    grupo_receber = client.post(
+        "/api/grupos",
+        json={"nome": "Grupo a receber", "participantes": [user_ids[1]]},
+        headers=owner_headers,
+    ).get_json()["data"]["id"]
+    despesa_receber = client.post(
+        "/api/despesas",
+        json={
+            "grupo_id": grupo_receber,
+            "pagador_id": user_ids[0],
+            "descricao": "Despesa paga pelo usuário",
+            "valor": 100,
+            "data_despesa": hoje,
+            "participantes": user_ids,
+        },
+        headers=owner_headers,
+    )
+    assert despesa_receber.status_code == 201
+
+    grupo_pagar = client.post(
+        "/api/grupos",
+        json={"nome": "Grupo a pagar", "participantes": [user_ids[0]]},
+        headers=member_headers,
+    ).get_json()["data"]["id"]
+    despesa_pagar = client.post(
+        "/api/despesas",
+        json={
+            "grupo_id": grupo_pagar,
+            "pagador_id": user_ids[1],
+            "descricao": "Despesa paga pelo participante",
+            "valor": 60,
+            "data_despesa": hoje,
+            "participantes": user_ids,
+        },
+        headers=member_headers,
+    )
+    assert despesa_pagar.status_code == 201
+
+    dashboard = client.get("/api/dashboard", headers=owner_headers)
+    pendencias = client.get("/api/dashboard/pendencias", headers=owner_headers)
+    assert dashboard.status_code == 200
+    assert pendencias.status_code == 200
+    totais = dashboard.get_json()["data"]
+    detalhes = pendencias.get_json()["data"]
+
+    assert float(totais["receber"]) == 50
+    assert float(totais["pagar"]) == 30
+    assert len(detalhes["a_receber"]) == 1
+    assert len(detalhes["a_pagar"]) == 1
+
+    receber = detalhes["a_receber"][0]
+    assert receber["pessoa_id"] == user_ids[1]
+    assert receber["pessoa_nome"] == "Pendencias User 1"
+    assert receber["grupo_id"] == grupo_receber
+    assert receber["grupo_nome"] == "Grupo a receber"
+    assert float(receber["valor"]) == 50
+
+    pagar = detalhes["a_pagar"][0]
+    assert pagar["pessoa_id"] == user_ids[1]
+    assert pagar["pessoa_nome"] == "Pendencias User 1"
+    assert pagar["grupo_id"] == grupo_pagar
+    assert pagar["grupo_nome"] == "Grupo a pagar"
+    assert float(pagar["valor"]) == 30
+    assert sum(float(item["valor"]) for item in detalhes["a_receber"]) == float(
+        totais["receber"]
+    )
+    assert sum(float(item["valor"]) for item in detalhes["a_pagar"]) == float(
+        totais["pagar"]
+    )
+
+
 def test_category_api_validates_filters_and_enforces_ownership(client):
     emails = ("categories-owner@example.com", "categories-other@example.com")
     tokens = []
@@ -489,6 +874,37 @@ def test_category_api_validates_filters_and_enforces_ownership(client):
 
     owner_headers = {"Authorization": f"Bearer {tokens[0]}"}
     other_headers = {"Authorization": f"Bearer {tokens[1]}"}
+    atualizado_icone = client.put(
+        "/api/categorias/icones",
+        json={"nome": "Casa", "tipo": "pessoal", "icone": "🛋️"},
+        headers=owner_headers,
+    )
+    assert atualizado_icone.status_code == 200
+    icones_owner = client.get(
+        "/api/categorias/icones?tipo=pessoal", headers=owner_headers
+    ).get_json()["data"]
+    assert icones_owner == [
+        {"nome": "Casa", "tipo": "pessoal", "icone": "🛋️"}
+    ]
+    assert client.get(
+        "/api/categorias/icones", headers=other_headers
+    ).get_json()["data"] == []
+    assert client.put(
+        "/api/categorias/icones",
+        json={"nome": "Casa", "tipo": "pessoal", "icone": "invalido"},
+        headers=owner_headers,
+    ).status_code == 400
+    assert client.get(
+        "/api/categorias/icones?tipo=invalido", headers=owner_headers
+    ).status_code == 400
+    assert client.delete(
+        "/api/categorias/icones?nome=Casa&tipo=pessoal",
+        headers=owner_headers,
+    ).status_code == 200
+    assert client.get(
+        "/api/categorias/icones", headers=owner_headers
+    ).get_json()["data"] == []
+
     invalid_payloads = [
         [],
         {"nome": []},
@@ -496,6 +912,7 @@ def test_category_api_validates_filters_and_enforces_ownership(client):
         {"nome": "x" * 101},
         {"nome": "Viagem", "tipo": 1},
         {"nome": "Viagem", "tipo": "invalido"},
+        {"nome": "Viagem", "icone": "não permitido"},
     ]
     for payload in invalid_payloads:
         assert client.post(
@@ -507,28 +924,61 @@ def test_category_api_validates_filters_and_enforces_ownership(client):
 
     criada = client.post(
         "/api/categorias",
-        json={"nome": "Viagem", "tipo": "pessoal"},
+        json={"nome": "Viagem de teste", "tipo": "pessoal", "icone": "✈️"},
         headers=owner_headers,
     )
     assert criada.status_code == 201
     categoria_id = criada.get_json()["data"]["id"]
     duplicada = client.post(
         "/api/categorias",
-        json={"nome": "Viagem", "tipo": "pessoal"},
+        json={"nome": "Viagem de teste", "tipo": "pessoal"},
         headers=owner_headers,
     )
     assert duplicada.status_code == 409
 
+    casa_padrao = next(
+        item
+        for item in client.get(
+            "/api/categorias?tipo=pessoal", headers=owner_headers
+        ).get_json()["data"]
+        if item["nome"] == "Casa"
+    )
+    casa_atualizada = client.put(
+        f"/api/categorias/{casa_padrao['id']}",
+        json={"nome": "Casa", "tipo": "pessoal", "icone": "🛋️"},
+        headers=owner_headers,
+    )
+    assert casa_atualizada.status_code == 200
+
     criada_ambos = client.post(
         "/api/categorias",
-        json={"nome": "Casa", "tipo": "ambos"},
+        json={"nome": "Categoria ampla de teste", "tipo": "ambos", "icone": "🛋️"},
         headers=owner_headers,
     )
     assert criada_ambos.status_code == 201
+    criada_pessoal = client.post(
+        "/api/categorias",
+        json={"nome": "Cuidados pessoais", "tipo": "pessoal", "icone": "🧴"},
+        headers=owner_headers,
+    )
+    assert criada_pessoal.status_code == 201
     listagem_pessoal = client.get(
         "/api/categorias?tipo=pessoal", headers=owner_headers
     ).get_json()["data"]
-    assert {item["nome"] for item in listagem_pessoal} >= {"Viagem", "Casa"}
+    assert {item["nome"] for item in listagem_pessoal} >= {
+        "Viagem de teste",
+        "Casa",
+        "Cuidados pessoais",
+    }
+    assert next(item for item in listagem_pessoal if item["nome"] == "Casa")[
+        "icone"
+    ] == "🛋️"
+    assert next(
+        item for item in listagem_pessoal if item["nome"] == "Cuidados pessoais"
+    )["icone"] == "🧴"
+    assert next(
+        item for item in listagem_pessoal if item["nome"] == "Viagem de teste"
+    )["icone"] == "✈️"
     listagem_grupo = client.get(
         "/api/categorias?tipo=grupo", headers=owner_headers
     ).get_json()["data"]
@@ -543,10 +993,16 @@ def test_category_api_validates_filters_and_enforces_ownership(client):
         ).status_code == 400
     atualizada = client.put(
         f"/api/categorias/{categoria_id}",
-        json={"nome": "Viagens", "tipo": "ambos"},
+        json={"nome": "Viagens", "tipo": "ambos", "icone": "🧳"},
         headers=owner_headers,
     )
     assert atualizada.status_code == 200
+    listagem_atualizada = client.get(
+        "/api/categorias?tipo=grupo", headers=owner_headers
+    ).get_json()["data"]
+    assert next(item for item in listagem_atualizada if item["nome"] == "Viagens")[
+        "icone"
+    ] == "🧳"
     assert client.put(
         f"/api/categorias/{categoria_id}",
         json={"nome": "Outro nome"},
@@ -629,6 +1085,32 @@ def test_personal_expense_api_covers_crud_filters_and_monthly_totals(client):
     assert despesa.status_code == receita.status_code == 201
     despesa_id = despesa.get_json()["data"]["id"]
     receita_id = receita.get_json()["data"]["id"]
+    categoria_renda = client.post(
+        "/api/categorias",
+        json={"nome": "Renda", "tipo": "pessoal"},
+        headers=owner_headers,
+    )
+    assert categoria_renda.status_code == 201
+    categoria_renda_id = categoria_renda.get_json()["data"]["id"]
+    renda_em_uso = next(
+        item
+        for item in client.get(
+            "/api/categorias?tipo=pessoal", headers=owner_headers
+        ).get_json()["data"]
+        if item["id"] == categoria_renda_id
+    )
+    assert renda_em_uso["quantidade_despesas"] == 1
+    assert client.put(
+        f"/api/categorias/{categoria_renda_id}",
+        json={"nome": "Renda mensal", "tipo": "pessoal", "icone": "💰"},
+        headers=owner_headers,
+    ).status_code == 200
+    assert client.get(
+        f"/api/despesas-pessoais/{receita_id}", headers=owner_headers
+    ).get_json()["data"]["categoria"] == "Renda mensal"
+    assert client.delete(
+        f"/api/categorias/{categoria_renda_id}", headers=owner_headers
+    ).status_code == 409
     despesa_outro = client.post(
         "/api/despesas-pessoais",
         json={
@@ -701,6 +1183,32 @@ def test_personal_expense_api_covers_crud_filters_and_monthly_totals(client):
     assert detalhe_atualizado["tipo"] == "despesa"
     assert detalhe_atualizado["valor"] == 25
 
+    categoria_alimentacao = next(
+        item
+        for item in client.get(
+            "/api/categorias?tipo=pessoal", headers=owner_headers
+        ).get_json()["data"]
+        if item["nome"] == "Alimentação"
+    )
+    renomeada = client.put(
+        f"/api/categorias/{categoria_alimentacao['id']}",
+        json={
+            "nome": "Alimentação da casa",
+            "tipo": "pessoal",
+            "icone": "🍽️",
+        },
+        headers=owner_headers,
+    )
+    assert renomeada.status_code == 200
+    detalhe_renomeado = client.get(
+        f"/api/despesas-pessoais/{despesa_id}", headers=owner_headers
+    ).get_json()["data"]
+    assert detalhe_renomeado["categoria"] == "Alimentação da casa"
+    assert client.delete(
+        f"/api/categorias/{categoria_alimentacao['id']}",
+        headers=owner_headers,
+    ).status_code == 409
+
     total_mes = client.get(
         f"/api/despesas-pessoais/total-mes?ano={date.today().year}"
         f"&mes={date.today().month}",
@@ -731,6 +1239,10 @@ def test_personal_expense_api_covers_crud_filters_and_monthly_totals(client):
         f"/api/despesas-pessoais/{despesa_id}", headers=owner_headers
     ).status_code == 200
     assert client.delete(
+        f"/api/categorias/{categoria_alimentacao['id']}",
+        headers=owner_headers,
+    ).status_code == 200
+    assert client.delete(
         f"/api/despesas-pessoais/{despesa_id}", headers=owner_headers
     ).status_code == 404
     assert client.get(
@@ -739,6 +1251,130 @@ def test_personal_expense_api_covers_crud_filters_and_monthly_totals(client):
     assert client.get(
         f"/api/despesas-pessoais/{despesa_outro}", headers=owner_headers
     ).status_code == 403
+
+
+def test_group_cover_icon_preferences_are_user_scoped_and_validated(client):
+    emails = ("cover-icons-owner@example.com", "cover-icons-other@example.com")
+    tokens = []
+    for index, email in enumerate(emails):
+        cadastrar_usuario(client, f"Cover Icon User {index}", email)
+        login = client.post(
+            "/api/auth/login",
+            json={"email": email, "senha": "SenhaSegura123!"},
+        ).get_json()["data"]
+        tokens.append(login["token"])
+
+    owner_headers = {"Authorization": f"Bearer {tokens[0]}"}
+    other_headers = {"Authorization": f"Bearer {tokens[1]}"}
+    endpoint = "/api/grupos/icones-capa"
+
+    assert client.get(endpoint).status_code == 401
+    initial_data = client.get(endpoint, headers=owner_headers).get_json()["data"]
+    icones_padrao = {icone for icone, _nome in DEFAULT_GROUP_COVER_ICONS}
+    ocultos_padrao = {
+        icone
+        for icone, _nome in AVAILABLE_GROUP_COVER_ICONS
+        if icone not in icones_padrao
+    }
+    assert set(initial_data["ocultos"]) == ocultos_padrao
+    assert {
+        opcao["icone"]
+        for opcao in initial_data["icones"]
+        if opcao["origem"] == "padrao"
+    } == icones_padrao
+
+    atualizada = client.put(
+        endpoint,
+        json={"ocultos": ["✈️", "🏠"]},
+        headers=owner_headers,
+    )
+    assert atualizada.status_code == 200
+    atualizada_data = client.get(endpoint, headers=owner_headers).get_json()["data"]
+    assert set(atualizada_data["ocultos"]) == {"🏠", "✈️"}
+    assert "🏖️" in {
+        opcao["icone"]
+        for opcao in atualizada_data["icones"]
+        if opcao["origem"] == "padrao"
+    }
+    other_data = client.get(endpoint, headers=other_headers).get_json()["data"]
+    assert set(other_data["ocultos"]) == ocultos_padrao
+    assert len(other_data["icones"]) == len(initial_data["icones"])
+
+    criada = client.post(
+        endpoint,
+        json={"nome": "Grupo personalizado", "icone": "🏖️"},
+        headers=owner_headers,
+    )
+    assert criada.status_code == 201
+    opcao_id = criada.get_json()["data"]["id"]
+    assert any(
+        opcao["id"] == opcao_id and opcao["nome"] == "Grupo personalizado"
+        for opcao in client.get(endpoint, headers=owner_headers).get_json()["data"]["icones"]
+    )
+    assert client.put(
+        f"{endpoint}/{opcao_id}",
+        json={"nome": "Férias", "icone": "✈️"},
+        headers=other_headers,
+    ).status_code == 404
+    assert client.delete(
+        f"{endpoint}/{opcao_id}", headers=other_headers
+    ).status_code == 404
+    assert client.post(
+        endpoint,
+        json={"nome": "Ícone inválido", "icone": "🔮"},
+        headers=owner_headers,
+    ).status_code == 400
+
+    editada = client.put(
+        f"{endpoint}/{opcao_id}",
+        json={"nome": "Férias", "icone": "✈️"},
+        headers=owner_headers,
+    )
+    assert editada.status_code == 200
+    assert any(
+        opcao["id"] == opcao_id
+        and opcao["nome"] == "Férias"
+        and opcao["icone"] == "✈️"
+        for opcao in client.get(endpoint, headers=owner_headers).get_json()["data"]["icones"]
+    )
+    assert client.delete(
+        f"{endpoint}/{opcao_id}", headers=owner_headers
+    ).status_code == 200
+    assert all(
+        opcao["id"] != opcao_id
+        for opcao in client.get(endpoint, headers=owner_headers).get_json()["data"]["icones"]
+    )
+    assert client.put(
+        f"{endpoint}/personalizado:missing",
+        json={"nome": "Inválido", "icone": "✈️"},
+        headers=other_headers,
+    ).status_code == 404
+
+    personalizada_restaurada = client.post(
+        endpoint,
+        json={"nome": "Minha capa", "icone": "🏖️"},
+        headers=owner_headers,
+    )
+    personalizada_id = personalizada_restaurada.get_json()["data"]["id"]
+    assert client.post(
+        f"{endpoint}/restaurar", headers=owner_headers
+    ).status_code == 200
+    restored = client.get(endpoint, headers=owner_headers).get_json()["data"]
+    assert set(restored["ocultos"]) == ocultos_padrao
+    assert len(restored["icones"]) == len(initial_data["icones"]) + 1
+    assert any(opcao["id"] == personalizada_id for opcao in restored["icones"])
+
+    for ocultos in ("✈️", ["invalido"], ["🏠", "🏠"]):
+        assert client.put(
+            endpoint,
+            json={"ocultos": ocultos},
+            headers=owner_headers,
+        ).status_code == 400
+
+    assert client.delete(endpoint, headers=owner_headers).status_code == 200
+    assert set(
+        client.get(endpoint, headers=owner_headers).get_json()["data"]["ocultos"]
+    ) == ocultos_padrao
 
 
 def test_group_api_covers_membership_and_admin_crud(client):
@@ -766,10 +1402,13 @@ def test_group_api_covers_membership_and_admin_crud(client):
         {"nome": 1},
         {"nome": ""},
         {"nome": "A"},
+        {"nome": "G" * 121},
         {"nome": "Grupo", "descricao": []},
+        {"nome": "Grupo", "descricao": "D" * 501},
         {"nome": "Grupo", "participantes": "invalid"},
         {"nome": "Grupo", "participantes": [user_ids[2], "invalid"]},
         {"nome": "Grupo", "participantes": [999999]},
+        {"nome": "Grupo", "participantes": list(range(1000, 1100))},
     ]
     for payload in invalid_payloads:
         assert client.post(
@@ -787,10 +1426,17 @@ def test_group_api_covers_membership_and_admin_crud(client):
     )
     assert criado.status_code == 201
     grupo_id = criado.get_json()["data"]["id"]
-    assert len(client.get("/api/grupos", headers=owner_headers).get_json()["data"]) == 1
-    assert client.get(
+    grupo_listado = client.get("/api/grupos", headers=owner_headers).get_json()["data"]
+    assert len(grupo_listado) == 1
+    assert grupo_listado[0]["icone"] is None
+    detalhes_iniciais = client.get(
         f"/api/grupos/{grupo_id}", headers=owner_headers
-    ).status_code == 200
+    ).get_json()["data"]
+    assert detalhes_iniciais["pode_editar"] is True
+    assert detalhes_iniciais["icone"] is None
+    assert client.get(
+        f"/api/grupos/{grupo_id}", headers=member_headers
+    ).get_json()["data"]["pode_editar"] is False
     assert client.get(
         f"/api/grupos/{grupo_id}", headers=outsider_headers
     ).status_code == 403
@@ -803,13 +1449,27 @@ def test_group_api_covers_membership_and_admin_crud(client):
         json={"nome": "Nome alterado"},
         headers=member_headers,
     ).status_code == 403
-    for payload in ([], {"nome": 2}, {"nome": ""}, {"nome": "A"}, {"nome": "Ok", "descricao": []}):
+    for icone_invalido in ("📱", [], 1):
+        assert client.put(
+            f"/api/grupos/{grupo_id}",
+            json={"nome": "Nome válido", "descricao": "", "icone": icone_invalido},
+            headers=owner_headers,
+        ).status_code == 400
+    for payload in (
+        [],
+        {"nome": 2},
+        {"nome": ""},
+        {"nome": "A"},
+        {"nome": "N" * 121},
+        {"nome": "Ok", "descricao": []},
+        {"nome": "Ok", "descricao": "D" * 501},
+    ):
         assert client.put(
             f"/api/grupos/{grupo_id}", json=payload, headers=owner_headers
         ).status_code == 400
     atualizado = client.put(
         f"/api/grupos/{grupo_id}",
-        json={"nome": "Grupo atualizado", "descricao": ""},
+        json={"nome": "Grupo atualizado", "descricao": "", "icone": "✈️"},
         headers=owner_headers,
     )
     assert atualizado.status_code == 200
@@ -818,6 +1478,30 @@ def test_group_api_covers_membership_and_admin_crud(client):
     ).get_json()["data"]
     assert detalhes["nome"] == "Grupo atualizado"
     assert detalhes["descricao"] is None
+    assert detalhes["icone"] == "✈️"
+    assert detalhes["pode_editar"] is True
+    grupo_listado = client.get("/api/grupos", headers=owner_headers).get_json()["data"]
+    assert grupo_listado[0]["icone"] == "✈️"
+
+    preservado = client.put(
+        f"/api/grupos/{grupo_id}",
+        json={"nome": "Grupo atualizado novamente", "descricao": "Mantido"},
+        headers=owner_headers,
+    )
+    assert preservado.status_code == 200
+    assert client.get(
+        f"/api/grupos/{grupo_id}", headers=owner_headers
+    ).get_json()["data"]["icone"] == "✈️"
+
+    removido_icone = client.put(
+        f"/api/grupos/{grupo_id}",
+        json={"nome": "Grupo sem ícone", "descricao": "", "icone": None},
+        headers=owner_headers,
+    )
+    assert removido_icone.status_code == 200
+    assert client.get(
+        f"/api/grupos/{grupo_id}", headers=owner_headers
+    ).get_json()["data"]["icone"] is None
 
     assert client.delete(
         f"/api/grupos/{grupo_id}", headers=member_headers
@@ -825,8 +1509,35 @@ def test_group_api_covers_membership_and_admin_crud(client):
     assert client.delete(
         "/api/grupos/999999", headers=owner_headers
     ).status_code == 404
+
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "UPDATE participantes SET papel = 'participante' "
+                "WHERE grupo_id = ? AND usuario_id = ?",
+                (grupo_id, user_ids[0]),
+            )
+            cursor.execute(
+                "UPDATE participantes SET papel = 'admin' "
+                "WHERE grupo_id = ? AND usuario_id = ?",
+                (grupo_id, user_ids[1]),
+            )
+            connection.commit()
+        finally:
+            cursor.close()
+
+    assert client.get(
+        f"/api/grupos/{grupo_id}", headers=owner_headers
+    ).get_json()["data"]["pode_editar"] is False
     assert client.delete(
         f"/api/grupos/{grupo_id}", headers=owner_headers
+    ).status_code == 403
+    assert client.get(
+        f"/api/grupos/{grupo_id}", headers=member_headers
+    ).get_json()["data"]["pode_editar"] is True
+    assert client.delete(
+        f"/api/grupos/{grupo_id}", headers=member_headers
     ).status_code == 200
     assert client.get(
         f"/api/grupos/{grupo_id}", headers=owner_headers
@@ -1329,7 +2040,7 @@ def test_global_user_directory_is_not_exposed(client):
 def test_signup_and_login(client):
     email = "api-test@example.com"
     response = cadastrar_usuario(client, "API Test", email)
-    assert "Conta criada com sucesso" in response.get_json()["message"]
+    assert "Cadastro solicitado" in response.get_json()["message"]
     with get_connection_context() as connection:
         cursor = cursor_for(connection)
         try:
@@ -1365,10 +2076,23 @@ def test_authenticated_request_after_login(client):
     assert response.get_json()["data"]["saldo_total"] == 0
 
 
-def test_duplicate_signup_returns_conflict(client):
+def test_duplicate_signup_has_same_response_as_new_signup(client):
     payload = {"nome": "Dup", "email": "dup@example.com", "senha": "SenhaSegura123!"}
-    assert client.post("/api/auth/cadastro", json=payload).status_code == 201
-    assert client.post("/api/auth/cadastro", json=payload).status_code == 409
+    first_response = client.post("/api/auth/cadastro", json=payload)
+    duplicate_response = client.post("/api/auth/cadastro", json=payload)
+
+    assert first_response.status_code == duplicate_response.status_code == 201
+    assert first_response.get_json() == duplicate_response.get_json()
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM usuarios WHERE email = ?",
+                (payload["email"],),
+            )
+            assert cursor.fetchone()["total"] == 1
+        finally:
+            cursor.close()
 
 
 def test_signup_rejects_password_below_the_minimum_length(client):
@@ -1377,12 +2101,37 @@ def test_signup_rejects_password_below_the_minimum_length(client):
         json={
             "nome": "Senha Curta",
             "email": "senha-curta@example.com",
-            "senha": "curta123",
+            "senha": "abc12",
         },
     )
 
     assert resposta.status_code == 400
     assert "12 caracteres" in resposta.get_json()["message"]
+
+
+@pytest.mark.parametrize(
+    ("senha", "mensagem"),
+    [
+        ("abcdefghijkl", "pelo menos um numero"),
+        ("123456789012", "pelo menos uma letra"),
+    ],
+)
+def test_signup_rejects_password_without_letter_or_number(
+    client, senha, mensagem
+):
+    resposta = client.post(
+        "/api/auth/cadastro",
+        json={
+            "nome": "Senha Invalida",
+            "email": "senha-invalida@example.com",
+            "senha": senha,
+        },
+    )
+    assert resposta.status_code == 400
+    assert mensagem in resposta.get_json()["message"]
+
+
+
 
 
 def test_update_profile_and_password(client):
@@ -1394,15 +2143,125 @@ def test_update_profile_and_password(client):
 
     assert client.put(
         "/api/auth/atualizar",
-        json={"nome": "Nome Atualizado", "email": email, "telefone": "11999999999"},
+        json={
+            "nome": "Nome Atualizado",
+            "email": email,
+            "telefone": "11999999999",
+            "pix_chave": "profile-pix@example.com",
+        },
         headers=headers,
     ).status_code == 200
+    perfil = client.get("/api/auth/me", headers=headers)
+    assert perfil.status_code == 200
+    assert perfil.get_json()["data"]["pix_chave"] == "profile-pix@example.com"
+    login_com_pix = client.post(
+        "/api/auth/login",
+        json={"email": email, "senha": "SenhaSegura123!"},
+    )
+    assert (
+        login_com_pix.get_json()["data"]["user"]["pix_chave"]
+        == "profile-pix@example.com"
+    )
+    assert client.put(
+        "/api/auth/atualizar",
+        json={
+            "nome": "Nome Atualizado",
+            "email": email,
+            "telefone": "11999999999",
+        },
+        headers=headers,
+    ).status_code == 200
+    assert client.get(
+        "/api/auth/me", headers=headers
+    ).get_json()["data"]["pix_chave"] == "profile-pix@example.com"
+    chave_longa = client.put(
+        "/api/auth/atualizar",
+        json={
+            "nome": "Nome Atualizado",
+            "email": email,
+            "telefone": "11999999999",
+            "pix_chave": "x" * 78,
+        },
+        headers=headers,
+    )
+    assert chave_longa.status_code == 400
+    assert client.get(
+        "/api/auth/me", headers=headers
+    ).get_json()["data"]["pix_chave"] == "profile-pix@example.com"
+    assert client.put(
+        "/api/auth/atualizar",
+        json={
+            "nome": "Nome Atualizado",
+            "email": email,
+            "telefone": "11999999999",
+            "pix_chave": "",
+        },
+        headers=headers,
+    ).status_code == 200
+    assert client.get(
+        "/api/auth/me", headers=headers
+    ).get_json()["data"]["pix_chave"] is None
     assert client.put(
         "/api/auth/alterar-senha",
         json={"senha_atual": "SenhaSegura123!", "nova_senha": "NovaSenha456!"},
         headers=headers,
     ).status_code == 200
     assert client.post("/api/auth/login", json={"email": email, "senha": "NovaSenha456!"}).status_code == 200
+
+
+def test_pix_key_is_returned_only_to_group_debtor(client):
+    emails = ("pix-owner@example.com", "pix-debtor@example.com")
+    tokens = []
+    user_ids = []
+    for index, email in enumerate(emails):
+        cadastrar_usuario(client, f"Pix User {index}", email)
+        login = client.post(
+            "/api/auth/login",
+            json={"email": email, "senha": "SenhaSegura123!"},
+        ).get_json()["data"]
+        tokens.append(login["token"])
+        user_ids.append(login["user"]["id"])
+
+    credor_headers = {"Authorization": f"Bearer {tokens[0]}"}
+    devedor_headers = {"Authorization": f"Bearer {tokens[1]}"}
+    chave_pix = "pix-receber@example.com"
+    assert client.put(
+        "/api/auth/atualizar",
+        json={
+            "nome": "Pix User 0",
+            "email": emails[0],
+            "pix_chave": chave_pix,
+        },
+        headers=credor_headers,
+    ).status_code == 200
+    grupo_id = client.post(
+        "/api/grupos",
+        json={"nome": "Grupo Pix", "participantes": [user_ids[1]]},
+        headers=credor_headers,
+    ).get_json()["data"]["id"]
+    despesa = client.post(
+        "/api/despesas",
+        json={
+            "grupo_id": grupo_id,
+            "pagador_id": user_ids[0],
+            "descricao": "Despesa Pix",
+            "valor": 60,
+            "data_despesa": date.today().isoformat(),
+            "participantes": user_ids,
+        },
+        headers=credor_headers,
+    )
+    assert despesa.status_code == 201
+
+    saldos_devedor = client.get(
+        f"/api/saldos/grupo/{grupo_id}", headers=devedor_headers
+    ).get_json()["data"]["dividas_simplificadas"]
+    assert saldos_devedor[0]["chave_pix"] == chave_pix
+
+    saldos_credor = client.get(
+        f"/api/saldos/grupo/{grupo_id}", headers=credor_headers
+    ).get_json()["data"]["dividas_simplificadas"]
+    assert "chave_pix" not in saldos_credor[0]
 
 
 def test_account_deletion_requires_the_current_password(client):
@@ -1425,6 +2284,51 @@ def test_account_deletion_requires_the_current_password(client):
     ).status_code == 200
 
 
+def test_account_deletion_is_blocked_when_user_owes_a_balance(client):
+    email = "account-delete-debtor@example.com"
+    cadastrar_usuario(client, "Delete Debtor", email)
+    login = client.post(
+        "/api/auth/login",
+        json={"email": email, "senha": "SenhaSegura123!"},
+    ).get_json()["data"]
+    headers = {"Authorization": f"Bearer {login['token']}"}
+    usuario_id = login["user"]["id"]
+
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                "INSERT INTO grupos (nome, descricao, criado_por) "
+                "VALUES (?, NULL, ?)",
+                ("Grupo com dívida", usuario_id),
+            )
+            grupo_id = cursor.lastrowid
+            cursor.execute(
+                "INSERT INTO participantes "
+                "(grupo_id, usuario_id, papel, ativo) "
+                "VALUES (?, ?, 'participante', 1)",
+                (grupo_id, usuario_id),
+            )
+            cursor.execute(
+                "INSERT INTO saldos (grupo_id, usuario_id, saldo) "
+                "VALUES (?, ?, ?)",
+                (grupo_id, usuario_id, -25),
+            )
+            connection.commit()
+        finally:
+            cursor.close()
+
+    resposta = client.delete(
+        "/api/auth/delete",
+        json={"senha_atual": "SenhaSegura123!"},
+        headers=headers,
+    )
+
+    assert resposta.status_code == 409
+    assert "saldo em dívida" in resposta.get_json()["mensagem"]
+    assert client.get("/api/auth/me", headers=headers).status_code == 200
+
+
 def test_account_deletion_anonymizes_and_preserves_shared_history(client):
     owner_email = "account-delete-owner@example.com"
     guest_email = "account-delete-guest@example.com"
@@ -1441,6 +2345,15 @@ def test_account_deletion_anonymizes_and_preserves_shared_history(client):
     guest_id = guest_login["user"]["id"]
     owner_headers = {"Authorization": f"Bearer {owner_login['token']}"}
     guest_headers = {"Authorization": f"Bearer {guest_login['token']}"}
+    assert client.put(
+        "/api/auth/atualizar",
+        json={
+            "nome": "Owner To Delete",
+            "email": owner_email,
+            "pix_chave": "pix-owner-to-delete@example.com",
+        },
+        headers=owner_headers,
+    ).status_code == 200
 
     grupo = client.post(
         "/api/grupos",
@@ -1516,6 +2429,13 @@ def test_account_deletion_anonymizes_and_preserves_shared_history(client):
                     guest_id,
                 ),
             )
+            cursor.execute(
+                "INSERT INTO gemini_usage_diaria "
+                "(data_utc, usuario_id, modelo, solicitacoes) "
+                "VALUES (UTC_DATE(), ?, 'account-delete-user', 1), "
+                "(UTC_DATE(), 0, 'account-delete-global', 1)",
+                (owner_id,),
+            )
             connection.commit()
         finally:
             cursor.close()
@@ -1540,7 +2460,7 @@ def test_account_deletion_anonymizes_and_preserves_shared_history(client):
         cursor = cursor_for(connection)
         try:
             cursor.execute(
-                "SELECT nome, email, telefone, excluido_em "
+                "SELECT nome, email, telefone, pix_chave, excluido_em "
                 "FROM usuarios WHERE id = ?",
                 (owner_id,),
             )
@@ -1548,6 +2468,7 @@ def test_account_deletion_anonymizes_and_preserves_shared_history(client):
             assert usuario["nome"] == "Usuário excluído"
             assert usuario["email"] == f"excluido+{owner_id}@deleted.invalid"
             assert usuario["telefone"] is None
+            assert usuario["pix_chave"] is None
             assert usuario["excluido_em"] is not None
 
             cursor.execute("SELECT COUNT(*) AS total FROM despesas WHERE id = ?", (despesa_id,))
@@ -1601,6 +2522,17 @@ def test_account_deletion_anonymizes_and_preserves_shared_history(client):
                 (owner_id,),
             )
             assert cursor.fetchone()["total"] == 0
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM gemini_usage_diaria "
+                "WHERE usuario_id = ?",
+                (owner_id,),
+            )
+            assert cursor.fetchone()["total"] == 0
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM gemini_usage_diaria "
+                "WHERE usuario_id = 0 AND modelo = 'account-delete-global'",
+            )
+            assert cursor.fetchone()["total"] == 1
         finally:
             cursor.close()
 

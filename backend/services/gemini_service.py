@@ -80,6 +80,7 @@ def ler_recibo(
 ) -> dict:
     api_key = Config.GEMINI_API_KEY
     model = Config.GEMINI_MODEL
+    fallback_model = Config.GEMINI_FALLBACK_MODEL
 
     if not api_key:
         raise GeminiUnavailableError(
@@ -88,6 +89,7 @@ def ler_recibo(
 
     inicio = perf_counter()
     resultado = "falha"
+    modelo_usado = model
     if usuario_id is not None:
         GeminiUsageModel.registrar_solicitacao(
             usuario_id,
@@ -131,22 +133,44 @@ def ler_recibo(
     """
 
     try:
-        client = genai.Client(api_key=api_key)
-
-        resposta = client.models.generate_content(
-            model=model,
-            contents=[
-                types.Part.from_bytes(
-                    data=imagem,
-                    mime_type=mime_type,
-                ),
-                prompt,
-            ],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0,
-            ),
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=25000),
         )
+
+        modelos = dict.fromkeys((model, fallback_model))
+        for modelo_tentativa in modelos:
+            try:
+                resposta = client.models.generate_content(
+                    model=modelo_tentativa,
+                    contents=[
+                        types.Part.from_bytes(
+                            data=imagem,
+                            mime_type=mime_type,
+                        ),
+                        prompt,
+                    ],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0,
+                    ),
+                )
+                modelo_usado = modelo_tentativa
+                break
+            except Exception as erro:
+                if (
+                    getattr(erro, "code", None) not in {429, 503}
+                    or modelo_tentativa == fallback_model
+                ):
+                    raise
+                _LOGGER.warning(
+                    "Modelo Gemini indisponível; tentando modelo de contingência.",
+                    extra={
+                        "model": modelo_tentativa,
+                        "fallback_model": fallback_model,
+                        "provider_code": getattr(erro, "code", None),
+                    },
+                )
 
         if not resposta.text:
             raise GeminiReceiptError(
@@ -171,6 +195,11 @@ def ler_recibo(
             "Não foi possível interpretar os dados do recibo."
         ) from erro
     except Exception as erro:
+        if getattr(erro, "code", None) in {429, 503}:
+            raise GeminiUnavailableError(
+                "O serviço de leitura está temporariamente ocupado. "
+                "Tente novamente em alguns minutos."
+            ) from erro
         raise GeminiReceiptError(
             "Não foi possível processar o recibo. Tente novamente."
         ) from erro
@@ -179,7 +208,7 @@ def ler_recibo(
             "Uso Gemini para leitura de recibo.",
             extra={
                 "event": "gemini_receipt_usage",
-                "model": model,
+                "model": modelo_usado,
                 "outcome": resultado,
                 "image_bytes": len(imagem),
                 "duration_ms": round((perf_counter() - inicio) * 1000),

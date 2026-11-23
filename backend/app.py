@@ -93,9 +93,16 @@ def create_app():
     def index():
         return {"status": "Online", "projeto": "wepay"}, 200
 
+    @app.route("/health/live", methods=["GET"])
+    def liveness():
+        """Confirma que o processo da API está ativo, sem consultar dependências."""
+        return {"status": "Online"}, 200
+
     @app.route("/health", methods=["GET"])
-    def health():
-        """Verifica se a API e o banco estão disponíveis sem expor credenciais."""
+    @app.route("/health/ready", methods=["GET"])
+    def readiness():
+        """Verifica dependências obrigatórias para receber tráfego."""
+        database_ok = True
         try:
             with get_connection_context() as connection:
                 cursor = connection.cursor()
@@ -105,16 +112,75 @@ def create_app():
                 finally:
                     cursor.close()
         except Exception:
-            app.logger.exception("Health check do banco falhou")
-            return {"status": "indisponivel", "database": "erro"}, 503
+            database_ok = False
+            app.logger.exception("Readiness check do banco falhou")
 
-        return {"status": "Online", "database": "Online"}, 200
+        try:
+            rate_limit_storage_ok = limiter.storage.check()
+        except Exception:
+            rate_limit_storage_ok = False
+            app.logger.exception(
+                "Readiness check do storage de rate limit falhou"
+            )
+        if not rate_limit_storage_ok:
+            app.logger.error("Storage de rate limit indisponivel")
+
+        ready = database_ok and rate_limit_storage_ok
+        return {
+            "status": "Online" if ready else "indisponivel",
+            "database": "Online" if database_ok else "erro",
+            "rate_limit_storage": (
+                "Online" if rate_limit_storage_ok else "erro"
+            ),
+        }, 200 if ready else 503
 
     @app.cli.command("init-db")
     def init_db_command():
         """Cria ou atualiza o schema fora do ciclo de inicialização da API."""
         initialize_database()
         print("Schema do WEPAY inicializado.")
+
+    @app.cli.command("invalidate-legacy-passwords")
+    @click.option(
+        "--apply",
+        "apply_changes",
+        is_flag=True,
+        help="Invalida as senhas legadas e revoga as sessões dessas contas.",
+    )
+    def invalidate_legacy_passwords_command(apply_changes):
+        """Exige redefinição para contas que ainda usam SHA-256 legado."""
+        from services.legacy_password_migration import (
+            invalidate_legacy_passwords,
+        )
+
+        try:
+            with get_connection_context() as connection:
+                try:
+                    count = invalidate_legacy_passwords(
+                        connection,
+                        dry_run=not apply_changes,
+                    )
+                    if apply_changes:
+                        connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+        except Exception as error:
+            app.logger.exception("Falha na migração de senhas legadas.")
+            raise click.ClickException(
+                "Migração de senhas falhou; nenhuma alteração foi confirmada."
+            ) from error
+
+        if apply_changes:
+            click.echo(
+                f"{count} conta(s) atualizada(s). "
+                "Essas contas precisam redefinir a senha antes de entrar."
+            )
+        else:
+            click.echo(
+                f"Dry-run: {count} conta(s) precisam redefinir a senha. "
+                "Pare a API antes de executar novamente com --apply."
+            )
 
     @app.cli.command("gemini-usage")
     @click.option(
@@ -246,7 +312,6 @@ if __name__ == "__main__":
             "`waitress-serve --host=0.0.0.0 --port=5000 wsgi:app`."
         )
     app = create_app()
-    initialize_database()
     app.run(
         debug=os.getenv("FLASK_DEBUG", "").strip().lower()
         in {"1", "true", "yes", "on"},

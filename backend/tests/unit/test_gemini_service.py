@@ -91,8 +91,8 @@ def test_ler_recibo_envia_imagem_e_normaliza_resposta(monkeypatch):
             )()
 
     class FakeClient:
-        def __init__(self, *, api_key):
-            chamadas.append({"api_key": api_key})
+        def __init__(self, *, api_key, http_options):
+            chamadas.append({"api_key": api_key, "http_options": http_options})
             self.models = FakeModels()
 
     monkeypatch.setattr(Config, "GEMINI_API_KEY", "test-key")
@@ -108,7 +108,8 @@ def test_ler_recibo_envia_imagem_e_normaliza_resposta(monkeypatch):
         "moeda": "BRL",
         "categoria_sugerida": "Alimentação",
     }
-    assert chamadas[0] == {"api_key": "test-key"}
+    assert chamadas[0]["api_key"] == "test-key"
+    assert chamadas[0]["http_options"].timeout == 25000
     requisicao = chamadas[1]
     assert requisicao["model"] == "test-model"
     assert requisicao["contents"][0].inline_data.data == b"image-bytes"
@@ -192,3 +193,68 @@ def test_ler_recibo_wraps_unexpected_client_errors(monkeypatch):
 
     with pytest.raises(GeminiReceiptError, match="Não foi possível processar"):
         ler_recibo(b"image-bytes", "image/jpeg")
+
+
+@pytest.mark.parametrize("code", [429, 503])
+def test_ler_recibo_reports_temporary_provider_unavailability(monkeypatch, code):
+    class FakeProviderError(Exception):
+        def __init__(self):
+            self.code = code
+
+    class FakeModels:
+        def generate_content(self, **_kwargs):
+            raise FakeProviderError()
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(Config, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr("services.gemini_service.genai.Client", FakeClient)
+
+    with pytest.raises(
+        GeminiUnavailableError,
+        match="temporariamente ocupado",
+    ):
+        ler_recibo(b"image-bytes", "image/jpeg")
+
+
+def test_ler_recibo_usa_modelo_de_contingencia_quando_modelo_principal_esta_ocupado(
+    monkeypatch,
+):
+    modelos_tentados = []
+
+    class FakeProviderError(Exception):
+        code = 503
+
+    class FakeModels:
+        def generate_content(self, *, model, **_kwargs):
+            modelos_tentados.append(model)
+            if model == "primary-model":
+                raise FakeProviderError()
+            return type(
+                "GeminiResponse",
+                (),
+                {
+                    "text": (
+                        '{"estabelecimento":"Mercado teste",'
+                        '"data":null,"valor_total":12.34,'
+                        '"categoria_sugerida":"Mercado"}'
+                    )
+                },
+            )()
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(Config, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(Config, "GEMINI_MODEL", "primary-model")
+    monkeypatch.setattr(Config, "GEMINI_FALLBACK_MODEL", "fallback-model")
+    monkeypatch.setattr("services.gemini_service.genai.Client", FakeClient)
+
+    resultado = ler_recibo(b"image-bytes", "image/jpeg")
+
+    assert modelos_tentados == ["primary-model", "fallback-model"]
+    assert resultado["estabelecimento"] == "Mercado teste"
+    assert resultado["valor_total"] == 12.34

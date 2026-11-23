@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+
 import jwt
 from flask import g, request
 from flask_limiter.util import get_remote_address
@@ -25,4 +28,18 @@ def refresh_user_or_ip():
                 return f"user:{user_id}"
         except (jwt.PyJWTError, KeyError, TypeError, ValueError):
             pass
+    return f"ip:{get_remote_address()}"
+
+
+def password_reset_email_or_ip():
+    data = request.get_json(silent=True)
+    email = data.get("email") if isinstance(data, dict) else None
+    if isinstance(email, str) and email.strip():
+        normalized_email = email.strip().lower().encode("utf-8")
+        digest = hmac.new(
+            Config.SECRET_KEY.encode("utf-8"),
+            normalized_email,
+            hashlib.sha256,
+        ).hexdigest()
+        return f"password-reset:{digest}"
     return f"ip:{get_remote_address()}"

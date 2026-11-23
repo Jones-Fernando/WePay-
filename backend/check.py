@@ -1,18 +1,11 @@
 import argparse
 
 from config import Config
+from database.connection import _connect_mysql
 
 
 def verificar_mysql():
-    import mysql.connector
-
-    connection = mysql.connector.connect(
-        host=Config.DB_HOST,
-        port=Config.DB_PORT,
-        user=Config.DB_USER,
-        password=Config.DB_PASSWORD,
-        database=Config.DB_NAME,
-    )
+    connection = _connect_mysql(Config.DB_NAME)
     try:
         print("MySQL OK:", connection.get_server_info())
     finally:

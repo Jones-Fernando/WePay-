@@ -17,6 +17,23 @@ def listar(current_user_id):
 def criar(current_user_id):
     return CategoriaController.criar(current_user_id)
 
+@categoria_bp.route("/icones", methods=["GET"])
+@token_required
+def listar_icones(current_user_id):
+    return CategoriaController.listar_icones(current_user_id)
+
+
+@categoria_bp.route("/icones", methods=["PUT"])
+@token_required
+def atualizar_icone_padrao(current_user_id):
+    return CategoriaController.atualizar_icone_padrao(current_user_id)
+
+
+@categoria_bp.route("/icones", methods=["DELETE"])
+@token_required
+def restaurar_icone_padrao(current_user_id):
+    return CategoriaController.restaurar_icone_padrao(current_user_id)
+
 
 @categoria_bp.route("/<int:categoria_id>", methods=["PUT"])
 @token_required

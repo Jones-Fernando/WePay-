@@ -7,6 +7,12 @@ A tabela saldos funciona apenas como um cache/materialização recalculável.
 Valores monetários são tratados com Decimal durante os cálculos.
 """
 
+import logging
+import time
+from functools import wraps
+
+from mysql.connector import Error as MySQLError
+
 from database.connection import get_connection_context, cursor_for, fetch_all, fetch_one
 from services.financeiro_calculo_service import (
     ZERO,
@@ -15,9 +21,39 @@ from services.financeiro_calculo_service import (
     money,
 )
 from services.financeiro_pagamento_service import FinanceiroPagamentoService
+from services.financeiro_pagamento_service import IdempotencyConflictError
 from services.financeiro_saldo_service import FinanceiroSaldoService
+from utils.validators import MAX_PARTICIPANTS_PER_GROUP
 
 _UNSET = object()
+_MAX_DEADLOCK_ATTEMPTS = 3
+_RETRYABLE_TRANSACTION_ERRORS = {1205, 1213}
+_LOGGER = logging.getLogger(__name__)
+
+
+def _retry_transaction_on_deadlock(operation):
+    @wraps(operation)
+    def wrapped(*args, **kwargs):
+        for attempt in range(1, _MAX_DEADLOCK_ATTEMPTS + 1):
+            try:
+                return operation(*args, **kwargs)
+            except MySQLError as error:
+                if (
+                    error.errno not in _RETRYABLE_TRANSACTION_ERRORS
+                    or attempt == _MAX_DEADLOCK_ATTEMPTS
+                ):
+                    raise
+                delay_seconds = 0.05 * (2 ** (attempt - 1))
+                _LOGGER.warning(
+                    "Conflito de bloqueio ao criar despesa; "
+                    "nova tentativa %s/%s em %.2f segundos.",
+                    attempt,
+                    _MAX_DEADLOCK_ATTEMPTS - 1,
+                    delay_seconds,
+                )
+                time.sleep(delay_seconds)
+
+    return wrapped
 
 
 class FinanceiroService:
@@ -118,6 +154,10 @@ class FinanceiroService:
         ids = sorted({int(item) for item in participantes_ids})
         if not ids:
             raise ValueError("O grupo precisa ter participantes.")
+        if len(ids) > MAX_PARTICIPANTS_PER_GROUP:
+            raise ValueError(
+                f"A divisao pode ter no maximo {MAX_PARTICIPANTS_PER_GROUP} participantes."
+            )
         placeholders = ",".join(["?"] * len(ids))
         cursor = cursor_for(conn)
         try:
@@ -165,6 +205,7 @@ class FinanceiroService:
             cursor.close()
 
     @staticmethod
+    @_retry_transaction_on_deadlock
     def criar_despesa(
         grupo_id,
         pagador_id,
@@ -180,6 +221,7 @@ class FinanceiroService:
         observacao=None,
         *,
         criador_id,
+        categoria_id=None,
     ):
         valor = money(valor)
         if valor <= ZERO:
@@ -210,14 +252,16 @@ class FinanceiroService:
             try:
                 cursor.execute(
                     "INSERT INTO despesas "
-                    "(grupo_id, pagador_id, criado_por, descricao, categoria, observacao, valor, data_despesa, vencimento) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "(grupo_id, pagador_id, criado_por, descricao, categoria, "
+                    "categoria_id, observacao, valor, data_despesa, vencimento) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         grupo_id,
                         pagador_id,
                         criador_id,
                         descricao,
                         categoria,
+                        categoria_id,
                         observacao,
                         valor,
                         data_despesa,
@@ -250,7 +294,12 @@ class FinanceiroService:
                 # Notificacoes internas fazem parte da mesma transacao da despesa.
                 from services.notificacao_service import NotificacaoService
                 NotificacaoService.notificar_nova_despesa(
-                    grupo_id, pagador_id, descricao, valor, conn
+                    grupo_id,
+                    criador_id,
+                    descricao,
+                    valor,
+                    conn,
+                    referencia_id=despesa_id,
                 )
             except Exception:
                 conn.rollback()
@@ -284,6 +333,7 @@ class FinanceiroService:
         observacao=_UNSET,
         *,
         ator_id,
+        categoria_id=None,
     ):
         valor = money(valor)
         descricao = (descricao or "").strip()
@@ -344,12 +394,13 @@ class FinanceiroService:
 
                 cursor.execute(
                     "UPDATE despesas SET pagador_id = ?, descricao = ?, categoria = ?, "
-                    "observacao = ?, valor = ?, data_despesa = ?, vencimento = ?, "
+                    "categoria_id = ?, observacao = ?, valor = ?, data_despesa = ?, vencimento = ?, "
                     "atualizado_em = CURRENT_TIMESTAMP WHERE id = ?",
                     (
                         pagador_id,
                         descricao,
                         categoria,
+                        categoria_id,
                         observacao_atual,
                         valor,
                         data_despesa or despesa["data_despesa"],
@@ -476,6 +527,7 @@ class FinanceiroService:
         data_pagamento=None,
         metodo=None,
         observacao=None,
+        idempotency_key=None,
     ):
         return FinanceiroPagamentoService.registrar_pagamento(
             grupo_id,
@@ -485,6 +537,7 @@ class FinanceiroService:
             data_pagamento,
             metodo,
             observacao,
+            idempotency_key,
             lock_group=FinanceiroService.lock_group,
             aplicar_delta_saldos=FinanceiroService._aplicar_delta_saldos,
         )

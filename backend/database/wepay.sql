@@ -3,11 +3,16 @@ CREATE TABLE IF NOT EXISTS usuarios (
     nome VARCHAR(120) NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
     telefone VARCHAR(30) NULL,
+    pix_chave VARCHAR(77) NULL,
+    avatar_url MEDIUMTEXT NULL,
     senha VARCHAR(255) NOT NULL,
     email_verificado TINYINT(1) NOT NULL DEFAULT 1,
     auth_version INT UNSIGNED NOT NULL DEFAULT 0,
+    categorias_inicializadas TINYINT(1) NOT NULL DEFAULT 0,
     notificacoes_ativas TINYINT(1) NOT NULL DEFAULT 0,
     sons_notificacoes_ativos TINYINT(1) NOT NULL DEFAULT 1,
+    notificacoes_despesas_ativas TINYINT(1) NOT NULL DEFAULT 1,
+    notificacoes_cobrancas_ativas TINYINT(1) NOT NULL DEFAULT 1,
     excluido_em DATETIME NULL,
     criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -18,12 +23,35 @@ CREATE TABLE IF NOT EXISTS grupos (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     nome VARCHAR(120) NOT NULL,
     descricao VARCHAR(500) NULL,
+    icone VARCHAR(16) NULL,
     criado_por BIGINT UNSIGNED NOT NULL,
     criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_grupo_criador FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE RESTRICT,
     INDEX idx_grupos_criador (criado_por),
     INDEX idx_grupos_nome (nome)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS grupo_icones_capa_ocultos (
+    usuario_id BIGINT UNSIGNED NOT NULL,
+    icone VARCHAR(16) COLLATE utf8mb4_bin NOT NULL,
+    criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (usuario_id, icone),
+    CONSTRAINT fk_grupo_icone_capa_usuario
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS grupo_icones_capa_opcoes (
+    usuario_id BIGINT UNSIGNED NOT NULL,
+    opcao_id VARCHAR(80) COLLATE utf8mb4_bin NOT NULL,
+    nome VARCHAR(60) NOT NULL,
+    icone VARCHAR(16) NOT NULL,
+    origem ENUM('padrao', 'personalizado') NOT NULL,
+    ativo TINYINT(1) NOT NULL DEFAULT 1,
+    criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (usuario_id, opcao_id),
+    CONSTRAINT fk_grupo_icone_capa_opcao_usuario
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS participantes (
@@ -48,6 +76,7 @@ CREATE TABLE IF NOT EXISTS despesas (
     criado_por BIGINT UNSIGNED NULL,
     descricao VARCHAR(255) NOT NULL,
     categoria VARCHAR(100) NULL,
+    categoria_id BIGINT UNSIGNED NULL,
     observacao VARCHAR(500) NULL,
     valor DECIMAL(12,2) NOT NULL,
     data_despesa DATE NOT NULL,
@@ -87,6 +116,7 @@ CREATE TABLE IF NOT EXISTS pagamentos (
     data_pagamento DATE NOT NULL,
     metodo VARCHAR(50) NULL,
     observacao VARCHAR(500) NULL,
+    idempotency_key VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
     criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT chk_pagamento_valor CHECK (valor > 0),
     CONSTRAINT chk_pagamento_pessoas CHECK (pagador_id <> recebedor_id),
@@ -95,7 +125,9 @@ CREATE TABLE IF NOT EXISTS pagamentos (
     CONSTRAINT fk_pagamento_recebedor FOREIGN KEY (recebedor_id) REFERENCES usuarios(id) ON DELETE RESTRICT,
     INDEX idx_pagamentos_grupo_data (grupo_id, data_pagamento),
     INDEX idx_pagamentos_pagador (pagador_id),
-    INDEX idx_pagamentos_recebedor (recebedor_id)
+    INDEX idx_pagamentos_recebedor (recebedor_id),
+    UNIQUE INDEX uq_pagamentos_idempotencia
+        (grupo_id, pagador_id, idempotency_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS saldos (
@@ -116,6 +148,7 @@ CREATE TABLE IF NOT EXISTS despesas_pessoais (
     descricao VARCHAR(255) NOT NULL,
     valor DECIMAL(12,2) NOT NULL,
     categoria VARCHAR(100) NULL,
+    categoria_id BIGINT UNSIGNED NULL,
     tipo ENUM('despesa', 'receita') NOT NULL DEFAULT 'despesa',
     data_despesa DATE NOT NULL,
     criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -130,11 +163,23 @@ CREATE TABLE IF NOT EXISTS categorias (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     usuario_id BIGINT UNSIGNED NULL,
     nome VARCHAR(100) NOT NULL,
+    icone VARCHAR(16) NOT NULL DEFAULT '📌',
     tipo ENUM('pessoal', 'grupo', 'ambos') NOT NULL DEFAULT 'ambos',
+    origem ENUM('padrao', 'personalizada') NOT NULL DEFAULT 'personalizada',
     criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_categoria_usuario_nome UNIQUE (usuario_id, nome),
+    CONSTRAINT uq_categoria_usuario_nome_tipo UNIQUE (usuario_id, nome, tipo),
     CONSTRAINT fk_categoria_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
     INDEX idx_categoria_usuario (usuario_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS categorias_icones_usuario (
+    usuario_id BIGINT UNSIGNED NOT NULL,
+    tipo ENUM('pessoal', 'grupo') NOT NULL,
+    nome VARCHAR(100) NOT NULL,
+    icone VARCHAR(16) NOT NULL,
+    atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (usuario_id, tipo, nome),
+    CONSTRAINT fk_categoria_icone_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS gemini_usage_diaria (
@@ -147,7 +192,8 @@ CREATE TABLE IF NOT EXISTS gemini_usage_diaria (
     atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (data_utc, usuario_id, modelo),
-    INDEX idx_gemini_usage_model_date (modelo, data_utc)
+    INDEX idx_gemini_usage_model_date (modelo, data_utc),
+    INDEX idx_gemini_usage_user_date (usuario_id, data_utc)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS refresh_tokens (
@@ -183,6 +229,27 @@ CREATE TABLE IF NOT EXISTS recuperacao_tokens (
     INDEX idx_recuperacao_expiracao (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS password_reset_email_outbox (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    recuperacao_token_id BIGINT UNSIGNED NOT NULL,
+    email_destino VARCHAR(255) NOT NULL,
+    token_cifrado VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    tentativas SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    disponivel_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reservado_em DATETIME NULL,
+    enviado_em DATETIME NULL,
+    falhou_em DATETIME NULL,
+    ultimo_erro VARCHAR(1000) NULL,
+    criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_reset_email_outbox_token
+        FOREIGN KEY (recuperacao_token_id) REFERENCES recuperacao_tokens(id)
+        ON DELETE CASCADE,
+    INDEX idx_reset_email_outbox_pendente (status, disponivel_em, id),
+    INDEX idx_reset_email_outbox_reserva (status, reservado_em),
+    INDEX idx_reset_email_outbox_retencao (status, enviado_em, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS convites_grupo (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     grupo_id BIGINT UNSIGNED NOT NULL,
@@ -203,6 +270,7 @@ CREATE TABLE IF NOT EXISTS notificacoes (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     usuario_id BIGINT UNSIGNED NOT NULL,
     grupo_id BIGINT UNSIGNED NULL,
+    referencia_id BIGINT UNSIGNED NULL,
     tipo VARCHAR(50) NOT NULL,
     titulo VARCHAR(150) NOT NULL,
     mensagem VARCHAR(500) NOT NULL,

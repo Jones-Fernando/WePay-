@@ -96,3 +96,15 @@ def test_rejects_empty_or_invalid_proxy_configuration():
         assert "trusted_hops" in str(exc)
     else:
         raise AssertionError("Contagem inválida deveria ser rejeitada.")
+
+
+def test_rejects_universal_proxy_networks():
+    app = Flask(__name__)
+
+    for cidr in ("0.0.0.0/0", "::/0"):
+        try:
+            TrustedProxyFix(app.wsgi_app, 1, (cidr,))
+        except ValueError as exc:
+            assert "rede universal" in str(exc)
+        else:
+            raise AssertionError(f"A rede universal {cidr} deveria ser rejeitada.")

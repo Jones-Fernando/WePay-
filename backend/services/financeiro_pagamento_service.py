@@ -7,6 +7,10 @@ from database.connection import cursor_for, fetch_all, fetch_one, get_connection
 from services.financeiro_calculo_service import CENT, ZERO, money
 
 
+class IdempotencyConflictError(Exception):
+    """A chave de idempotência já está associada a outro pagamento."""
+
+
 class FinanceiroPagamentoService:
     @staticmethod
     def registrar_pagamento(
@@ -17,6 +21,7 @@ class FinanceiroPagamentoService:
         data_pagamento=None,
         metodo=None,
         observacao=None,
+        idempotency_key=None,
         *,
         lock_group,
         aplicar_delta_saldos,
@@ -26,6 +31,11 @@ class FinanceiroPagamentoService:
             raise ValueError("Valor do pagamento deve ser maior que zero.")
         if int(pagador_id) == int(recebedor_id):
             raise ValueError("Pagador e recebedor devem ser diferentes.")
+        if idempotency_key is not None and not 1 <= len(idempotency_key) <= 64:
+            raise ValueError("Chave de idempotencia invalida.")
+        data_pagamento = data_pagamento or date.today().isoformat()
+        metodo = (metodo or "").strip() or None
+        observacao = (observacao or "").strip() or None
 
         with get_connection_context() as conn:
             lock_group(conn, grupo_id)
@@ -48,6 +58,32 @@ class FinanceiroPagamentoService:
                     raise ValueError(
                         "Pagador e recebedor precisam ser participantes ativos do grupo."
                     )
+
+                if idempotency_key is not None:
+                    cursor.execute(
+                        "SELECT id, recebedor_id, valor, data_pagamento, metodo, "
+                        "observacao FROM pagamentos "
+                        "WHERE grupo_id = ? AND pagador_id = ? "
+                        "AND idempotency_key = ? FOR UPDATE",
+                        (grupo_id, pagador_id, idempotency_key),
+                    )
+                    pagamento_existente = fetch_one(cursor)
+                    if pagamento_existente:
+                        mesmos_dados = (
+                            int(pagamento_existente["recebedor_id"])
+                            == int(recebedor_id)
+                            and money(pagamento_existente["valor"]) == valor
+                            and str(pagamento_existente["data_pagamento"])
+                            == data_pagamento
+                            and pagamento_existente["metodo"] == metodo
+                            and pagamento_existente["observacao"] == observacao
+                        )
+                        if not mesmos_dados:
+                            raise IdempotencyConflictError(
+                                "A chave de idempotencia ja foi usada "
+                                "com dados diferentes."
+                            )
+                        return int(pagamento_existente["id"])
 
                 cursor.execute(
                     "SELECT saldo FROM saldos "
@@ -77,16 +113,18 @@ class FinanceiroPagamentoService:
 
                 cursor.execute(
                     "INSERT INTO pagamentos "
-                    "(grupo_id, pagador_id, recebedor_id, valor, data_pagamento, metodo, observacao) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "(grupo_id, pagador_id, recebedor_id, valor, data_pagamento, "
+                    "metodo, observacao, idempotency_key) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         grupo_id,
                         pagador_id,
                         recebedor_id,
                         valor,
-                        data_pagamento or date.today().isoformat(),
+                        data_pagamento,
                         metodo,
                         observacao,
+                        idempotency_key,
                     ),
                 )
                 pagamento_id = cursor.lastrowid

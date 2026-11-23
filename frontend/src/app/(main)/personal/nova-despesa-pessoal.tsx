@@ -1,32 +1,45 @@
+import { useAppTheme, useAppThemeScheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 import React, { useState } from "react";
 import {
   SafeAreaView, View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ScrollView, StatusBar, Alert, KeyboardAvoidingView, Platform, ActivityIndicator,
+  StyleSheet, ScrollView, StatusBar, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import { router } from "expo-router";
-import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import CalendarioData from "@/components/CalendarioData";
+import { IconeCategoria } from "@/components/IconeCategoria";
 import { despesasPessoaisApi } from "@/services/api";
 import {
+  formatCurrencyInput,
   formatDateForInput,
   parseCurrencyInput,
-  parseDateInputToDate,
   parseDateInputToIso,
 } from "@/utils/financeInput";
 import { CATEGORIAS_PESSOAIS as CATEGORIAS } from "@/constants/financeCategories";
 import { useCategoriasFinanceiras } from "@/hooks/useCategoriasFinanceiras";
+import { Alert } from "@/services/feedback";
 
 export default function NovaDespesaPessoal() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
+  const esquema = useAppThemeScheme();
   const { categorias, erro: erroCategorias } = useCategoriasFinanceiras("pessoal", CATEGORIAS);
   const [descricao, setDescricao] = useState("");
   const [valor, setValor] = useState("");
-  const [data, setData] = useState("");
+  const [campoFocado, setCampoFocado] = useState<"descricao" | "valor" | null>(null);
+  const [data, setData] = useState(() => formatDateForInput(new Date()));
   const [categoria, setCategoria] = useState("Alimentação");
   const [salvando, setSalvando] = useState(false);
   const [mostrarSeletorData, setMostrarSeletorData] = useState(false);
 
-  function selecionarData(_evento: DateTimePickerEvent, dataSelecionada?: Date) {
+  function abrirCalendario() {
+    setMostrarSeletorData(true);
+  }
+
+  function selecionarData(dataSelecionada: string) {
+    setData(dataSelecionada);
     setMostrarSeletorData(false);
-    if (dataSelecionada) setData(formatDateForInput(dataSelecionada));
   }
 
   async function salvarDespesa() {
@@ -60,7 +73,7 @@ export default function NovaDespesaPessoal() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={esquema === "dark" ? "light-content" : "dark-content"} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.conteudo} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
@@ -69,7 +82,7 @@ export default function NovaDespesaPessoal() {
             </TouchableOpacity>
             <View style={{ flex: 1 }}>
               <Text style={styles.titulo}>Nova despesa pessoal</Text>
-              <Text style={styles.subtitulo}>Fora dos grupos — só seu controle</Text>
+              <Text style={styles.subtitulo}>Seu controle financeiro pessoal</Text>
             </View>
           </View>
 
@@ -84,32 +97,65 @@ export default function NovaDespesaPessoal() {
 
           <View style={styles.campo}>
             <Text style={styles.label}>Descrição</Text>
-            <TextInput style={styles.input} placeholder="Ex.: Mercado" placeholderTextColor="#8AA69E" value={descricao} onChangeText={setDescricao} autoCapitalize="sentences" />
+            <TextInput
+              style={[
+                styles.input,
+                campoFocado === "descricao" && styles.campoFocado,
+              ]}
+              placeholder="Ex.: Mercado"
+              placeholderTextColor={Cores.placeholder}
+              value={descricao}
+              onChangeText={setDescricao}
+              onFocus={() => setCampoFocado("descricao")}
+              onBlur={() =>
+                setCampoFocado((campo) => campo === "descricao" ? null : campo)
+              }
+              autoCapitalize="sentences"
+            />
           </View>
 
           <View style={styles.campo}>
             <Text style={styles.label}>Valor</Text>
-            <View style={styles.valorContainer}>
+            <View
+              style={[
+                styles.valorContainer,
+                campoFocado === "valor" && styles.campoFocado,
+              ]}
+            >
               <Text style={styles.simbolo}>R$</Text>
-              <TextInput style={styles.inputValor} placeholder="0,00" placeholderTextColor="#8AA69E" value={valor} onChangeText={setValor} keyboardType="decimal-pad" />
+              <TextInput
+                style={styles.inputValor}
+                placeholder="0,00"
+                placeholderTextColor={Cores.placeholder}
+                value={valor}
+                onChangeText={(texto) => setValor(formatCurrencyInput(texto))}
+                onFocus={() => setCampoFocado("valor")}
+                onBlur={() =>
+                  setCampoFocado((campo) => campo === "valor" ? null : campo)
+                }
+                keyboardType="decimal-pad"
+              />
             </View>
           </View>
 
           <View style={styles.campo}>
             <Text style={styles.label}>Data</Text>
-            <TouchableOpacity style={styles.seletorData} onPress={() => setMostrarSeletorData(true)} activeOpacity={0.8}>
+            <TouchableOpacity
+              testID="date-selector"
+              style={styles.seletorData}
+              onPress={abrirCalendario}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={`Data ${data}. Abrir calendário`}
+            >
               <Text style={[styles.textoSeletorData, !data && styles.placeholderSeletorData]}>{data || "Escolher data"}</Text>
-            </TouchableOpacity>
-            {mostrarSeletorData && (
-              <DateTimePicker
-                value={parseDateInputToDate(data) ?? new Date()}
-                mode="date"
-                display="default"
-                locale="pt-BR"
-                maximumDate={new Date()}
-                onChange={selecionarData}
+              <Feather
+                name="calendar"
+                size={16}
+                color={Cores.textoSuave}
+                accessible={false}
               />
-            )}
+            </TouchableOpacity>
           </View>
 
           <View style={styles.campo}>
@@ -117,8 +163,8 @@ export default function NovaDespesaPessoal() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 10 }}>
               {categorias.map((item) => (
                 <TouchableOpacity key={item.nome} style={[styles.categoria, categoria === item.nome && styles.categoriaSelecionada]} onPress={() => setCategoria(item.nome)} activeOpacity={0.8}>
-                  <Text style={{ fontSize: 15, marginRight: 5 }}>{item.icone}</Text>
-                  <Text style={[styles.categoriaTexto, categoria === item.nome && { color: "#0B3B33" }]}>{item.nome}</Text>
+                  <IconeCategoria icone={item.icone} tamanho={15} style={{ marginRight: 5 }} />
+                  <Text style={[styles.categoriaTexto, categoria === item.nome && { color: Cores.texto }]}>{item.nome}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -126,7 +172,7 @@ export default function NovaDespesaPessoal() {
           </View>
 
           <TouchableOpacity style={[styles.botaoSalvar, salvando && { opacity: 0.6 }]} onPress={salvarDespesa} disabled={salvando} activeOpacity={0.85}>
-            {salvando ? <ActivityIndicator color="#0B3B33" /> : <Text style={styles.botaoSalvarTexto}>Salvar despesa</Text>}
+            {salvando ? <ActivityIndicator color={Cores.textoSobrePrincipal} /> : <Text style={styles.botaoSalvarTexto}>Salvar despesa</Text>}
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.botaoCancelar} onPress={() => router.back()} activeOpacity={0.8}>
@@ -134,38 +180,46 @@ export default function NovaDespesaPessoal() {
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
+      {mostrarSeletorData && (
+        <CalendarioData
+          value={data}
+          onClose={() => setMostrarSeletorData(false)}
+          onSelectDate={selecionarData}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5FBF7" },
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: Cores.fundo },
   conteudo: { paddingHorizontal: 20, paddingBottom: 30 },
   header: { flexDirection: "row", alignItems: "center", paddingTop: 12, paddingBottom: 22 },
-  botaoVoltar: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", justifyContent: "center", alignItems: "center", marginRight: 12 },
-  voltar: { fontSize: 32, color: "#0B3B33", marginTop: -3 },
-  titulo: { fontSize: 22, fontWeight: "700", color: "#0B3B33" },
-  subtitulo: { fontSize: 12, color: "#6B8F86", marginTop: 4 },
-  cardIA: { flexDirection: "row", alignItems: "center", backgroundColor: "#E8F9F2", borderWidth: 1, borderColor: "#C9EFE1", borderRadius: 16, padding: 14, marginBottom: 24 },
-  iconeIA: { width: 44, height: 44, borderRadius: 14, backgroundColor: "#FFFFFF", justifyContent: "center", alignItems: "center", marginRight: 12 },
-  iaTitulo: { fontSize: 14, fontWeight: "700", color: "#0B3B33", marginBottom: 3 },
-  iaSubtitulo: { fontSize: 10, color: "#6B8F86", lineHeight: 15 },
-  seta: { fontSize: 25, color: "#00A17A", marginLeft: 8 },
+  botaoVoltar: { width: 42, height: 42, borderRadius: 21, backgroundColor: Cores.cartaoFundo, borderWidth: 1, borderColor: Cores.borda, justifyContent: "center", alignItems: "center", marginRight: 12 },
+  voltar: { fontSize: 32, color: Cores.texto, marginTop: -3 },
+  titulo: { fontSize: 22, fontWeight: "700", color: Cores.texto },
+  subtitulo: { fontSize: 12, color: Cores.textoSuave, marginTop: 4 },
+  cardIA: { flexDirection: "row", alignItems: "center", backgroundColor: Cores.superficieVerde, borderWidth: 1, borderColor: Cores.bordaDestaque, borderRadius: 16, padding: 14, marginBottom: 24 },
+  iconeIA: { width: 44, height: 44, borderRadius: 14, backgroundColor: Cores.cartaoFundo, justifyContent: "center", alignItems: "center", marginRight: 12 },
+  iaTitulo: { fontSize: 14, fontWeight: "700", color: Cores.texto, marginBottom: 3 },
+  iaSubtitulo: { fontSize: 10, color: Cores.textoSuave, lineHeight: 15 },
+  seta: { fontSize: 25, color: Cores.textoPositivo, marginLeft: 8 },
   campo: { marginBottom: 20 },
-  label: { fontSize: 13, fontWeight: "600", color: "#0B3B33", marginBottom: 8 },
-  input: { height: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 13, paddingHorizontal: 15, fontSize: 14, color: "#0B3B33" },
-  seletorData: { height: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 13, paddingHorizontal: 15, justifyContent: "center" },
-  textoSeletorData: { fontSize: 14, color: "#0B3B33" },
-  placeholderSeletorData: { color: "#8AA69E" },
-  valorContainer: { height: 52, flexDirection: "row", alignItems: "center", backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 13, paddingHorizontal: 15 },
-  simbolo: { fontSize: 14, fontWeight: "700", color: "#0B3B33", marginRight: 8 },
-  inputValor: { flex: 1, height: "100%", fontSize: 18, color: "#0B3B33" },
-  categoria: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8" },
-  erroCategorias: { color: "#D64545", fontSize: 12, marginTop: 6 },
-  categoriaSelecionada: { backgroundColor: "#DDF7EE", borderColor: "#00C896" },
-  categoriaTexto: { fontSize: 11, color: "#6B8F86", fontWeight: "600" },
-  botaoSalvar: { height: 54, backgroundColor: "#00C896", borderRadius: 15, justifyContent: "center", alignItems: "center", marginTop: 4 },
-  botaoSalvarTexto: { fontSize: 15, fontWeight: "700", color: "#0B3B33" },
+  label: { fontSize: 13, fontWeight: "600", color: Cores.texto, marginBottom: 8 },
+  input: { height: 52, backgroundColor: Cores.cartaoFundo, borderWidth: 1, borderColor: Cores.borda, borderRadius: 12, paddingHorizontal: 15, fontSize: 14, color: Cores.texto, outlineStyle: "solid", outlineWidth: 0 },
+  campoFocado: { borderWidth: 2, borderColor: Cores.textoPositivo },
+  seletorData: { height: 52, backgroundColor: Cores.cartaoFundo, borderWidth: 1, borderColor: Cores.borda, borderRadius: 12, paddingHorizontal: 15, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  textoSeletorData: { fontSize: 14, color: Cores.texto },
+  placeholderSeletorData: { color: Cores.placeholder },
+  valorContainer: { height: 52, flexDirection: "row", alignItems: "center", backgroundColor: Cores.cartaoFundo, borderWidth: 1, borderColor: Cores.borda, borderRadius: 12, paddingHorizontal: 15 },
+  simbolo: { fontSize: 14, color: Cores.texto, marginRight: 8 },
+  inputValor: { flex: 1, height: "100%", fontSize: 14, color: Cores.texto, borderRadius: 12, outlineStyle: "solid", outlineWidth: 0 },
+  categoria: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, backgroundColor: Cores.cartaoFundo, borderWidth: 1, borderColor: Cores.borda },
+  erroCategorias: { color: Cores.textoNegativo, fontSize: 12, marginTop: 6 },
+  categoriaSelecionada: { backgroundColor: Cores.superficieVerdeSelecionada, borderColor: Cores.principal },
+  categoriaTexto: { fontSize: 11, color: Cores.textoSuave, fontWeight: "600" },
+  botaoSalvar: { height: 54, backgroundColor: Cores.principal, borderRadius: 15, justifyContent: "center", alignItems: "center", marginTop: 4 },
+  botaoSalvarTexto: { fontSize: 15, fontWeight: "700", color: Cores.textoSobrePrincipal },
   botaoCancelar: { height: 48, justifyContent: "center", alignItems: "center", marginTop: 5 },
-  botaoCancelarTexto: { fontSize: 13, fontWeight: "600", color: "#6B8F86" },
+  botaoCancelarTexto: { fontSize: 13, fontWeight: "600", color: Cores.textoSuave },
 });

@@ -1,5 +1,11 @@
 from database.connection import get_connection_context, cursor_for, fetch_one, fetch_all
 
+_CATEGORIA_RESOLVIDA = (
+    "COALESCE("
+    "CONVERT(c.nome USING utf8mb4) COLLATE utf8mb4_unicode_ci, "
+    "CONVERT(d.categoria USING utf8mb4) COLLATE utf8mb4_unicode_ci)"
+)
+
 
 class DespesaModel:
     @staticmethod
@@ -14,17 +20,24 @@ class DespesaModel:
                 )
                 resumo = fetch_one(cursor)
                 cursor.execute(
-                    "SELECT categoria, SUM(valor) AS valor "
-                    "FROM despesas WHERE grupo_id = ? "
-                    "GROUP BY categoria ORDER BY categoria",
+                    f"""
+                    SELECT {_CATEGORIA_RESOLVIDA} AS categoria,
+                           SUM(d.valor) AS valor
+                    FROM despesas d
+                    LEFT JOIN categorias c ON c.id = d.categoria_id
+                    WHERE d.grupo_id = ?
+                    GROUP BY {_CATEGORIA_RESOLVIDA}
+                    ORDER BY {_CATEGORIA_RESOLVIDA}
+                    """,
                     (grupo_id,),
                 )
                 categorias = fetch_all(cursor)
                 cursor.execute(
-                    """
+                    f"""
                     SELECT d.id, d.grupo_id, d.pagador_id, d.criado_por,
                            d.descricao,
-                           d.categoria, d.valor, d.data_despesa,
+                           {_CATEGORIA_RESOLVIDA} AS categoria,
+                           d.categoria_id, d.valor, d.data_despesa,
                            d.vencimento,
                            CAST(d.criado_em AS CHAR) AS criado_em,
                            (SELECT COUNT(*)
@@ -32,6 +45,7 @@ class DespesaModel:
                             WHERE dd.despesa_id = d.id) AS participantes_count,
                            u.nome AS pagador_nome
                     FROM despesas d
+                    LEFT JOIN categorias c ON c.id = d.categoria_id
                     JOIN usuarios u ON u.id = d.pagador_id
                     WHERE d.grupo_id = ?
                     ORDER BY d.data_despesa DESC, d.id DESC
@@ -58,7 +72,9 @@ class DespesaModel:
             cursor = cursor_for(conn)
             try:
                 cursor.execute(
-                    "SELECT d.*, u.nome AS pagador_nome FROM despesas d "
+                    f"SELECT d.*, {_CATEGORIA_RESOLVIDA} AS categoria, "
+                    "u.nome AS pagador_nome FROM despesas d "
+                    "LEFT JOIN categorias c ON c.id = d.categoria_id "
                     "JOIN usuarios u ON u.id = d.pagador_id WHERE d.id = ?",
                     (despesa_id,),
                 )

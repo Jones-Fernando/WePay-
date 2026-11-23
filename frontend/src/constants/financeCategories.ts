@@ -3,6 +3,20 @@ export interface CategoriaOpcao {
   icone: string;
 }
 
+export const ICONES_CATEGORIA = [
+  "🍕", "📌", "🛒", "🚕", "🏠", "🎮", "🎬", "📦", "💡", "📶", "🧹", "🔧",
+  "🏨", "✈️", "⛽", "🅿️", "🎟️", "🏘️", "💊", "📚", "🛍️", "🐾", "🧾",
+  "🍽️", "☕", "🚗", "🚌", "🏥", "💻", "📱", "👕", "⚽", "🏋️", "🎁",
+  "💳", "🏦", "🧳", "🧼", "🐶", "🐱",
+  "🥗", "🥩", "🥛", "🍔", "🍰", "🥤", "🍷", "🚲", "🚆", "🚇",
+  "🛵", "🚚", "🛏️", "🛋️", "🚿", "🧺", "🔌", "🚰",
+  "🦷", "👓", "🩺", "💉", "🎓", "📝", "🧘",
+  "👗", "👟", "💄", "🪙", "💰",
+  "🧰", "🏖️", "⛺", "🎉",
+  "🥐", "🥖", "🥕", "🍜", "🍣", "🍱", "🍿", "🧴", "🧻", "🪥", "🪒",
+  "💅", "💇", "🧖", "💆", "💈", "👶", "🩹", "💼", "🖨️", "💸", "🛡️", "🎵",
+] as const;
+
 export const CATEGORIAS_GRUPO = [
   { nome: "Alimentação", icone: "🛒" },
   { nome: "Transporte", icone: "🚕" },
@@ -30,7 +44,6 @@ export const CATEGORIAS_PESSOAIS = [
   { nome: "Saúde", icone: "💊" },
   { nome: "Educação", icone: "📚" },
   { nome: "Lazer", icone: "🎮" },
-  { nome: "Assinatura", icone: "🎬" },
   { nome: "Assinaturas", icone: "🎬" },
   { nome: "Compras", icone: "🛍️" },
   { nome: "Pets", icone: "🐾" },
@@ -54,17 +67,33 @@ export const CATEGORIAS_RECIBO = CATEGORIAS_PESSOAIS.filter(({ nome }) =>
 
 export function mesclarCategorias(
   padrao: readonly CategoriaOpcao[],
-  personalizadas: readonly string[],
+  personalizadas: readonly (string | CategoriaOpcao)[],
+  iconesPadrao: readonly CategoriaOpcao[] = [],
 ): CategoriaOpcao[] {
-  const nomes = new Set(padrao.map(({ nome }) => nome));
+  const iconesPorNome = new Map(
+    iconesPadrao.map(({ nome, icone }) => [nome, icone]),
+  );
+  const categoriasPadrao = padrao.map((categoria) => ({
+    ...categoria,
+    icone: iconesPorNome.get(categoria.nome) ?? categoria.icone,
+  }));
+  const nomes = new Set(categoriasPadrao.map(({ nome }) => nome));
+  const adicionadas: CategoriaOpcao[] = [];
+
+  for (const personalizada of personalizadas) {
+    const nome =
+      typeof personalizada === "string" ? personalizada : personalizada.nome;
+    if (nomes.has(nome)) continue;
+    nomes.add(nome);
+    adicionadas.push({
+      nome,
+      icone:
+        typeof personalizada === "string" ? "📌" : personalizada.icone || "📌",
+    });
+  }
+
   return [
-    ...padrao,
-    ...personalizadas
-      .filter((nome) => {
-        if (nomes.has(nome)) return false;
-        nomes.add(nome);
-        return true;
-      })
-      .map((nome) => ({ nome, icone: "📌" })),
+    ...categoriasPadrao,
+    ...adicionadas,
   ];
 }

@@ -1,6 +1,3 @@
-import hashlib
-import hmac
-
 import bcrypt
 
 MIN_PASSWORD_LENGTH = 12
@@ -20,6 +17,10 @@ def validar_senha(password: object) -> str | None:
         return "Senha deve ser texto."
     if len(password) < MIN_PASSWORD_LENGTH:
         return f"Senha deve ter ao menos {MIN_PASSWORD_LENGTH} caracteres."
+    if not any(character.isalpha() and character.isascii() for character in password):
+        return "Senha deve conter pelo menos uma letra."
+    if not any(character.isdigit() and character.isascii() for character in password):
+        return "Senha deve conter pelo menos um numero."
     try:
         tamanho_bytes = len(password.encode("utf-8"))
     except UnicodeEncodeError:
@@ -45,7 +46,5 @@ def check_password(password: str, hashed_password: str) -> bool:
             password.encode("utf-8"),
             hashed_password.encode("utf-8"),
         )
-    except (ValueError, TypeError):
-        # Compatibilidade com hashes SHA-256 antigos do projeto.
-        legacy_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
-        return hmac.compare_digest(legacy_hash, str(hashed_password))
+    except (ValueError, TypeError, UnicodeEncodeError):
+        return False

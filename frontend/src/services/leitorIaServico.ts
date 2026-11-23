@@ -47,7 +47,7 @@ export async function lerReciboComIa(imagem: {
       xhr.onerror = () =>
         reject(new Error("Não foi possível conectar ao servidor."));
       xhr.ontimeout = () => reject(new Error("Tempo de conexão esgotado."));
-      xhr.timeout = 120000;
+      xhr.timeout = 60000;
 
       const corpo = new FormData();
       corpo.append(

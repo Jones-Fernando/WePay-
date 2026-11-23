@@ -1,3 +1,5 @@
+import { useAppTheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 /*
  * WEPAY — ESQUECI A SENHA
  * Migrado do projeto de referência para o grupo (auth).
@@ -14,15 +16,19 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   ActivityIndicator,
 } from "react-native";
 import { router } from "expo-router";
 import { authApi } from "@/services/api";
+import { Alert } from "@/services/feedback";
+import { useFieldFocus } from "@/hooks/useFieldFocus";
 
 export default function EsqueciSenha() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
   const [email, setEmail] = useState("");
   const [carregando, setCarregando] = useState(false);
+  const { focusedField, focusHandlers } = useFieldFocus();
 
   async function enviarRecuperacao() {
     const emailLimpo = email.trim();
@@ -96,9 +102,12 @@ export default function EsqueciSenha() {
             <Text style={styles.label}>E-mail</Text>
 
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                focusedField === "email" && styles.focusedField,
+              ]}
               placeholder="Digite seu e-mail"
-              placeholderTextColor="#6B8F86"
+              placeholderTextColor={Cores.textoSuave}
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
@@ -107,6 +116,7 @@ export default function EsqueciSenha() {
               autoComplete="email"
               textContentType="emailAddress"
               returnKeyType="send"
+              {...focusHandlers("email")}
               onSubmitEditing={enviarRecuperacao}
             />
 
@@ -118,7 +128,7 @@ export default function EsqueciSenha() {
               disabled={carregando}
             >
               {carregando ? (
-                <ActivityIndicator color="#0B3B33" />
+                <ActivityIndicator color={Cores.texto} />
               ) : (
                 <Text style={styles.primaryButtonText}>Enviar instruções</Text>
               )}
@@ -151,10 +161,10 @@ export default function EsqueciSenha() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F5FBF7",
+    backgroundColor: Cores.fundo,
   },
 
   keyboard: {
@@ -181,14 +191,14 @@ const styles = StyleSheet.create({
   },
 
   backIcon: {
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 32,
     lineHeight: 32,
     marginRight: 6,
   },
 
   backText: {
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 14,
     fontWeight: "600",
   },
@@ -201,11 +211,11 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 16,
-    backgroundColor: "#00C896",
+    backgroundColor: Cores.principal,
     justifyContent: "center",
     alignItems: "center",
 
-    shadowColor: "#0B3B33",
+    shadowColor: Cores.sombra,
     shadowOpacity: 0.12,
     shadowRadius: 8,
     shadowOffset: {
@@ -217,7 +227,7 @@ const styles = StyleSheet.create({
   },
 
   logoText: {
-    color: "#0B3B33",
+    color: Cores.textoSobrePrincipal,
     fontSize: 30,
     fontWeight: "700",
   },
@@ -227,7 +237,7 @@ const styles = StyleSheet.create({
   ========================= */
 
   title: {
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 25,
     fontWeight: "600",
     marginTop: 22,
@@ -235,7 +245,7 @@ const styles = StyleSheet.create({
   },
 
   subtitle: {
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     fontSize: 14,
     lineHeight: 21,
     marginTop: 9,
@@ -253,7 +263,7 @@ const styles = StyleSheet.create({
   },
 
   label: {
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 13,
     fontWeight: "600",
     marginBottom: 8,
@@ -261,13 +271,19 @@ const styles = StyleSheet.create({
 
   input: {
     height: 52,
-    backgroundColor: "#F0F8F4",
+    backgroundColor: Cores.fundoCampo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
     borderRadius: 12,
     paddingHorizontal: 15,
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 14,
+    outlineStyle: "solid",
+    outlineWidth: 0,
+  },
+  focusedField: {
+    borderWidth: 2,
+    borderColor: Cores.textoPositivo,
   },
 
   /* =========================
@@ -276,7 +292,7 @@ const styles = StyleSheet.create({
 
   primaryButton: {
     height: 52,
-    backgroundColor: "#00C896",
+    backgroundColor: Cores.principal,
     borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
@@ -284,7 +300,7 @@ const styles = StyleSheet.create({
   },
 
   primaryButtonText: {
-    color: "#0B3B33",
+    color: Cores.textoSobrePrincipal,
     fontSize: 15,
     fontWeight: "700",
   },
@@ -297,9 +313,9 @@ const styles = StyleSheet.create({
     width: "100%",
     flexDirection: "row",
     alignItems: "flex-start",
-    backgroundColor: "#F0F8F4",
+    backgroundColor: Cores.fundoCampo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
     borderRadius: 12,
     padding: 14,
     marginTop: 24,
@@ -309,8 +325,8 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: "#00C896",
-    color: "#0B3B33",
+    backgroundColor: Cores.principal,
+    color: Cores.textoSobrePrincipal,
     textAlign: "center",
     lineHeight: 20,
     fontSize: 12,
@@ -320,7 +336,7 @@ const styles = StyleSheet.create({
 
   infoText: {
     flex: 1,
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     fontSize: 12,
     lineHeight: 18,
   },
@@ -335,7 +351,7 @@ const styles = StyleSheet.create({
   },
 
   loginText: {
-    color: "#00A17A",
+    color: Cores.textoPositivo,
     fontSize: 13,
     fontWeight: "700",
   },

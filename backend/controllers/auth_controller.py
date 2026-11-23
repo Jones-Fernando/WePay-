@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+import base64
+import binascii
 import secrets
 
 import jwt
@@ -18,6 +20,9 @@ from database.connection import (
     fetch_one,
     get_connection_context,
 )
+
+MAX_AVATAR_BYTES = 1_500_000
+_PIX_KEY_NOT_PROVIDED = object()
 
 
 def _json_object():
@@ -88,11 +93,15 @@ class AuthController:
         if erro_senha:
             return ResponseUtils.erro(erro_senha)
 
-        usuario_id, erro = AuthService.registrar_usuario(nome, email, senha)
+        _, erro = AuthService.registrar_usuario(nome, email, senha)
         if erro:
-            return ResponseUtils.erro(erro, status=409)
+            return ResponseUtils.erro(erro)
         return ResponseUtils.sucesso(
-            mensagem="Conta criada com sucesso. Você já pode entrar.",
+            mensagem=(
+                "Cadastro solicitado. Se esse endereço já tiver uma conta, "
+                "entre ou use Esqueci minha senha; caso contrário, sua conta "
+                "está pronta para login."
+            ),
             status=201,
         )
 
@@ -317,10 +326,20 @@ class AuthController:
         nome_value = data.get("nome")
         email_value = data.get("email")
         telefone_value = data.get("telefone")
+        pix_chave = data.get("pix_chave", _PIX_KEY_NOT_PROVIDED)
         if not isinstance(nome_value, str) or not isinstance(email_value, str):
             return ResponseUtils.erro("Nome e email sao obrigatorios.")
         if telefone_value is not None and not isinstance(telefone_value, str):
             return ResponseUtils.erro("Telefone deve ser um texto.")
+        if pix_chave is not _PIX_KEY_NOT_PROVIDED:
+            if pix_chave is not None and not isinstance(pix_chave, str):
+                return ResponseUtils.erro("A chave Pix deve ser um texto.")
+            if isinstance(pix_chave, str):
+                pix_chave = pix_chave.strip() or None
+                if pix_chave and len(pix_chave) > 77:
+                    return ResponseUtils.erro(
+                        "A chave Pix deve ter no máximo 77 caracteres."
+                    )
         nome = nome_value.strip()
         email = email_value.strip().lower()
         telefone = telefone_value.strip() or None if telefone_value else None
@@ -334,8 +353,63 @@ class AuthController:
         if usuario_existente and int(usuario_existente["id"]) != int(current_user_id):
             return ResponseUtils.erro("Email ja cadastrado por outro usuario.", status=409)
 
-        UsuarioModel.atualizar(current_user_id, nome, email, telefone)
+        if pix_chave is _PIX_KEY_NOT_PROVIDED:
+            UsuarioModel.atualizar(current_user_id, nome, email, telefone)
+        else:
+            UsuarioModel.atualizar(
+                current_user_id,
+                nome,
+                email,
+                telefone,
+                pix_chave=pix_chave,
+            )
         return ResponseUtils.sucesso(mensagem="Perfil atualizado com sucesso.")
+
+    @staticmethod
+    def atualizar_avatar(current_user_id):
+        data = _json_object()
+        if data is None:
+            return ResponseUtils.erro("Envie uma imagem válida.")
+
+        imagem_base64 = data.get("imagem_base64")
+        max_base64_length = ((MAX_AVATAR_BYTES + 2) // 3) * 4
+        if not isinstance(imagem_base64, str) or not imagem_base64:
+            return ResponseUtils.erro("Selecione uma foto de perfil.")
+        if len(imagem_base64) > max_base64_length:
+            return ResponseUtils.erro(
+                "A foto deve ter no máximo 1,5 MB.", status=413
+            )
+
+        try:
+            imagem = base64.b64decode(imagem_base64, validate=True)
+        except (binascii.Error, ValueError):
+            return ResponseUtils.erro("O arquivo de imagem é inválido.")
+
+        if len(imagem) > MAX_AVATAR_BYTES:
+            return ResponseUtils.erro(
+                "A foto deve ter no máximo 1,5 MB.", status=413
+            )
+
+        if imagem.startswith(b"\xff\xd8\xff"):
+            tipo_mime = "image/jpeg"
+        elif imagem.startswith(b"\x89PNG\r\n\x1a\n"):
+            tipo_mime = "image/png"
+        elif imagem.startswith(b"RIFF") and imagem[8:12] == b"WEBP":
+            tipo_mime = "image/webp"
+        else:
+            return ResponseUtils.erro(
+                "Use uma imagem JPEG, PNG ou WEBP.", status=415
+            )
+
+        foto_data = base64.b64encode(imagem).decode("ascii")
+        avatar_url = f"data:{tipo_mime};base64,{foto_data}"
+        if not UsuarioModel.atualizar_avatar(current_user_id, avatar_url):
+            return ResponseUtils.erro("Usuário não encontrado.", status=404)
+
+        return ResponseUtils.sucesso(
+            dados={"avatar_url": avatar_url},
+            mensagem="Foto de perfil atualizada com sucesso.",
+        )
 
     @staticmethod
     def alterar_senha(current_user_id):
@@ -413,18 +487,23 @@ class AuthController:
                             mensagem="Se o e-mail estiver cadastrado, voce recebera as instrucoes."
                         )
                     cursor.execute(
-                        "UPDATE recuperacao_tokens SET usado_em = CURRENT_TIMESTAMP "
-                        "WHERE usuario_id = ? AND usado_em IS NULL",
-                        (usuario["id"],),
-                    )
-                    cursor.execute(
                         "INSERT INTO recuperacao_tokens (usuario_id, token_hash, expires_at) VALUES (?, ?, ?)",
                         (usuario["id"], token_hash(token), expira_em.replace(tzinfo=None)),
                     )
+                    recuperacao_token_id = cursor.lastrowid
+                    EmailService.agendar_recuperacao_senha(
+                        usuario["id"],
+                        recuperacao_token_id,
+                        email,
+                        token,
+                        conn,
+                    )
                     conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
                 finally:
                     cursor.close()
-            EmailService.enviar_recuperacao_senha(email, token)
             dados = {"token_teste": token} if Config.ENVIRONMENT == "testing" else None
             return ResponseUtils.sucesso(
                 dados=dados,
@@ -522,6 +601,23 @@ class AuthController:
                     return ResponseUtils.erro("Senha atual invalida.", status=401)
 
                 cursor.execute(
+                    """
+                    SELECT 1
+                    FROM saldos
+                    WHERE usuario_id = ?
+                      AND saldo < 0
+                    LIMIT 1
+                    """,
+                    (current_user_id,),
+                )
+                saldo_devedor = fetch_one(cursor)
+                if saldo_devedor:
+                    return ResponseUtils.erro(
+                        "Não é possível excluir sua conta enquanto houver saldo em dívida.",
+                        status=409,
+                    )
+
+                cursor.execute(
                     "SELECT id FROM grupos WHERE criado_por = ? FOR UPDATE",
                     (current_user_id,),
                 )
@@ -583,7 +679,7 @@ class AuthController:
                 )
                 for query in (
                     "DELETE FROM despesas_pessoais WHERE usuario_id = ?",
-                    "DELETE FROM categorias WHERE usuario_id = ?",
+                    "DELETE FROM gemini_usage_diaria WHERE usuario_id = ?",
                     "DELETE FROM notificacoes WHERE usuario_id = ?",
                     "DELETE FROM expo_push_tokens WHERE usuario_id = ?",
                     "DELETE FROM refresh_tokens WHERE usuario_id = ?",
@@ -593,6 +689,21 @@ class AuthController:
                         query,
                         (current_user_id,),
                     )
+
+                cursor.execute(
+                    """
+                    UPDATE despesas
+                    SET categoria_id = NULL
+                    WHERE categoria_id IN (
+                        SELECT id FROM categorias WHERE usuario_id = ?
+                    )
+                    """,
+                    (current_user_id,),
+                )
+                cursor.execute(
+                    "DELETE FROM categorias WHERE usuario_id = ?",
+                    (current_user_id,),
+                )
 
                 cursor.execute(
                     "SELECT grupo_id FROM participantes "
