@@ -31,6 +31,12 @@ class CoverageMetrics(TypedDict):
     summary: CoverageSummary
 
 
+def normalize_coverage_paths(
+    files: Mapping[str, CoverageMetrics],
+) -> dict[str, CoverageMetrics]:
+    return {path.replace("\\", "/"): metrics for path, metrics in files.items()}
+
+
 def coverage_for_packages(
     files: Mapping[str, CoverageMetrics], packages: Sequence[str]
 ) -> tuple[int, int, set[str]]:
@@ -56,7 +62,7 @@ def main() -> None:
     with report_path.open(encoding="utf-8") as report_file:
         report = json.load(report_file)
 
-    files = report.get("files", {})
+    files = normalize_coverage_paths(report.get("files", {}))
     failures = []
     covered, statements, found_packages = coverage_for_packages(
         files, GATED_COVERAGE_PACKAGES

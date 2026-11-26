@@ -3,6 +3,7 @@ from flask import current_app, request
 
 from models.grupo_model import GrupoModel
 from models.participante_model import ParticipanteModel
+from services.financeiro_pagamento_service import IdempotencyConflictError
 from services.financeiro_service import FinanceiroService
 from utils.response_utils import ResponseUtils
 from utils.validators import (
@@ -19,6 +20,19 @@ class PagamentoController:
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
             return ResponseUtils.erro("Corpo da requisicao invalido.")
+        idempotency_key = request.headers.get("Idempotency-Key")
+        if idempotency_key is not None:
+            idempotency_key = idempotency_key.strip()
+            if (
+                not idempotency_key
+                or len(idempotency_key) > 64
+                or not idempotency_key.isascii()
+                or not all(
+                    character.isalnum() or character in "-._:"
+                    for character in idempotency_key
+                )
+            ):
+                return ResponseUtils.erro("Chave de idempotencia invalida.")
         try:
             grupo_id = parse_positive_int(data.get("grupo_id"), "grupo_id")
             recebedor_id = parse_positive_int(
@@ -61,7 +75,10 @@ class PagamentoController:
                 data_pagamento=data_pagamento,
                 metodo=metodo,
                 observacao=observacao,
+                idempotency_key=idempotency_key,
             )
+        except IdempotencyConflictError as exc:
+            return ResponseUtils.erro(str(exc), status=409)
         except ValueError as exc:
             return ResponseUtils.erro(str(exc), status=400)
         except Exception:

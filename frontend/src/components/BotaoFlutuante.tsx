@@ -6,17 +6,19 @@
 
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
-import { Cores } from '../constants/Cores';
+import { useAppTheme } from '@/hooks/useAppTheme';
 
 interface BotaoFlutuanteProps {
   onPress: () => void;
 }
 
 export const BotaoFlutuante: React.FC<BotaoFlutuanteProps> = ({ onPress }) => {
+  const cores = useAppTheme();
+  const estilos = criarEstilos(cores);
   return (
-    <TouchableOpacity
-      style={estilos.botao}
-      onPress={onPress}
+    <TouchableOpacity 
+      style={estilos.botao} 
+      onPress={onPress} 
       activeOpacity={0.85}
     >
       <Text style={estilos.icone}>+</Text>
@@ -24,7 +26,7 @@ export const BotaoFlutuante: React.FC<BotaoFlutuanteProps> = ({ onPress }) => {
   );
 };
 
-const estilos = StyleSheet.create({
+const criarEstilos = (cores: ReturnType<typeof useAppTheme>) => StyleSheet.create({
   botao: {
     position: 'absolute',
     bottom: 24,
@@ -32,11 +34,11 @@ const estilos = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: Cores.tinta,
+    backgroundColor: cores.tinta,
     justifyContent: 'center',
     alignItems: 'center',
     // Sombra destacada
-    shadowColor: Cores.tinta,
+    shadowColor: cores.tinta,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 6,
@@ -44,7 +46,7 @@ const estilos = StyleSheet.create({
   },
   icone: {
     fontSize: 32,
-    color: Cores.destaque,
+    color: cores.destaque,
     fontWeight: '300',
     marginTop: -2,
   },

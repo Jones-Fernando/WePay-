@@ -4,6 +4,7 @@ import logging
 from time import perf_counter
 from datetime import datetime
 
+import httpx
 from google import genai
 from google.genai import types
 
@@ -11,6 +12,7 @@ from config import Config
 from models.gemini_usage_model import GeminiUsageModel
 
 _LOGGER = logging.getLogger(__name__)
+ERROS_TEMPORARIOS_GEMINI = {429, 503, 504}
 
 
 class GeminiReceiptError(Exception):
@@ -39,6 +41,20 @@ CATEGORIAS = {
     "Pedágios e estacionamento",
     "Passeios e ingressos",
 }
+
+
+def _mensagem_erro_provedor(erro: Exception, api_key: str) -> str:
+    mensagem = str(erro)
+    if api_key:
+        mensagem = mensagem.replace(api_key, "[REDACTED]")
+    return mensagem[:500]
+
+
+def _erro_provedor_temporario(erro: Exception) -> bool:
+    return (
+        getattr(erro, "code", None) in ERROS_TEMPORARIOS_GEMINI
+        or isinstance(erro, httpx.TimeoutException)
+    )
 
 
 def normalizar_recibo(dados: dict) -> dict:
@@ -80,6 +96,7 @@ def ler_recibo(
 ) -> dict:
     api_key = Config.GEMINI_API_KEY
     model = Config.GEMINI_MODEL
+    fallback_model = Config.GEMINI_FALLBACK_MODEL
 
     if not api_key:
         raise GeminiUnavailableError(
@@ -88,6 +105,7 @@ def ler_recibo(
 
     inicio = perf_counter()
     resultado = "falha"
+    modelo_usado = model
     if usuario_id is not None:
         GeminiUsageModel.registrar_solicitacao(
             usuario_id,
@@ -131,24 +149,80 @@ def ler_recibo(
     """
 
     try:
-        client = genai.Client(api_key=api_key)
-
-        resposta = client.models.generate_content(
-            model=model,
-            contents=[
-                types.Part.from_bytes(
-                    data=imagem,
-                    mime_type=mime_type,
-                ),
-                prompt,
-            ],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0,
-            ),
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=25000),
         )
 
+        modelos = dict.fromkeys((model, fallback_model))
+        for modelo_tentativa in modelos:
+            try:
+                resposta = client.models.generate_content(
+                    model=modelo_tentativa,
+                    contents=[
+                        types.Part.from_bytes(
+                            data=imagem,
+                            mime_type=mime_type,
+                        ),
+                        prompt,
+                    ],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0,
+                    ),
+                )
+                modelo_usado = modelo_tentativa
+                break
+            except Exception as erro:
+                codigo_provedor = getattr(erro, "code", None)
+                detalhes_erro = {
+                    "model": modelo_tentativa,
+                    "provider_code": codigo_provedor,
+                    "provider_error_type": type(erro).__name__,
+                    "provider_error": _mensagem_erro_provedor(erro, api_key),
+                }
+                if (
+                    not _erro_provedor_temporario(erro)
+                    or modelo_tentativa == fallback_model
+                ):
+                    _LOGGER.error(
+                        (
+                            "Falha na chamada ao modelo Gemini "
+                            "(modelo=%s, código=%s, tipo=%s, erro=%s)."
+                        ),
+                        modelo_tentativa,
+                        codigo_provedor,
+                        type(erro).__name__,
+                        detalhes_erro["provider_error"],
+                        extra={
+                            **detalhes_erro,
+                            "fallback_attempt": (
+                                modelo_tentativa == fallback_model
+                                and model != fallback_model
+                            ),
+                        },
+                    )
+                    raise
+                _LOGGER.warning(
+                    (
+                        "Modelo Gemini indisponível; tentando contingência "
+                        "(modelo=%s, código=%s, tipo=%s, erro=%s)."
+                    ),
+                    modelo_tentativa,
+                    codigo_provedor,
+                    type(erro).__name__,
+                    detalhes_erro["provider_error"],
+                    extra={
+                        "fallback_model": fallback_model,
+                        **detalhes_erro,
+                    },
+                )
+
         if not resposta.text:
+            _LOGGER.warning(
+                "Gemini retornou uma resposta vazia.",
+                extra={"model": modelo_usado},
+            )
             raise GeminiReceiptError(
                 "A IA não retornou dados para o recibo."
             )
@@ -167,10 +241,19 @@ def ler_recibo(
     except GeminiReceiptError:
         raise
     except json.JSONDecodeError as erro:
+        _LOGGER.warning(
+            "Gemini retornou conteúdo que não pôde ser interpretado como JSON.",
+            extra={"line": erro.lineno, "column": erro.colno},
+        )
         raise GeminiReceiptError(
             "Não foi possível interpretar os dados do recibo."
         ) from erro
     except Exception as erro:
+        if _erro_provedor_temporario(erro):
+            raise GeminiUnavailableError(
+                "O serviço de leitura está temporariamente ocupado. "
+                "Tente novamente em alguns minutos."
+            ) from erro
         raise GeminiReceiptError(
             "Não foi possível processar o recibo. Tente novamente."
         ) from erro
@@ -179,7 +262,7 @@ def ler_recibo(
             "Uso Gemini para leitura de recibo.",
             extra={
                 "event": "gemini_receipt_usage",
-                "model": model,
+                "model": modelo_usado,
                 "outcome": resultado,
                 "image_bytes": len(imagem),
                 "duration_ms": round((perf_counter() - inicio) * 1000),

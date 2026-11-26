@@ -1,3 +1,5 @@
+import { useAppTheme, useAppThemeScheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 
 /**
  * WEPAY — NOVA DESPESA EM GRUPO
@@ -18,25 +20,24 @@ import {
   StyleSheet,
   ScrollView,
   StatusBar,
-  Alert,
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { IconeCategoria } from "@/components/IconeCategoria";
+import CalendarioData from "@/components/CalendarioData";
 import { despesasGrupoApi, participantesApi } from "@/services/api";
+import { Alert } from "@/services/feedback";
 import {
-  formatDateForInput,
+  formatCurrencyInput,
   normalizeDateInput,
   parseCurrencyInput,
-  parseDateInputToDate,
   parseDateInputToIso,
 } from "@/utils/financeInput";
 import { formatCurrencyBRL } from "@/utils/financeFormat";
 import { CATEGORIAS_GRUPO as CATEGORIAS } from "@/constants/financeCategories";
 import { useCategoriasFinanceiras } from "@/hooks/useCategoriasFinanceiras";
-
-type TipoDivisao = "IGUAL" | "VALOR" | "PERCENTUAL";
 
 type Participante = {
   id: string;
@@ -55,6 +56,9 @@ function obterParametro(
 }
 
 export default function NovaDespesaGrupo() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
+  const esquema = useAppThemeScheme();
   const params = useLocalSearchParams();
   const { categorias, erro: erroCategorias } = useCategoriasFinanceiras("grupo", CATEGORIAS);
 
@@ -68,7 +72,7 @@ export default function NovaDespesaGrupo() {
   );
 
   const [valor, setValor] = useState(() =>
-    obterParametro(params.valor)
+    formatCurrencyInput(obterParametro(params.valor))
   );
 
   const [data, setData] = useState(() =>
@@ -94,47 +98,18 @@ export default function NovaDespesaGrupo() {
   const [participantesSelecionados, setParticipantesSelecionados] =
     useState<string[]>([]);
 
-  const [tipoDivisao, setTipoDivisao] =
-    useState<TipoDivisao>("IGUAL");
-
-  const [valoresIndividuais, setValoresIndividuais] =
-    useState<Record<string, string>>({});
-
-  const [percentuaisIndividuais, setPercentuaisIndividuais] =
-    useState<Record<string, string>>({});
+  const tipoDivisao = "IGUAL" as const;
   const [salvando, setSalvando] = useState(false);
   const [mostrarSeletorData, setMostrarSeletorData] = useState(false);
+  const [campoFocado, setCampoFocado] = useState<string | null>(null);
 
   const descricaoLimpa = descricao.trim();
   const valorNumerico = parseCurrencyInput(valor);
   const dataLimpa = data.trim();
-  const dataValida = !!dataLimpa && !!parseDateInputToIso(dataLimpa);
-  const erroDescricao =
-    descricao === ""
-      ? "Digite a descrição da despesa."
-      : descricaoLimpa.length < 2
-        ? "A descrição deve ter pelo menos 2 caracteres."
-        : "";
-  const erroValor =
-    valor === ""
-      ? "Digite um valor válido para a despesa."
-      : !Number.isFinite(valorNumerico) || valorNumerico <= 0
-        ? "Digite um valor maior que zero."
-        : "";
-  const erroData =
-    data === ""
-      ? "Informe a data da despesa."
-      : !dataValida
-        ? "Informe uma data válida no formato DD/MM/AAAA."
-        : "";
-  const erroParticipantes =
-    participantesSelecionados.length === 0
-      ? "Selecione pelo menos um participante para dividir a despesa."
-      : "";
 
-  function selecionarData(_evento: DateTimePickerEvent, dataSelecionada?: Date) {
+  function selecionarData(dataSelecionada: string) {
+    setData(dataSelecionada);
     setMostrarSeletorData(false);
-    if (dataSelecionada) setData(formatDateForInput(dataSelecionada));
   }
 
   useEffect(() => {
@@ -182,131 +157,15 @@ export default function NovaDespesaGrupo() {
     });
   }
 
-  function distribuirIgualmente(
-    valorTotal: number,
-    quantidade: number
-  ): number[] {
-    if (quantidade <= 0) {
-      return [];
-    }
-
-    const totalCentavos = Math.round(valorTotal * 100);
-    const valorBase = Math.floor(totalCentavos / quantidade);
-    const resto = totalCentavos % quantidade;
-
-    return Array.from(
-      { length: quantidade },
-      (_, indice) =>
-        (valorBase + (indice < resto ? 1 : 0)) / 100
-    );
-  }
-
-  function distribuirPorPercentual(
-    valorTotal: number,
-    percentuais: number[]
-  ): number[] {
-    const totalCentavos = Math.round(valorTotal * 100);
-    const parcelas = percentuais.map((percentual) => {
-      const valorExato = (totalCentavos * percentual) / 100;
-      const centavos = Math.floor(valorExato);
-
-      return {
-        centavos,
-        fracao: valorExato - centavos,
-      };
-    });
-
-    let centavosRestantes = totalCentavos - parcelas.reduce(
-      (total, parcela) => total + parcela.centavos,
-      0
-    );
-
-    const indicesPorFracao = parcelas
-      .map((parcela, indice) => ({ indice, fracao: parcela.fracao }))
-      .sort((a, b) => b.fracao - a.fracao);
-
-    for (let indice = 0; centavosRestantes > 0; indice += 1) {
-      parcelas[indicesPorFracao[indice % parcelas.length].indice].centavos += 1;
-      centavosRestantes -= 1;
-    }
-
-    return parcelas.map((parcela) => parcela.centavos / 100);
-  }
-
   function validarDivisao(valorNumerico: number): boolean {
     if (participantesSelecionados.length === 0) {
       Alert.alert(
         "Atenção",
         "Selecione pelo menos um participante para dividir a despesa."
       );
-
       return false;
     }
-
-    if (tipoDivisao === "VALOR") {
-      const valores = participantesSelecionados.map((id) =>
-        parseCurrencyInput(valoresIndividuais[id] ?? "")
-      );
-
-      if (valores.some((item) => !Number.isFinite(item) || item < 0)) {
-        Alert.alert(
-          "Valores inválidos",
-          "Informe um valor válido para cada participante."
-        );
-
-        return false;
-      }
-
-      const somaCentavos = valores.reduce(
-        (soma, item) => soma + Math.round(item * 100),
-        0
-      );
-
-      if (somaCentavos !== Math.round(valorNumerico * 100)) {
-        Alert.alert(
-          "Divisão não confere",
-          "A soma dos valores individuais deve ser igual ao valor total da despesa."
-        );
-
-        return false;
-      }
-    }
-
-    if (tipoDivisao === "PERCENTUAL") {
-      const percentuais = participantesSelecionados.map((id) =>
-        Number(
-          (percentuaisIndividuais[id] ?? "").replace(",", ".")
-        )
-      );
-
-      if (
-        percentuais.some(
-          (item) => !Number.isFinite(item) || item < 0 || item > 100
-        )
-      ) {
-        Alert.alert(
-          "Percentuais inválidos",
-          "Informe percentuais entre 0 e 100 para cada participante."
-        );
-
-        return false;
-      }
-
-      const soma = percentuais.reduce(
-        (total, item) => total + item,
-        0
-      );
-
-      if (Math.abs(soma - 100) > 0.01) {
-        Alert.alert(
-          "Divisão não confere",
-          "A soma dos percentuais de todos os participantes precisa ser 100%."
-        );
-
-        return false;
-      }
-    }
-
+    void valorNumerico;
     return true;
   }
 
@@ -360,58 +219,7 @@ export default function NovaDespesaGrupo() {
       return;
     }
 
-    let divisaoCalculada: {
-      participanteId: string;
-      valor: number;
-    }[] = [];
-
-    if (tipoDivisao === "IGUAL") {
-      const valoresDivididos = distribuirIgualmente(
-        valorNumerico,
-        participantesSelecionados.length
-      );
-
-      divisaoCalculada = participantesSelecionados.map(
-        (participanteId, indice) => ({
-          participanteId,
-          valor: valoresDivididos[indice],
-        })
-      );
-    }
-
-    if (tipoDivisao === "VALOR") {
-      divisaoCalculada = participantesSelecionados.map(
-        (participanteId) => ({
-          participanteId,
-          valor: parseCurrencyInput(
-            valoresIndividuais[participanteId] ?? ""
-          ),
-        })
-      );
-    }
-
-    if (tipoDivisao === "PERCENTUAL") {
-      const percentuais = participantesSelecionados.map((participanteId) =>
-        Number(
-          (percentuaisIndividuais[participanteId] ?? "0").replace(",", ".")
-        )
-      );
-      const valoresDivididos = distribuirPorPercentual(
-        valorNumerico,
-        percentuais
-      );
-
-      divisaoCalculada = participantesSelecionados.map(
-        (participanteId, indice) => ({
-          participanteId,
-          valor: valoresDivididos[indice],
-        })
-      );
-    }
-
-    const tipoApi = tipoDivisao === "IGUAL" ? "igual" : tipoDivisao === "VALOR" ? "valores" : "porcentagem";
-    const valores = Object.fromEntries(divisaoCalculada.map((item) => [item.participanteId, item.valor]));
-    const percentuais = Object.fromEntries(participantesSelecionados.map((id) => [id, Number((percentuaisIndividuais[id] ?? "0").replace(",", "."))]));
+    const tipoApi = "igual";
     setSalvando(true);
     try {
       await despesasGrupoApi.criar({
@@ -419,8 +227,6 @@ export default function NovaDespesaGrupo() {
         data_despesa: dataIso, categoria, observacao: observacao.trim(),
         pagador_id: Number(pagadorId),
         participantes: participantesSelecionados.map(Number), divisao_tipo: tipoApi,
-        ...(tipoApi === "valores" ? { valores } : {}),
-        ...(tipoApi === "porcentagem" ? { percentuais } : {}),
       });
       Alert.alert("Despesa registrada", "A despesa foi dividida e os saldos foram recalculados.", [
         { text: "OK", onPress: () => router.replace({ pathname: "/(main)/group/despesas-grupo", params: { groupId, grupoNome: nomeGrupo } }) },
@@ -441,7 +247,7 @@ export default function NovaDespesaGrupo() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={esquema === "dark" ? "light-content" : "dark-content"} />
 
       <KeyboardAvoidingView
         style={styles.flex}
@@ -505,35 +311,49 @@ export default function NovaDespesaGrupo() {
             <Text style={styles.label}>Descrição</Text>
 
             <TextInput
-              style={[styles.input, erroDescricao ? styles.inputErro : null]}
+              style={[
+                styles.input,
+                campoFocado === "descricao" && styles.campoFocado,
+              ]}
               placeholder="Ex.: Mercado, jantar, hospedagem"
-              placeholderTextColor="#8AA69E"
+              placeholderTextColor={Cores.placeholder}
               value={descricao}
               onChangeText={setDescricao}
+              onFocus={() => setCampoFocado("descricao")}
+              onBlur={() =>
+                setCampoFocado((campo) => campo === "descricao" ? null : campo)
+              }
               autoCapitalize="sentences"
               maxLength={120}
             />
-            {erroDescricao ? <Text style={styles.erroTexto}>{erroDescricao}</Text> : null}
           </View>
 
-          {/* VALOR */}
+          {/* VALOR TOTAL */}
 
           <View style={styles.campo}>
             <Text style={styles.label}>Valor total</Text>
 
-            <View style={styles.valorContainer}>
+            <View
+              style={[
+                styles.valorContainer,
+                campoFocado === "valor" && styles.campoFocado,
+              ]}
+            >
               <Text style={styles.simbolo}>R$</Text>
 
               <TextInput
-                style={[styles.inputValor, erroValor ? styles.inputErro : null]}
+                style={styles.inputValor}
                 placeholder="0,00"
-                placeholderTextColor="#8AA69E"
+                placeholderTextColor={Cores.placeholder}
                 value={valor}
-                onChangeText={setValor}
+                onChangeText={(texto) => setValor(formatCurrencyInput(texto))}
+                onFocus={() => setCampoFocado("valor")}
+                onBlur={() =>
+                  setCampoFocado((campo) => campo === "valor" ? null : campo)
+                }
                 keyboardType="decimal-pad"
               />
             </View>
-            {erroValor ? <Text style={styles.erroTexto}>{erroValor}</Text> : null}
 
             {tipoDivisao === "IGUAL" &&
               valorNumerico > 0 &&
@@ -549,20 +369,22 @@ export default function NovaDespesaGrupo() {
 
           <View style={styles.campo}>
             <Text style={styles.label}>Data</Text>
-            <TouchableOpacity style={[styles.seletorData, erroData ? styles.inputErro : null]} onPress={() => setMostrarSeletorData(true)} activeOpacity={0.8}>
+            <TouchableOpacity
+              testID="group-date-selector"
+              style={styles.seletorData}
+              onPress={() => setMostrarSeletorData(true)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={`Data ${data || "não selecionada"}. Abrir calendário`}
+            >
               <Text style={[styles.textoSeletorData, !data && styles.placeholderSeletorData]}>{data || "Escolher data"}</Text>
-            </TouchableOpacity>
-            {erroData ? <Text style={styles.erroTexto}>{erroData}</Text> : null}
-            {mostrarSeletorData && (
-              <DateTimePicker
-                value={parseDateInputToDate(data) ?? new Date()}
-                mode="date"
-                display="default"
-                locale="pt-BR"
-                maximumDate={new Date()}
-                onChange={selecionarData}
+              <Feather
+                name="calendar"
+                size={16}
+                color={Cores.textoSuave}
+                accessible={false}
               />
-            )}
+            </TouchableOpacity>
           </View>
 
           {/* CATEGORIA */}
@@ -588,9 +410,7 @@ export default function NovaDespesaGrupo() {
                     onPress={() => setCategoria(item.nome)}
                     activeOpacity={0.8}
                   >
-                    <Text style={styles.categoriaIcone}>
-                      {item.icone}
-                    </Text>
+                    <IconeCategoria icone={item.icone} tamanho={15} style={{ marginRight: 5 }} />
 
                     <Text
                       style={[
@@ -683,7 +503,7 @@ export default function NovaDespesaGrupo() {
               Toque para incluir ou retirar participantes.
             </Text>
 
-            <View style={[styles.listaOpcoes, erroParticipantes ? styles.blocoErro : null]}>
+            <View style={styles.listaOpcoes}>
               {participantes.map((participante) => {
                 const selecionado =
                   participantesSelecionados.includes(participante.id);
@@ -739,179 +559,6 @@ export default function NovaDespesaGrupo() {
                 );
               })}
             </View>
-            {erroParticipantes ? <Text style={styles.erroTexto}>{erroParticipantes}</Text> : null}
-          </View>
-
-          {/* TIPO DE DIVISÃO */}
-
-          <View style={styles.campo}>
-            <Text style={styles.label}>Como dividir o valor?</Text>
-
-            <View style={styles.divisoes}>
-              <TouchableOpacity
-                style={[
-                  styles.divisao,
-                  tipoDivisao === "IGUAL" && styles.divisaoSelecionada,
-                ]}
-                onPress={() => setTipoDivisao("IGUAL")}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.divisaoIcone}>⚖️</Text>
-
-                <Text
-                  style={[
-                    styles.divisaoTitulo,
-                    tipoDivisao === "IGUAL" &&
-                      styles.divisaoTituloSelecionado,
-                  ]}
-                >
-                  Igual
-                </Text>
-
-                <Text style={styles.divisaoDescricao}>
-                  Partes iguais
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.divisao,
-                  tipoDivisao === "VALOR" && styles.divisaoSelecionada,
-                ]}
-                onPress={() => setTipoDivisao("VALOR")}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.divisaoIcone}>💵</Text>
-
-                <Text
-                  style={[
-                    styles.divisaoTitulo,
-                    tipoDivisao === "VALOR" &&
-                      styles.divisaoTituloSelecionado,
-                  ]}
-                >
-                  Por valor
-                </Text>
-
-                <Text style={styles.divisaoDescricao}>
-                  Valor por pessoa
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.divisao,
-                  tipoDivisao === "PERCENTUAL" &&
-                    styles.divisaoSelecionada,
-                ]}
-                onPress={() => setTipoDivisao("PERCENTUAL")}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.divisaoIcone}>📊</Text>
-
-                <Text
-                  style={[
-                    styles.divisaoTitulo,
-                    tipoDivisao === "PERCENTUAL" &&
-                      styles.divisaoTituloSelecionado,
-                  ]}
-                >
-                  Por %
-                </Text>
-
-                <Text style={styles.divisaoDescricao}>
-                  Percentual
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* VALORES INDIVIDUAIS */}
-
-            {tipoDivisao === "VALOR" &&
-              participantesSelecionados.length > 0 && (
-                <View style={styles.detalhesDivisao}>
-                  <Text style={styles.detalhesTitulo}>
-                    Valor de cada participante
-                  </Text>
-
-                  {participantes.filter((item) =>
-                    participantesSelecionados.includes(item.id)
-                  ).map((participante) => (
-                    <View
-                      key={participante.id}
-                      style={styles.linhaDivisao}
-                    >
-                      <Text style={styles.nomeLinha}>
-                        {participante.nome}
-                      </Text>
-
-                      <View style={styles.valorIndividual}>
-                        <Text style={styles.simboloPequeno}>R$</Text>
-
-                        <TextInput
-                          style={styles.inputIndividual}
-                          placeholder="0,00"
-                          placeholderTextColor="#8AA69E"
-                          value={
-                            valoresIndividuais[participante.id] ?? ""
-                          }
-                          onChangeText={(texto) =>
-                            setValoresIndividuais((atuais) => ({
-                              ...atuais,
-                              [participante.id]: texto,
-                            }))
-                          }
-                          keyboardType="decimal-pad"
-                        />
-                      </View>
-                    </View>
-                  ))}
-                </View>
-              )}
-
-            {/* PERCENTUAIS INDIVIDUAIS */}
-
-            {tipoDivisao === "PERCENTUAL" &&
-              participantesSelecionados.length > 0 && (
-                <View style={styles.detalhesDivisao}>
-                  <Text style={styles.detalhesTitulo}>
-                    Percentual de cada participante
-                  </Text>
-
-                  {participantes.filter((item) =>
-                    participantesSelecionados.includes(item.id)
-                  ).map((participante) => (
-                    <View
-                      key={participante.id}
-                      style={styles.linhaDivisao}
-                    >
-                      <Text style={styles.nomeLinha}>
-                        {participante.nome}
-                      </Text>
-
-                      <View style={styles.percentualIndividual}>
-                        <TextInput
-                          style={styles.inputPercentual}
-                          placeholder="0"
-                          placeholderTextColor="#8AA69E"
-                          value={
-                            percentuaisIndividuais[participante.id] ?? ""
-                          }
-                          onChangeText={(texto) =>
-                            setPercentuaisIndividuais((atuais) => ({
-                              ...atuais,
-                              [participante.id]: texto,
-                            }))
-                          }
-                          keyboardType="decimal-pad"
-                        />
-
-                        <Text style={styles.simboloPercentual}>%</Text>
-                      </View>
-                    </View>
-                  ))}
-                </View>
-              )}
           </View>
 
           {/* OBSERVAÇÃO */}
@@ -922,11 +569,19 @@ export default function NovaDespesaGrupo() {
             </Text>
 
             <TextInput
-              style={[styles.input, styles.inputObservacao]}
+              style={[
+                styles.input,
+                styles.inputObservacao,
+                campoFocado === "observacao" && styles.campoFocado,
+              ]}
               placeholder="Adicione uma informação sobre a despesa..."
-              placeholderTextColor="#8AA69E"
+              placeholderTextColor={Cores.placeholder}
               value={observacao}
               onChangeText={setObservacao}
+              onFocus={() => setCampoFocado("observacao")}
+              onBlur={() =>
+                setCampoFocado((campo) => campo === "observacao" ? null : campo)
+              }
               multiline
               textAlignVertical="top"
               maxLength={500}
@@ -959,18 +614,25 @@ export default function NovaDespesaGrupo() {
           <View style={styles.espacoFinal} />
         </ScrollView>
       </KeyboardAvoidingView>
+      {mostrarSeletorData && (
+        <CalendarioData
+          value={data}
+          onClose={() => setMostrarSeletorData(false)}
+          onSelectDate={selecionarData}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
   flex: {
     flex: 1,
   },
 
   container: {
     flex: 1,
-    backgroundColor: "#F5FBF7",
+    backgroundColor: Cores.fundo,
   },
 
   scroll: {
@@ -995,9 +657,9 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
@@ -1005,7 +667,7 @@ const styles = StyleSheet.create({
 
   voltar: {
     fontSize: 32,
-    color: "#0B3B33",
+    color: Cores.texto,
     marginTop: -3,
   },
 
@@ -1016,12 +678,12 @@ const styles = StyleSheet.create({
   titulo: {
     fontSize: 22,
     fontWeight: "700",
-    color: "#0B3B33",
+    color: Cores.texto,
   },
 
   subtitulo: {
     fontSize: 12,
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     marginTop: 4,
   },
 
@@ -1030,9 +692,9 @@ const styles = StyleSheet.create({
   cardIA: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#E8F9F2",
+    backgroundColor: Cores.superficieVerde,
     borderWidth: 1,
-    borderColor: "#C9EFE1",
+    borderColor: Cores.bordaDestaque,
     borderRadius: 16,
     padding: 14,
     marginBottom: 24,
@@ -1042,7 +704,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
@@ -1059,19 +721,19 @@ const styles = StyleSheet.create({
   iaTitulo: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#0B3B33",
+    color: Cores.texto,
     marginBottom: 3,
   },
 
   iaSubtitulo: {
     fontSize: 10,
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     lineHeight: 15,
   },
 
   seta: {
     fontSize: 25,
-    color: "#00A17A",
+    color: Cores.textoPositivo,
     marginLeft: 8,
   },
 
@@ -1084,80 +746,75 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#0B3B33",
+    color: Cores.texto,
     marginBottom: 8,
   },
 
   input: {
     minHeight: 52,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
-    borderRadius: 13,
+    borderColor: Cores.borda,
+    borderRadius: 12,
     paddingHorizontal: 15,
     fontSize: 14,
-    color: "#0B3B33",
+    color: Cores.texto,
+    outlineStyle: "solid",
+    outlineWidth: 0,
   },
-  inputErro: {
-    borderColor: "#D92D20",
-  },
-  erroTexto: {
-    marginTop: 6,
-    color: "#B42318",
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  blocoErro: {
-    borderColor: "#D92D20",
-  },
+  campoFocado: { borderWidth: 2, borderColor: Cores.textoPositivo },
   seletorData: {
     height: 52,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
-    borderRadius: 13,
+    borderColor: Cores.borda,
+    borderRadius: 12,
     paddingHorizontal: 15,
-    justifyContent: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
 
-  textoSeletorData: { fontSize: 14, color: "#0B3B33" },
-  placeholderSeletorData: { color: "#8AA69E" },
+  textoSeletorData: { fontSize: 14, color: Cores.texto },
+  placeholderSeletorData: { color: Cores.placeholder },
 
   valorContainer: {
     height: 52,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
-    borderRadius: 13,
+    borderColor: Cores.borda,
+    borderRadius: 12,
     paddingHorizontal: 15,
   },
 
   simbolo: {
     fontSize: 14,
-    fontWeight: "700",
-    color: "#0B3B33",
+    color: Cores.texto,
     marginRight: 8,
   },
 
   inputValor: {
     flex: 1,
     height: "100%",
-    fontSize: 18,
-    color: "#0B3B33",
+    fontSize: 14,
+    color: Cores.texto,
+    borderRadius: 12,
+    outlineStyle: "solid",
+    outlineWidth: 0,
   },
 
   ajuda: {
     fontSize: 11,
     lineHeight: 17,
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     marginTop: 7,
   },
 
   descricaoSecao: {
     fontSize: 11,
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     lineHeight: 17,
     marginTop: -2,
     marginBottom: 10,
@@ -1167,7 +824,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingRight: 10,
   },
-  erroCategorias: { color: "#D64545", fontSize: 12, marginTop: 6 },
+  erroCategorias: { color: Cores.textoErroFormulario, fontSize: 12, marginTop: 6 },
 
   categoria: {
     flexDirection: "row",
@@ -1175,29 +832,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
   },
 
   categoriaSelecionada: {
-    backgroundColor: "#DDF7EE",
-    borderColor: "#00C896",
+    backgroundColor: Cores.superficieVerdeSelecionada,
+    borderColor: Cores.principal,
   },
 
-  categoriaIcone: {
-    fontSize: 15,
-    marginRight: 5,
-  },
 
   categoriaTexto: {
     fontSize: 11,
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     fontWeight: "600",
   },
 
   categoriaTextoSelecionado: {
-    color: "#0B3B33",
+    color: Cores.texto,
   },
 
   /* PAGADOR E PARTICIPANTES */
@@ -1210,74 +863,74 @@ const styles = StyleSheet.create({
     minHeight: 58,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
     borderRadius: 13,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
 
   opcaoPessoaSelecionada: {
-    backgroundColor: "#F1FBF7",
-    borderColor: "#00C896",
+    backgroundColor: Cores.superficieVerde,
+    borderColor: Cores.principal,
   },
 
   avatar: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#EAF7F3",
+    backgroundColor: Cores.superficieVerde,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 11,
   },
 
   avatarSelecionado: {
-    backgroundColor: "#00C896",
+    backgroundColor: Cores.principal,
   },
 
   avatarTexto: {
     fontSize: 10,
     fontWeight: "800",
-    color: "#6B8F86",
+    color: Cores.textoSuave,
   },
 
   avatarTextoSelecionado: {
-    color: "#0B3B33",
+    color: Cores.textoSobrePrincipal,
   },
 
   nomePessoa: {
     flex: 1,
     fontSize: 13,
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     fontWeight: "500",
   },
 
   nomePessoaSelecionado: {
-    color: "#0B3B33",
+    color: Cores.texto,
     fontWeight: "700",
   },
 
   radio: {
     width: 20,
     height: 20,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: "#B7CEC5",
+    borderColor: Cores.borda,
     alignItems: "center",
     justifyContent: "center",
   },
 
   radioSelecionado: {
-    borderColor: "#00C896",
+    borderColor: Cores.principal,
   },
 
   radioCentro: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: "#00C896",
+    backgroundColor: Cores.principal,
   },
 
   checkbox: {
@@ -1285,153 +938,20 @@ const styles = StyleSheet.create({
     height: 21,
     borderRadius: 6,
     borderWidth: 1.5,
-    borderColor: "#B7CEC5",
+    borderColor: Cores.borda,
     alignItems: "center",
     justifyContent: "center",
   },
 
   checkboxSelecionado: {
-    backgroundColor: "#00C896",
-    borderColor: "#00C896",
+    backgroundColor: Cores.principal,
+    borderColor: Cores.principal,
   },
 
   checkTexto: {
     fontSize: 13,
     fontWeight: "800",
-    color: "#FFFFFF",
-  },
-
-  /* TIPOS DE DIVISÃO */
-
-  divisoes: {
-    flexDirection: "row",
-    gap: 8,
-  },
-
-  divisao: {
-    flex: 1,
-    minHeight: 108,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E1EEE8",
-    borderRadius: 13,
-    paddingHorizontal: 6,
-    paddingVertical: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  divisaoSelecionada: {
-    backgroundColor: "#DDF7EE",
-    borderColor: "#00C896",
-  },
-
-  divisaoIcone: {
-    fontSize: 21,
-    marginBottom: 7,
-  },
-
-  divisaoTitulo: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#6B8F86",
-    textAlign: "center",
-  },
-
-  divisaoTituloSelecionado: {
-    color: "#0B3B33",
-  },
-
-  divisaoDescricao: {
-    fontSize: 9,
-    color: "#6B8F86",
-    marginTop: 5,
-    textAlign: "center",
-  },
-
-  detalhesDivisao: {
-    marginTop: 14,
-    padding: 13,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E1EEE8",
-    borderRadius: 13,
-  },
-
-  detalhesTitulo: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#0B3B33",
-    marginBottom: 12,
-  },
-
-  linhaDivisao: {
-    minHeight: 46,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderBottomColor: "#F0F6F3",
-    paddingVertical: 5,
-  },
-
-  nomeLinha: {
-    flex: 1,
-    fontSize: 12,
-    color: "#0B3B33",
-    paddingRight: 8,
-  },
-
-  valorIndividual: {
-    width: 112,
-    height: 39,
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E1EEE8",
-    borderRadius: 10,
-    paddingHorizontal: 8,
-  },
-
-  simboloPequeno: {
-    color: "#6B8F86",
-    fontSize: 10,
-    fontWeight: "700",
-    marginRight: 4,
-  },
-
-  inputIndividual: {
-    flex: 1,
-    height: "100%",
-    fontSize: 13,
-    color: "#0B3B33",
-    textAlign: "right",
-  },
-
-  percentualIndividual: {
-    width: 78,
-    height: 39,
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E1EEE8",
-    borderRadius: 10,
-    paddingHorizontal: 8,
-  },
-
-  inputPercentual: {
-    flex: 1,
-    height: "100%",
-    fontSize: 13,
-    color: "#0B3B33",
-    textAlign: "right",
-  },
-
-  simboloPercentual: {
-    color: "#6B8F86",
-    fontSize: 12,
-    fontWeight: "700",
-    marginLeft: 4,
+    color: Cores.textoSobreAcao,
   },
 
   /* OBSERVAÇÃO */
@@ -1447,14 +967,14 @@ const styles = StyleSheet.create({
   botaoSalvar: {
     height: 52,
     borderRadius: 16,
-    backgroundColor: "#00C896",
+    backgroundColor: Cores.principal,
     justifyContent: "center",
     alignItems: "center",
     marginTop: 5,
   },
 
   botaoSalvarTexto: {
-    color: "#FFFFFF",
+    color: Cores.textoSobreAcao,
     fontSize: 15,
     fontWeight: "800",
   },
@@ -1462,16 +982,16 @@ const styles = StyleSheet.create({
   botaoCancelar: {
     height: 52,
     borderRadius: 16,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
     justifyContent: "center",
     alignItems: "center",
     marginTop: 10,
   },
 
   botaoCancelarTexto: {
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     fontSize: 14,
     fontWeight: "700",
   },

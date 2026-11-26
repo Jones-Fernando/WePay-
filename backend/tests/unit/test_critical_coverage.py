@@ -1,4 +1,7 @@
-from scripts.check_critical_coverage import coverage_for_packages
+from scripts.check_critical_coverage import (
+    coverage_for_packages,
+    normalize_coverage_paths,
+)
 
 
 def test_coverage_for_packages_counts_only_requested_source_packages():
@@ -33,3 +36,31 @@ def test_coverage_for_packages_normalizes_windows_paths():
 
     assert (covered, statements) == (3, 4)
     assert found == {"database"}
+
+
+def test_coverage_paths_are_normalized_for_critical_module_lookup():
+    files = {
+        "models\\saldo_model.py": {
+            "summary": {
+                "num_statements": 10,
+                "covered_lines": 9,
+                "percent_covered": 90.0,
+            }
+        },
+        "services/financeiro_service.py": {
+            "summary": {
+                "num_statements": 20,
+                "covered_lines": 19,
+                "percent_covered": 95.0,
+            }
+        },
+    }
+
+    normalized_files = normalize_coverage_paths(files)
+
+    assert normalized_files["models/saldo_model.py"] == files[
+        "models\\saldo_model.py"
+    ]
+    assert normalized_files["services/financeiro_service.py"] == files[
+        "services/financeiro_service.py"
+    ]

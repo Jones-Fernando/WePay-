@@ -1,11 +1,13 @@
+import { useAppTheme, useAppThemeScheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 
 import React from "react";
 
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   Platform,
+  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -14,25 +16,21 @@ import {
 } from "react-native";
 
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { Feather } from "@expo/vector-icons";
 import { despesasPessoaisApi } from "@/services/api";
 import { CATEGORIAS_PESSOAIS as CATEGORIAS } from "@/constants/financeCategories";
+import { useCategoriasFinanceiras } from "@/hooks/useCategoriasFinanceiras";
 import type { DespesaPessoal } from "@/types/api";
 import { formatDateForDisplay } from "@/utils/financeInput";
 import { formatCurrencyBRL } from "@/utils/financeFormat";
-
-const WEPAY = {
-  paper: "#F5FBF7",
-  ink: "#0B3B33",
-  inkSoft: "#315D53",
-  accent: "#00C896",
-  accentDark: "#00A17A",
-  softGreen: "#BFE0D6",
-  surface: "#FFFFFF",
-  line: "#E1EEE8",
-  muted: "#6B8F86",
-};
+import { Alert } from "@/services/feedback";
+import { IconeCategoria } from "@/components/IconeCategoria";
 
 export default function DetalhesDespesaPessoalScreen() {
+  const Cores = useAppTheme();
+  const esquema = useAppThemeScheme();
+  const styles = createStyles(Cores);
+  const { categorias } = useCategoriasFinanceiras("pessoal", CATEGORIAS);
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const idNumerico = id ? Number(id) : NaN;
@@ -141,17 +139,19 @@ export default function DetalhesDespesaPessoalScreen() {
 
   if (carregando) {
     return (
-      <View style={[styles.container, styles.loading]}>
-        <StatusBar barStyle="dark-content" />
-        <ActivityIndicator color={WEPAY.accent} />
-      </View>
+      <SafeAreaView style={[styles.container, styles.loading]}>
+        <StatusBar barStyle={esquema === "dark" ? "light-content" : "dark-content"} />
+        <ActivityIndicator color={Cores.principal} />
+      </SafeAreaView>
     );
   }
 
   if (!despesa) {
     return (
-      <View style={styles.notFound}>
-        <Text style={styles.notFoundIcon}>🧾</Text>
+      <SafeAreaView style={styles.notFound}>
+        <View style={styles.notFoundIcon}>
+          <Feather name="file-text" size={28} color={Cores.textoPositivo} accessible={false} />
+        </View>
 
         <Text style={styles.notFoundTitle}>
           Despesa não encontrada
@@ -163,6 +163,8 @@ export default function DetalhesDespesaPessoalScreen() {
 
         <Pressable
           style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel="Voltar para despesas"
           onPress={() =>
             router.replace(
               "/(main)/personal/despesas-pessoais"
@@ -173,50 +175,49 @@ export default function DetalhesDespesaPessoalScreen() {
             Voltar para despesas
           </Text>
         </Pressable>
-      </View>
+      </SafeAreaView>
     );
   }
 
   const tipoLabel = despesa.tipo === "receita" ? "Receita pessoal" : "Despesa pessoal";
-  const categoria = CATEGORIAS.find(
+  const categoria = categorias.find(
     (item) => item.nome === despesa.categoria
   );
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle={esquema === "dark" ? "light-content" : "dark-content"} />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Cabeçalho */}
         <View style={styles.header}>
           <Pressable
             onPress={voltar}
             hitSlop={12}
             style={styles.backArea}
+            accessibilityRole="button"
+            accessibilityLabel="Voltar"
           >
-            <Text style={styles.backIcon}>‹</Text>
-            <Text style={styles.backText}>Voltar</Text>
+            <Feather name="arrow-left" size={20} color={Cores.texto} accessible={false} />
           </Pressable>
 
-          <Text style={styles.headerTitle}>
-            Detalhes da despesa
-          </Text>
+          <View style={styles.headerText}>
+            <Text style={styles.headerTitle}>
+              Detalhes do lançamento
+            </Text>
 
-          <Text style={styles.headerSubtitle}>
-            Confira as informações deste lançamento.
-          </Text>
+            <Text style={styles.headerSubtitle}>
+              Confira as informações deste registro.
+            </Text>
+          </View>
         </View>
 
-        {/* Cartão principal */}
         <View style={styles.mainCard}>
           <View style={styles.receiptHeader}>
             <View style={styles.receiptIcon}>
-              <Text style={styles.receiptEmoji}>
-                {categoria?.icone ?? "📌"}
-              </Text>
+              <IconeCategoria icone={categoria?.icone ?? "Outros"} tamanho={34} />
             </View>
 
             <View style={styles.originBadge}>
@@ -237,133 +238,57 @@ export default function DetalhesDespesaPessoalScreen() {
           <View style={styles.mainCardDivider} />
 
           <View style={styles.mainCardFooter}>
-            <Text style={styles.mainCardFooterText}>
-              {formatDateForDisplay(despesa.data_despesa, {
-                day: "2-digit",
-                month: "long",
-                year: "numeric",
-              })}
-            </Text>
+            <View style={styles.mainCardFooterItem}>
+              <IconeCategoria icone="📅" tamanho={18} />
+              <Text style={styles.mainCardFooterText}>
+                {formatDateForDisplay(despesa.data_despesa, {
+                  day: "2-digit",
+                  month: "long",
+                  year: "numeric",
+                })}
+              </Text>
+            </View>
 
-            <Text style={styles.mainCardFooterText}>
-              {despesa.categoria ?? "Outros"}
-            </Text>
+            <View style={[styles.mainCardFooterItem, styles.mainCardCategory]}>
+              <IconeCategoria icone={categoria?.icone ?? "📌"} tamanho={18} />
+              <Text style={styles.mainCardFooterText}>
+                {despesa.categoria ?? "Outros"}
+              </Text>
+            </View>
           </View>
         </View>
 
-        {/* Informações da despesa */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>
-            Informações da despesa
-          </Text>
-        </View>
-
-        <View style={styles.detailsCard}>
-          <View style={styles.detailRow}>
-            <View style={styles.detailLeft}>
-              <Text style={styles.detailIcon}>📝</Text>
-              <Text style={styles.detailLabel}>
-                Descrição
-              </Text>
-            </View>
-
-            <Text style={styles.detailValue}>
-              {despesa.descricao}
-            </Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.detailRow}>
-            <View style={styles.detailLeft}>
-              <Text style={styles.detailIcon}>💰</Text>
-              <Text style={styles.detailLabel}>
-                Valor
-              </Text>
-            </View>
-
-            <Text style={styles.detailValue}>
-              {formatCurrencyBRL(despesa.valor)}
-            </Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.detailRow}>
-            <View style={styles.detailLeft}>
-              <Text style={styles.detailIcon}>📅</Text>
-              <Text style={styles.detailLabel}>
-                Data da despesa
-              </Text>
-            </View>
-
-            <Text style={styles.detailValue}>
-              {formatDateForDisplay(despesa.data_despesa, {
-                day: "2-digit",
-                month: "long",
-                year: "numeric",
-              })}
-            </Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.detailRow}>
-            <View style={styles.detailLeft}>
-              <Text style={styles.detailIcon}>🏷️</Text>
-              <Text style={styles.detailLabel}>
-                Categoria
-              </Text>
-            </View>
-
-            <Text style={styles.detailValue}>
-              {categoria?.icone ?? "📌"} {despesa.categoria ?? "Outros"}
-            </Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.detailRow}>
-            <View style={styles.detailLeft}>
-              <Text style={styles.detailIcon}>📋</Text>
-              <Text style={styles.detailLabel}>
-                Origem do cadastro
-              </Text>
-            </View>
-
-            <Text style={styles.detailValue}>
-              {despesa.tipo === "receita" ? "Receita" : "Despesa"}
-            </Text>
-          </View>
-        </View>
-
-        {/* Ações */}
         <View style={styles.actions}>
           <Pressable
             onPress={editarDespesa}
             disabled={excluindo}
+            accessibilityRole="button"
+            accessibilityLabel="Editar despesa"
             style={({ pressed }) => [
               styles.editButton,
               (pressed || excluindo) && styles.buttonPressed,
             ]}
           >
-            <Text style={styles.editButtonText}>
-              ✎  Editar despesa
-            </Text>
+            <Text style={styles.editButtonText}>✎  Editar despesa</Text>
           </Pressable>
 
           <Pressable
             onPress={confirmarExclusao}
             disabled={excluindo}
+            accessibilityRole="button"
+            accessibilityLabel="Excluir despesa"
             style={({ pressed }) => [
               styles.deleteButton,
               (pressed || excluindo) && styles.buttonPressed,
             ]}
           >
             {excluindo ? (
-              <ActivityIndicator color="#D24A3B" />
+              <ActivityIndicator color={Cores.textoNegativo} />
             ) : (
-              <Text style={styles.deleteButtonText}>Excluir despesa</Text>
+              <>
+                <Feather name="trash-2" size={16} color={Cores.textoNegativo} accessible={false} />
+                <Text style={styles.deleteButtonText}>Excluir despesa</Text>
+              </>
             )}
           </Pressable>
           {erroAcao ? (
@@ -374,14 +299,14 @@ export default function DetalhesDespesaPessoalScreen() {
         </View>
 
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: WEPAY.paper,
+    backgroundColor: Cores.fundo,
   },
 
   loading: {
@@ -390,49 +315,58 @@ const styles = StyleSheet.create({
   },
 
   scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
+    width: "100%",
+    maxWidth: 720,
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 36,
   },
 
   header: {
-    marginBottom: 22,
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 58,
+    marginBottom: 18,
   },
 
   backArea: {
-    flexDirection: "row",
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Cores.borda,
+    backgroundColor: Cores.cartaoFundo,
     alignItems: "center",
-    marginBottom: 20,
+    justifyContent: "center",
   },
 
-  backIcon: {
-    color: WEPAY.accentDark,
-    fontSize: 29,
-    lineHeight: 30,
-    marginRight: 5,
-  },
-
-  backText: {
-    color: WEPAY.accentDark,
-    fontSize: 13,
-    fontWeight: "600",
+  headerText: {
+    flex: 1,
+    marginLeft: 12,
   },
 
   headerTitle: {
-    color: WEPAY.ink,
-    fontSize: 22,
-    fontWeight: "700",
+    color: Cores.texto,
+    fontSize: 20,
+    fontWeight: "800",
+    fontFamily: "sans-serif",
   },
 
   headerSubtitle: {
-    color: WEPAY.muted,
-    fontSize: 12,
-    marginTop: 5,
+    color: Cores.textoSuave,
+    fontSize: 13,
+    marginTop: 3,
+    fontFamily: "sans-serif",
   },
 
   mainCard: {
-    backgroundColor: WEPAY.ink,
+    backgroundColor: Cores.superficieMarca,
     borderRadius: 18,
-    padding: 20,
+    borderWidth: 1,
+    borderColor: Cores.bordaDestaque,
+    paddingHorizontal: 20,
+    paddingVertical: 18,
     overflow: "hidden",
   },
 
@@ -440,166 +374,121 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    minHeight: 34,
   },
 
   receiptIcon: {
-    width: 48,
-    height: 48,
-    backgroundColor: WEPAY.accent,
-    borderRadius: 15,
+    width: 34,
+    height: 34,
     alignItems: "center",
     justifyContent: "center",
   },
 
-  receiptEmoji: {
-    fontSize: 23,
-  },
-
   originBadge: {
-    backgroundColor: "rgba(255,255,255,0.10)",
-    borderRadius: 20,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
+    backgroundColor: "transparent",
   },
 
   originBadgeText: {
-    color: WEPAY.softGreen,
-    fontSize: 10,
-    fontWeight: "600",
+    color: Cores.textoSobreMarca,
+    fontSize: 13,
+    fontWeight: "700",
+    fontFamily: "sans-serif",
+    letterSpacing: 0.2,
+    textAlign: "right",
   },
 
   expenseDescription: {
-    color: WEPAY.surface,
+    color: Cores.textoSobreMarca,
     fontSize: 17,
-    fontWeight: "700",
-    marginTop: 20,
+    fontWeight: "600",
+    fontFamily: "sans-serif",
+    lineHeight: 26,
+    marginTop: 16,
   },
 
   expenseValue: {
-    color: WEPAY.accent,
-    fontSize: 30,
+    color: Cores.principal,
+    fontSize: 28,
     fontWeight: "700",
-    marginTop: 7,
+    fontFamily: "sans-serif",
+    letterSpacing: -0.8,
+    marginTop: 6,
   },
 
   mainCardDivider: {
     height: 1,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    marginVertical: 17,
+    backgroundColor: Cores.bordaDestaque,
+    opacity: 0.32,
+    marginTop: 18,
+    marginBottom: 14,
   },
 
   mainCardFooter: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
   },
 
-  mainCardFooterText: {
-    color: WEPAY.softGreen,
-    fontSize: 11,
-    fontWeight: "500",
-  },
-
-  sectionHeader: {
-    marginTop: 25,
-    marginBottom: 12,
-  },
-
-  sectionTitle: {
-    color: WEPAY.ink,
-    fontSize: 15,
-    fontWeight: "700",
-  },
-
-  detailsCard: {
-    backgroundColor: WEPAY.surface,
-    borderRadius: 16,
-    paddingHorizontal: 15,
-    borderWidth: 1,
-    borderColor: WEPAY.line,
-  },
-
-  detailRow: {
+  mainCardFooterItem: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    minHeight: 57,
-    gap: 8,
-  },
-
-  detailLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 9,
-    flex: 1,
-  },
-
-  detailIcon: {
-    fontSize: 15,
-  },
-
-  detailLabel: {
-    color: WEPAY.muted,
-    fontSize: 11,
-  },
-
-  detailValue: {
-    color: WEPAY.ink,
-    fontSize: 11,
-    fontWeight: "600",
-    textAlign: "right",
+    gap: 6,
     flexShrink: 1,
   },
 
-  divider: {
-    height: 1,
-    backgroundColor: WEPAY.line,
+  mainCardCategory: {
+    justifyContent: "flex-end",
   },
 
-  observationCard: {
-    backgroundColor: WEPAY.surface,
-    borderRadius: 14,
-    padding: 15,
-    borderWidth: 1,
-    borderColor: WEPAY.line,
-  },
-
-  observationText: {
-    color: WEPAY.inkSoft,
+  mainCardFooterText: {
+    color: Cores.textoSobreMarca,
     fontSize: 12,
-    lineHeight: 19,
+    lineHeight: 16,
+    fontWeight: "700",
+    fontFamily: "sans-serif",
+    flexShrink: 1,
   },
 
   actions: {
-    marginTop: 28,
-    gap: 12,
+    marginTop: 24,
+    gap: 10,
   },
 
   editButton: {
     height: 50,
-    backgroundColor: WEPAY.accent,
+    backgroundColor: Cores.principalEscuro,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
   },
 
   editButtonText: {
-    color: WEPAY.ink,
-    fontSize: 13,
-    fontWeight: "700",
+    color: Cores.textoSobrePrincipal,
+    fontSize: 14,
+    fontWeight: "800",
+    fontFamily: "sans-serif",
   },
 
   deleteButton: {
     height: 48,
-    backgroundColor: "#FFE7E2",
+    backgroundColor: Cores.superficieNegativa,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Cores.bordaNegativoSuave,
     alignItems: "center",
     justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
   },
 
   deleteButtonText: {
-    color: "#D24A3B",
-    fontSize: 12,
-    fontWeight: "700",
+    color: Cores.textoNegativo,
+    fontSize: 13,
+    fontWeight: "800",
+    fontFamily: "sans-serif",
   },
 
   buttonPressed: {
@@ -607,32 +496,37 @@ const styles = StyleSheet.create({
   },
 
   actionError: {
-    color: "#D24A3B",
+    color: Cores.textoNegativo,
     fontSize: 12,
     textAlign: "center",
   },
 
   notFound: {
     flex: 1,
-    backgroundColor: WEPAY.paper,
+    backgroundColor: Cores.fundo,
     alignItems: "center",
     justifyContent: "center",
     padding: 25,
   },
 
   notFoundIcon: {
-    fontSize: 42,
+    width: 64,
+    height: 64,
+    borderRadius: 20,
+    backgroundColor: Cores.superficieVerde,
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: 12,
   },
 
   notFoundTitle: {
-    color: WEPAY.ink,
+    color: Cores.texto,
     fontWeight: "700",
     fontSize: 17,
   },
 
   notFoundDescription: {
-    color: WEPAY.muted,
+    color: Cores.textoSuave,
     fontSize: 12,
     textAlign: "center",
     lineHeight: 18,
@@ -641,14 +535,14 @@ const styles = StyleSheet.create({
   },
 
   backButton: {
-    backgroundColor: WEPAY.accent,
+    backgroundColor: Cores.principal,
     borderRadius: 12,
     paddingHorizontal: 20,
     paddingVertical: 13,
   },
 
   backButtonText: {
-    color: WEPAY.ink,
+    color: Cores.texto,
     fontWeight: "700",
     fontSize: 12,
   },

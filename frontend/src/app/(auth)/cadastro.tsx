@@ -1,3 +1,5 @@
+import { useAppTheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 /*
  * WEPAY — CADASTRO
  * Migrado do projeto de referência para o grupo (auth).
@@ -14,15 +16,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   ActivityIndicator,
-  Modal,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { authApi } from "@/services/api";
-import { MIN_PASSWORD_LENGTH } from "@/constants/password";
+import { validarSenhaNova } from "@/constants/password";
+import { Alert } from "@/services/feedback";
 
 export default function Cadastro() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
   const { convite } = useLocalSearchParams<{ convite?: string }>();
   const conviteToken = Array.isArray(convite) ? convite[0] : convite;
   const [nome, setNome] = useState("");
@@ -32,7 +35,9 @@ export default function Cadastro() {
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [mostrarConfirmacao, setMostrarConfirmacao] = useState(false);
   const [carregando, setCarregando] = useState(false);
-  const [contaCriada, setContaCriada] = useState(false);
+  const [campoFocado, setCampoFocado] = useState<
+    "nome" | "email" | "senha" | "confirmarSenha" | null
+  >(null);
 
   async function criarConta() {
     const nomeLimpo = nome.trim();
@@ -50,18 +55,20 @@ export default function Cadastro() {
       Alert.alert("Erro", "As senhas não são iguais.");
       return;
     }
-    if (senha.length < MIN_PASSWORD_LENGTH) {
-      Alert.alert(
-        "Atenção",
-        `A senha deve ter ao menos ${MIN_PASSWORD_LENGTH} caracteres.`
-      );
+    const erroSenha = validarSenhaNova(senha);
+    if (erroSenha) {
+      Alert.alert("Atenção", erroSenha);
       return;
     }
 
     setCarregando(true);
     try {
       await authApi.register(nomeLimpo, emailLimpo, senha, conviteToken);
-      setContaCriada(true);
+      Alert.alert(
+        "Cadastro solicitado",
+        "Se esse endereço já tiver uma conta, entre ou use Esqueci minha senha. Caso contrário, sua conta está pronta para login.",
+        [{ text: "Ir para o login", onPress: irParaLogin }],
+      );
     } catch (erro) {
       Alert.alert(
         "Erro",
@@ -81,28 +88,6 @@ export default function Cadastro() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Modal
-        transparent
-        visible={contaCriada}
-        animationType="fade"
-        statusBarTranslucent
-      >
-        <View style={styles.successOverlay}>
-          <View style={styles.successCard}>
-            <View style={styles.successIcon}>
-              <Text style={styles.successIconText}>✓</Text>
-            </View>
-            <Text style={styles.successTitle}>Conta criada com sucesso!</Text>
-            <Text style={styles.successText}>
-              Sua conta está pronta. Entre com seu e-mail e sua senha.
-            </Text>
-            <TouchableOpacity style={styles.successLoginButton} onPress={irParaLogin}>
-              <Text style={styles.primaryButtonText}>Ir para o login</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -139,40 +124,71 @@ export default function Cadastro() {
           <View style={styles.form}>
             {/* Nome */}
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                campoFocado === "nome" && styles.focusedField,
+              ]}
               placeholder="Nome completo"
-              placeholderTextColor="#6B8F86"
+              placeholderTextColor={Cores.textoSuave}
               value={nome}
               onChangeText={setNome}
+              onFocus={() => setCampoFocado("nome")}
+              onBlur={() =>
+                setCampoFocado((campo) => (campo === "nome" ? null : campo))
+              }
               autoCapitalize="words"
             />
 
             {/* E-mail */}
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                campoFocado === "email" && styles.focusedField,
+              ]}
               placeholder="E-mail"
-              placeholderTextColor="#6B8F86"
+              placeholderTextColor={Cores.textoSuave}
               value={email}
               onChangeText={setEmail}
+              onFocus={() => setCampoFocado("email")}
+              onBlur={() =>
+                setCampoFocado((campo) => (campo === "email" ? null : campo))
+              }
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
             />
 
             {/* Senha */}
-            <View style={styles.passwordContainer}>
+            <View
+              style={[
+                styles.passwordContainer,
+                campoFocado === "senha" && styles.focusedField,
+              ]}
+            >
               <TextInput
                 style={styles.passwordInput}
                 placeholder="Senha"
-                placeholderTextColor="#6B8F86"
+                placeholderTextColor={Cores.textoSuave}
                 value={senha}
                 onChangeText={setSenha}
+                onFocus={() => setCampoFocado("senha")}
+                onBlur={() =>
+                  setCampoFocado((campo) => (campo === "senha" ? null : campo))
+                }
                 secureTextEntry={!mostrarSenha}
+                autoCapitalize="none"
+                autoCorrect={false}
               />
 
               <TouchableOpacity
                 onPress={() =>
                   setMostrarSenha(!mostrarSenha)
+                }
+                activeOpacity={0.7}
+                style={styles.showPasswordButton}
+                onFocus={() => setCampoFocado("senha")}
+                onBlur={() =>
+                  setCampoFocado((campo) => (campo === "senha" ? null : campo))
                 }
               >
                 <Text style={styles.showPassword}>
@@ -181,20 +197,45 @@ export default function Cadastro() {
               </TouchableOpacity>
             </View>
 
+            <Text style={styles.passwordHint}>
+              Use pelo menos 6 caracteres, uma letra maiúscula, um número e um símbolo (por exemplo, !, @ ou #). Espaços não contam como símbolo. Senhas mais longas são mais seguras.
+            </Text>
+
             {/* Confirmar senha */}
-            <View style={styles.passwordContainer}>
+            <View
+              style={[
+                styles.passwordContainer,
+                campoFocado === "confirmarSenha" && styles.focusedField,
+              ]}
+            >
               <TextInput
                 style={styles.passwordInput}
                 placeholder="Confirmar senha"
-                placeholderTextColor="#6B8F86"
+                placeholderTextColor={Cores.textoSuave}
                 value={confirmarSenha}
                 onChangeText={setConfirmarSenha}
+                onFocus={() => setCampoFocado("confirmarSenha")}
+                onBlur={() =>
+                  setCampoFocado((campo) =>
+                    campo === "confirmarSenha" ? null : campo
+                  )
+                }
                 secureTextEntry={!mostrarConfirmacao}
+                autoCapitalize="none"
+                autoCorrect={false}
               />
 
               <TouchableOpacity
                 onPress={() =>
                   setMostrarConfirmacao(!mostrarConfirmacao)
+                }
+                activeOpacity={0.7}
+                style={styles.showPasswordButton}
+                onFocus={() => setCampoFocado("confirmarSenha")}
+                onBlur={() =>
+                  setCampoFocado((campo) =>
+                    campo === "confirmarSenha" ? null : campo
+                  )
                 }
               >
                 <Text style={styles.showPassword}>
@@ -210,7 +251,7 @@ export default function Cadastro() {
               disabled={carregando}
             >
               {carregando ? (
-                <ActivityIndicator color="#0B3B33" />
+                <ActivityIndicator color={Cores.texto} />
               ) : (
                 <Text style={styles.primaryButtonText}>Criar conta</Text>
               )}
@@ -237,10 +278,10 @@ export default function Cadastro() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F5FBF7",
+    backgroundColor: Cores.fundo,
   },
 
   scroll: {
@@ -264,7 +305,7 @@ const styles = StyleSheet.create({
   },
 
   backText: {
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 35,
     fontWeight: "300",
   },
@@ -273,11 +314,11 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 16,
-    backgroundColor: "#00C896",
+    backgroundColor: Cores.principal,
     justifyContent: "center",
     alignItems: "center",
 
-    shadowColor: "#0B3B33",
+    shadowColor: Cores.sombra,
     shadowOpacity: 0.12,
     shadowRadius: 8,
     shadowOffset: {
@@ -288,13 +329,13 @@ const styles = StyleSheet.create({
   },
 
   logoText: {
-    color: "#0B3B33",
+    color: Cores.textoSobrePrincipal,
     fontSize: 30,
     fontWeight: "700",
   },
 
   title: {
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 25,
     fontWeight: "600",
     marginTop: 22,
@@ -302,7 +343,7 @@ const styles = StyleSheet.create({
   },
 
   subtitle: {
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     fontSize: 14,
     marginTop: 7,
     textAlign: "center",
@@ -316,21 +357,28 @@ const styles = StyleSheet.create({
 
   input: {
     height: 52,
-    backgroundColor: "#F0F8F4",
+    backgroundColor: Cores.fundoCampo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
     borderRadius: 12,
     paddingHorizontal: 15,
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 14,
     marginBottom: 11,
+    outlineStyle: "solid",
+    outlineWidth: 0,
+  },
+
+  focusedField: {
+    borderWidth: 2,
+    borderColor: Cores.textoPositivo,
   },
 
   passwordContainer: {
     height: 52,
-    backgroundColor: "#F0F8F4",
+    backgroundColor: Cores.fundoCampo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
     borderRadius: 12,
     flexDirection: "row",
     alignItems: "center",
@@ -339,21 +387,38 @@ const styles = StyleSheet.create({
     marginBottom: 11,
   },
 
+  passwordHint: {
+    color: Cores.textoSuave,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: -4,
+    marginBottom: 8,
+  },
+
   passwordInput: {
     flex: 1,
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 14,
+    height: "100%",
+    borderRadius: 12,
+    outlineStyle: "solid",
+    outlineWidth: 0,
+  },
+
+  showPasswordButton: {
+    outlineStyle: "solid",
+    outlineWidth: 0,
   },
 
   showPassword: {
-    color: "#00A17A",
+    color: Cores.textoPositivo,
     fontSize: 11,
     fontWeight: "600",
   },
 
   primaryButton: {
     height: 52,
-    backgroundColor: "#00C896",
+    backgroundColor: Cores.principal,
     borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
@@ -361,7 +426,7 @@ const styles = StyleSheet.create({
   },
 
   primaryButtonText: {
-    color: "#0B3B33",
+    color: Cores.textoSobrePrincipal,
     fontSize: 15,
     fontWeight: "700",
   },
@@ -373,72 +438,15 @@ const styles = StyleSheet.create({
   },
 
   loginText: {
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     fontSize: 13,
   },
 
   loginLink: {
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 13,
     fontWeight: "700",
     marginLeft: 5,
-  },
-
-  successOverlay: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "rgba(11, 59, 51, 0.35)",
-    padding: 24,
-  },
-
-  successCard: {
-    width: "100%",
-    maxWidth: 340,
-    alignItems: "center",
-    backgroundColor: "#F5FBF7",
-    borderRadius: 16,
-    padding: 28,
-  },
-
-  successIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#00C896",
-    marginBottom: 16,
-  },
-
-  successIconText: {
-    color: "#0B3B33",
-    fontSize: 28,
-    fontWeight: "700",
-  },
-
-  successTitle: {
-    color: "#0B3B33",
-    fontSize: 18,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-
-  successText: {
-    color: "#6B8F86",
-    fontSize: 14,
-    marginTop: 8,
-    textAlign: "center",
-  },
-
-  successLoginButton: {
-    width: "100%",
-    height: 48,
-    backgroundColor: "#00C896",
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 8,
   },
 
 });

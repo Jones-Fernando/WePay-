@@ -11,7 +11,9 @@ class NotificacaoModel:
             try:
                 cursor.execute(
                     """
-                    SELECT notificacoes_ativas, sons_notificacoes_ativos
+                    SELECT notificacoes_ativas, sons_notificacoes_ativos,
+                           notificacoes_despesas_ativas,
+                           notificacoes_cobrancas_ativas
                     FROM usuarios WHERE id = ? AND excluido_em IS NULL
                     """,
                     (usuario_id,),
@@ -22,22 +24,39 @@ class NotificacaoModel:
                 return {
                     "notificacoes": bool(row["notificacoes_ativas"]),
                     "sons": bool(row["sons_notificacoes_ativos"]),
+                    "despesas": bool(row["notificacoes_despesas_ativas"]),
+                    "cobrancas": bool(row["notificacoes_cobrancas_ativas"]),
                 }
             finally:
                 cursor.close()
 
     @staticmethod
-    def atualizar_preferencias(usuario_id, notificacoes, sons):
+    def atualizar_preferencias(
+        usuario_id,
+        notificacoes,
+        sons,
+        despesas=True,
+        cobrancas=True,
+    ):
         with get_connection_context() as conn:
             cursor = cursor_for(conn)
             try:
                 cursor.execute(
                     """
                     UPDATE usuarios
-                    SET notificacoes_ativas = ?, sons_notificacoes_ativos = ?
+                    SET notificacoes_ativas = ?,
+                        sons_notificacoes_ativos = ?,
+                        notificacoes_despesas_ativas = ?,
+                        notificacoes_cobrancas_ativas = ?
                     WHERE id = ? AND excluido_em IS NULL
                     """,
-                    (notificacoes, sons, usuario_id),
+                    (
+                        notificacoes,
+                        sons,
+                        despesas,
+                        cobrancas,
+                        usuario_id,
+                    ),
                 )
                 atualizado = cursor.rowcount > 0
                 if not atualizado:
@@ -120,6 +139,7 @@ class NotificacaoModel:
                 cursor.execute(
                     """
                     SELECT t.id AS token_id, n.usuario_id, n.grupo_id,
+                           n.referencia_id,
                            n.tipo, n.titulo,
                            g.nome AS grupo_nome,
                            u.sons_notificacoes_ativos, t.token
@@ -138,17 +158,34 @@ class NotificacaoModel:
                 cursor.close()
 
     @staticmethod
-    def criar(usuario_id, grupo_id, tipo, titulo, mensagem, conn=None):
+    def criar(
+        usuario_id,
+        grupo_id,
+        tipo,
+        titulo,
+        mensagem,
+        conn=None,
+        referencia_id=None,
+    ):
         context = nullcontext(conn) if conn is not None else get_connection_context()
         with context as connection:
             cursor = cursor_for(connection)
             try:
                 cursor.execute(
-                    "INSERT INTO notificacoes (usuario_id, grupo_id, tipo, titulo, mensagem) VALUES (?, ?, ?, ?, ?)",
-                    (usuario_id, grupo_id, tipo, titulo, mensagem),
+                    "INSERT INTO notificacoes "
+                    "(usuario_id, grupo_id, referencia_id, tipo, titulo, mensagem) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        usuario_id,
+                        grupo_id,
+                        referencia_id,
+                        tipo,
+                        titulo,
+                        mensagem,
+                    ),
                 )
                 item_id = cursor.lastrowid
-                if tipo == "nova_despesa":
+                if tipo in {"nova_despesa", "cobranca"}:
                     from models.push_outbox_model import PushOutboxModel
 
                     PushOutboxModel.enfileirar(item_id, connection)
@@ -175,10 +212,13 @@ class NotificacaoModel:
                 total = int(fetch_one(cursor)["total"])
                 cursor.execute(
                     """
-                    SELECT id, grupo_id, tipo, titulo, mensagem, lida, criado_em
-                    FROM notificacoes
-                    WHERE usuario_id = ? AND (? = 0 OR lida = 0)
-                    ORDER BY criado_em DESC, id DESC
+                    SELECT n.id, n.grupo_id, n.referencia_id,
+                           g.nome AS grupo_nome, n.tipo, n.titulo,
+                           n.mensagem, n.lida, n.criado_em
+                    FROM notificacoes n
+                    LEFT JOIN grupos g ON g.id = n.grupo_id
+                    WHERE n.usuario_id = ? AND (? = 0 OR n.lida = 0)
+                    ORDER BY n.criado_em DESC, n.id DESC
                     LIMIT ? OFFSET ?
                     """,
                     (usuario_id, filtro_nao_lidas, limit, offset),
@@ -204,5 +244,21 @@ class NotificacaoModel:
                 atualizado = cursor.rowcount
                 conn.commit()
                 return atualizado > 0
+            finally:
+                cursor.close()
+
+    @staticmethod
+    def marcar_todas_lidas(usuario_id):
+        with get_connection_context() as conn:
+            cursor = cursor_for(conn)
+            try:
+                cursor.execute(
+                    "UPDATE notificacoes SET lida = 1 "
+                    "WHERE usuario_id = ? AND lida = 0",
+                    (usuario_id,),
+                )
+                atualizadas = cursor.rowcount
+                conn.commit()
+                return atualizadas
             finally:
                 cursor.close()

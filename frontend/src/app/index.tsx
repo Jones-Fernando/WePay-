@@ -1,3 +1,5 @@
+import { useAppTheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 /**
  * WEPAY — ENTRADA DO APP
  *
@@ -13,14 +15,21 @@ import { Redirect } from "expo-router";
 import { useUsuario } from "@/contexts/UsuarioContext";
 
 export default function Index() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
   const { usuario, carregando, erroRestauracao, restaurarSessao } = useUsuario();
 
   if (carregando) {
     return (
       <View
-        style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: Cores.fundo,
+        }}
       >
-        <ActivityIndicator color="#00C896" />
+        <ActivityIndicator color={Cores.principal} />
       </View>
     );
   }
@@ -40,22 +49,22 @@ export default function Index() {
   return <Redirect href={usuario ? "/(main)/home" : "/(auth)/login"} />;
 }
 
-const styles = StyleSheet.create({
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
   container: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     padding: 24,
-    backgroundColor: "#F5FBF7",
+    backgroundColor: Cores.fundo,
   },
   title: {
-    color: "#0B3B33",
+    color: Cores.texto,
     fontSize: 20,
     fontWeight: "700",
     textAlign: "center",
   },
   message: {
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     fontSize: 14,
     marginTop: 10,
     textAlign: "center",
@@ -64,13 +73,13 @@ const styles = StyleSheet.create({
     minHeight: 48,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#00C896",
+    backgroundColor: Cores.principal,
     borderRadius: 14,
     paddingHorizontal: 20,
     marginTop: 20,
   },
   buttonText: {
-    color: "#0B3B33",
+    color: Cores.textoSobrePrincipal,
     fontWeight: "700",
   },
 });

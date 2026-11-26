@@ -31,6 +31,10 @@ RETENTION_RULES = (
         "push_outbox",
         "status = 'sent' AND enviado_em < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 90 DAY)",
     ),
+    (
+        "gemini_usage_diaria",
+        "data_utc < DATE_SUB(UTC_DATE(), INTERVAL 365 DAY)",
+    ),
 )
 
 RETENTION_QUERIES = {
@@ -89,6 +93,16 @@ RETENTION_QUERIES = {
         DELETE FROM push_outbox
         WHERE status = 'sent' AND enviado_em < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 90 DAY)
         ORDER BY id
+        LIMIT ?
+        """,
+    ),
+    "gemini_usage_diaria": (
+        "SELECT COUNT(*) AS total FROM gemini_usage_diaria "
+        "WHERE data_utc < DATE_SUB(UTC_DATE(), INTERVAL 365 DAY)",
+        """
+        DELETE FROM gemini_usage_diaria
+        WHERE data_utc < DATE_SUB(UTC_DATE(), INTERVAL 365 DAY)
+        ORDER BY data_utc, usuario_id, modelo
         LIMIT ?
         """,
     ),

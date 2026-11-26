@@ -3,6 +3,9 @@ from decimal import Decimal, InvalidOperation
 
 
 MAX_MONEY = Decimal("9999999999.99")
+MAX_GROUP_NAME_LENGTH = 120
+MAX_GROUP_DESCRIPTION_LENGTH = 500
+MAX_PARTICIPANTS_PER_GROUP = 100
 
 
 def parse_money(value):

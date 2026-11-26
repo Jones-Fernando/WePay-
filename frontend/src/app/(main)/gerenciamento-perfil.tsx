@@ -1,3 +1,5 @@
+import { useAppTheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 /**
  * ============================================================
  * WEPAY - GERENCIAMENTO DE PERFIL
@@ -6,10 +8,7 @@
  * Esta tela permite ao usuário:
  *
  * - visualizar seus dados;
- * - alterar nome;
- * - alterar e-mail;
- * - alterar telefone;
- * - salvar alterações;
+ * - abrir a edição das informações pessoais;
  * - acessar a alteração de senha;
  * - sair da conta.
  *
@@ -51,13 +50,13 @@ import React, { useState } from "react";
  * Componentes básicos do React Native.
  */
 import {
-  Alert,
+  ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -74,8 +73,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
  * Expo Router permite navegar entre as telas.
  */
 import { router } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
 import { useUsuario } from "@/contexts/UsuarioContext";
 import { authApi } from "@/services/api";
+import { Alert } from "@/services/feedback";
 
 
 /**
@@ -84,198 +85,74 @@ import { authApi } from "@/services/api";
 ============================================================ */
 
 export default function GerenciamentoPerfilScreen() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
   const { usuario, atualizarPerfil, logout } = useUsuario();
   const usuarioAtual = usuario ?? {
     id: "",
     nome: "",
     email: "",
     telefone: "",
+    pixChave: "",
     iniciais: "",
     saldoTotal: 0,
   };
 
-  /**
-   * ==========================================================
-   * ESTADOS DO FORMULÁRIO
-   ========================================================== */
-
-  /**
-   * Nome atual do usuário.
-   */
-  const [nome, setNome] = useState(usuarioAtual.nome);
-
-
-  /**
-   * E-mail do usuário.
-   */
-  const [email, setEmail] =
-    useState(usuarioAtual.email);
-
-
-  /**
-   * Telefone do usuário.
-   */
-  const [telefone, setTelefone] =
-    useState(usuarioAtual.telefone);
-
-
-  /**
-   * Controla o estado de carregamento do botão
-   * "Salvar alterações".
-   */
-  const [salvando, setSalvando] =
+  const [alterandoFoto, setAlterandoFoto] =
     useState(false);
 
-
-  /**
-   * ==========================================================
-   * FUNÇÃO DE VALIDAÇÃO DE E-MAIL
-   ========================================================== */
-
-  /**
-   * Verifica se o e-mail possui uma estrutura básica.
-   */
-  function emailValido(valor: string): boolean {
-
-    return /\S+@\S+\.\S+/.test(valor);
-
-  }
-
-
-  /**
-   * ==========================================================
-   * FUNÇÃO DE SALVAR
-   ========================================================== */
-
-  async function salvarAlteracoes() {
-
-    /**
-     * Remove espaços desnecessários do nome.
-     */
-    const nomeLimpo = nome.trim();
-
-
-    /**
-     * Remove espaços desnecessários do e-mail.
-     */
-    const emailLimpo = email.trim();
-
-
-    /**
-     * ========================================================
-     * VALIDAÇÃO DO NOME
-     ======================================================== */
-
-    if (!nomeLimpo) {
-
-      Alert.alert(
-        "Atenção",
-        "Digite seu nome."
-      );
-
-      return;
-    }
-
-
-    /**
-     * Evita nomes muito curtos.
-     */
-    if (nomeLimpo.length < 3) {
-
-      Alert.alert(
-        "Atenção",
-        "O nome precisa ter pelo menos 3 caracteres."
-      );
-
-      return;
-    }
-
-
-    /**
-     * ========================================================
-     * VALIDAÇÃO DO E-MAIL
-     ======================================================== */
-
-    if (!emailLimpo) {
-
-      Alert.alert(
-        "Atenção",
-        "Digite seu e-mail."
-      );
-
-      return;
-    }
-
-
-    /**
-     * Verifica se o e-mail possui um formato válido.
-     */
-    if (!emailValido(emailLimpo)) {
-
-      Alert.alert(
-        "Atenção",
-        "Digite um e-mail válido."
-      );
-
-      return;
-    }
-
-
-    /**
-     * ========================================================
-     * PROCESSAMENTO
-     ======================================================== */
+  async function selecionarFotoPerfil() {
+    if (alterandoFoto) return;
+    setAlterandoFoto(true);
 
     try {
+      if (Platform.OS !== "web") {
+        const permissao =
+          await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!permissao.granted) {
+          Alert.alert(
+            "Permissão necessária",
+            "Permita o acesso às fotos para escolher uma imagem de perfil.",
+          );
+          return;
+        }
+      }
 
-      /**
-       * Ativa o estado de carregamento.
-       */
-      setSalvando(true);
-
-
-      await authApi.atualizarPerfil({
-        nome: nomeLimpo,
-        email: emailLimpo,
-        telefone: telefone.trim(),
+      const resultado = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+        base64: true,
       });
+      if (resultado.canceled || !resultado.assets[0]) return;
 
-      atualizarPerfil({
-        nome: nomeLimpo,
-        email: emailLimpo,
-        telefone: telefone.trim(),
-      });
+      const imagemBase64 = resultado.assets[0].base64;
+      if (!imagemBase64) {
+        Alert.alert(
+          "Foto inválida",
+          "Não foi possível ler a imagem selecionada. Escolha outra foto.",
+        );
+        return;
+      }
 
-
-      /**
-       * Mostra mensagem de sucesso.
-       */
+      try {
+        const resposta = await authApi.atualizarAvatar(imagemBase64);
+        atualizarPerfil({ avatarUrl: resposta.data.avatar_url });
+      } catch {
+        // A camada da API já exibe o erro de operações CRUD.
+        return;
+      }
+    } catch (erro) {
       Alert.alert(
-        "Perfil atualizado",
-        "Suas informações foram atualizadas com sucesso."
+        "Foto não atualizada",
+        erro instanceof Error
+          ? erro.message
+          : "Não foi possível salvar sua foto de perfil.",
       );
-
-    } catch {
-
-      /**
-       * Caso aconteça algum erro.
-       */
-      Alert.alert(
-        "Erro",
-        "Não foi possível atualizar seu perfil."
-      );
-
     } finally {
-
-      /**
-       * O finally executa tanto em sucesso quanto em erro.
-       *
-       * Portanto, sempre removemos o estado de carregamento.
-       */
-      setSalvando(false);
-
+      setAlterandoFoto(false);
     }
-
   }
 
 
@@ -283,6 +160,10 @@ export default function GerenciamentoPerfilScreen() {
    * ==========================================================
    * FUNÇÃO ALTERAR SENHA
    ========================================================== */
+
+  function abrirInformacoesPessoais() {
+    router.push("/(main)/informacoes-pessoais");
+  }
 
   function alterarSenha() {
     router.push("/(main)/alterar-senha");
@@ -295,56 +176,33 @@ export default function GerenciamentoPerfilScreen() {
    * FUNÇÃO SAIR
    ========================================================== */
 
+  async function confirmarSaida() {
+    try {
+      await logout();
+    } catch (erro) {
+      Alert.alert(
+        "Sessão encerrada",
+        erro instanceof Error
+          ? erro.message
+          : "A sessão local foi encerrada, mas o servidor não confirmou a revogação.",
+      );
+    }
+    router.replace("/(auth)/login");
+  }
+
   function sairDaConta() {
+    const mensagem = "Tem certeza que deseja sair da sua conta?";
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm(mensagem)) {
+        void confirmarSaida();
+      }
+      return;
+    }
 
-    /**
-     * Antes de sair, pedimos confirmação ao usuário.
-     *
-     * O Alert possui dois botões:
-     *
-     * Cancelar
-     * Sair
-     */
-
-    Alert.alert(
-      "Sair da conta",
-      "Tem certeza que deseja sair da sua conta?",
-      [
-        {
-          text: "Cancelar",
-          style: "cancel",
-        },
-
-        {
-          text: "Sair",
-
-          /**
-           * Aqui ficará futuramente a remoção do token
-           * armazenado no dispositivo.
-           *
-           * Exemplo futuro:
-           *
-           * await storage.removeToken();
-           */
-
-          onPress: async () => {
-            try {
-              await logout();
-            } catch (erro) {
-              Alert.alert(
-                "Sessão encerrada",
-                erro instanceof Error
-                  ? erro.message
-                  : "A sessão local foi encerrada, mas o servidor não confirmou a revogação.",
-              );
-            }
-            router.replace("/(auth)/login");
-
-          },
-        },
-      ]
-    );
-
+    Alert.alert("Sair da conta", mensagem, [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Sair", onPress: () => void confirmarSaida() },
+    ]);
   }
 
 
@@ -416,7 +274,7 @@ export default function GerenciamentoPerfilScreen() {
             </View>
 
 
-            {/*
+            {/* 
               Espaço vazio do lado direito.
               Ele serve para manter o título centralizado.
             */}
@@ -424,7 +282,6 @@ export default function GerenciamentoPerfilScreen() {
             <View style={styles.headerSpace} />
 
           </View>
-
 
           {/* =================================================
               PERFIL / AVATAR
@@ -438,9 +295,17 @@ export default function GerenciamentoPerfilScreen() {
 
             <View style={styles.profileAvatar}>
 
-              <Text style={styles.profileAvatarText}>
-                {usuarioAtual.iniciais}
-              </Text>
+              {usuarioAtual.avatarUrl ? (
+                <Image
+                  accessibilityLabel="Foto de perfil"
+                  source={{ uri: usuarioAtual.avatarUrl }}
+                  style={styles.profileAvatarImage}
+                />
+              ) : (
+                <Text style={styles.profileAvatarText}>
+                  {usuarioAtual.iniciais || "?"}
+                </Text>
+              )}
 
             </View>
 
@@ -450,7 +315,7 @@ export default function GerenciamentoPerfilScreen() {
             -------------------------------------------------- */}
 
             <Text style={styles.profileName}>
-              {nome || "Seu nome"}
+              {usuarioAtual.nome || "Seu nome"}
             </Text>
 
 
@@ -468,291 +333,122 @@ export default function GerenciamentoPerfilScreen() {
             -------------------------------------------------- */}
 
             <TouchableOpacity
-              style={styles.photoButton}
-              activeOpacity={0.7}
-              onPress={() =>
-                Alert.alert(
-                  "Foto de perfil",
-                  "A alteração da foto será implementada posteriormente."
-                )
-              }
-            >
-
-              <Text style={styles.photoButtonText}>
-                Alterar foto
-              </Text>
-
-            </TouchableOpacity>
-
-          </View>
-
-
-          {/* =================================================
-              SEÇÃO: INFORMAÇÕES PESSOAIS
-          ================================================== */}
-
-          <View style={styles.section}>
-
-            <Text style={styles.sectionTitle}>
-              Informações pessoais
-            </Text>
-
-
-            {/* -------------------------------------------------
-                NOME
-            -------------------------------------------------- */}
-
-            <View style={styles.field}>
-
-              <Text style={styles.label}>
-                Nome
-              </Text>
-
-
-              <TextInput
-                style={styles.input}
-
-                /**
-                 * Valor atual do campo.
-                 */
-                value={nome}
-
-                /**
-                 * Atualiza o estado sempre que
-                 * o usuário digitar.
-                 */
-                onChangeText={setNome}
-
-                placeholder="Digite seu nome"
-                placeholderTextColor="#6B8F86"
-
-                /**
-                 * Como o nome é textual,
-                 * utilizamos capitalização de palavras.
-                 */
-                autoCapitalize="words"
-
-                autoCorrect={false}
-              />
-
-            </View>
-
-
-            {/* -------------------------------------------------
-                E-MAIL
-            -------------------------------------------------- */}
-
-            <View style={styles.field}>
-
-              <Text style={styles.label}>
-                E-mail
-              </Text>
-
-
-              <TextInput
-                style={styles.input}
-
-                value={email}
-
-                onChangeText={setEmail}
-
-                placeholder="seu@email.com"
-
-                placeholderTextColor="#6B8F86"
-
-                /**
-                 * Teclado apropriado para e-mail.
-                 */
-                keyboardType="email-address"
-
-                /**
-                 * Evita alteração automática para
-                 * letras maiúsculas.
-                 */
-                autoCapitalize="none"
-
-                autoCorrect={false}
-              />
-
-            </View>
-
-
-            {/* -------------------------------------------------
-                TELEFONE
-            -------------------------------------------------- */}
-
-            <View style={styles.field}>
-
-              <Text style={styles.label}>
-                Telefone
-              </Text>
-
-
-              <TextInput
-                style={styles.input}
-
-                value={telefone}
-
-                onChangeText={setTelefone}
-
-                placeholder="(00) 00000-0000"
-
-                placeholderTextColor="#6B8F86"
-
-                keyboardType="phone-pad"
-
-                /**
-                 * Não aplicamos máscara automática aqui.
-                 *
-                 * A máscara pode ser adicionada posteriormente
-                 * em utils/mask.ts, caso você mantenha essa
-                 * pasta na evolução da arquitetura.
-                 */
-              />
-
-            </View>
-
-
-            {/* =================================================
-                BOTÃO SALVAR
-            ================================================== */}
-
-            <TouchableOpacity
               style={[
-                styles.saveButton,
-
-                /**
-                 * Durante salvamento o botão fica
-                 * visualmente mais discreto.
-                 */
-                salvando &&
-                  styles.saveButtonDisabled,
+                styles.photoButton,
+                alterandoFoto && styles.photoButtonDisabled,
               ]}
-
-              /**
-               * Evita executar novamente enquanto
-               * uma operação estiver em andamento.
-               */
-              disabled={salvando}
-
-              onPress={salvarAlteracoes}
-
-              activeOpacity={0.8}
+              disabled={alterandoFoto}
+              activeOpacity={0.7}
+              onPress={() => void selecionarFotoPerfil()}
             >
 
-              <Text style={styles.saveButtonText}>
-
-                {salvando
-                  ? "Salvando..."
-                  : "Salvar alterações"}
-
-              </Text>
+              {alterandoFoto ? (
+                <ActivityIndicator size="small" color={Cores.textoPositivo} />
+              ) : (
+                <Text style={styles.photoButtonText}>
+                  {usuarioAtual.avatarUrl ? "Alterar foto" : "Adicionar foto"}
+                </Text>
+              )}
 
             </TouchableOpacity>
 
           </View>
 
 
-          {/* =================================================
-              SEÇÃO: SEGURANÇA
-          ================================================== */}
-
           <View style={styles.section}>
+            <View style={styles.optionGroupSpacing}>
+              <Text style={styles.sectionTitle}>Perfil</Text>
+              <TouchableOpacity
+                testID="personal-info-option"
+                style={styles.optionCard}
+                onPress={abrirInformacoesPessoais}
+                activeOpacity={0.7}
+              >
+                <View style={styles.optionIcon}>
+                  <Text style={styles.optionIconText}>👤</Text>
+                </View>
 
-            <Text style={styles.sectionTitle}>
-              Segurança
-            </Text>
+                <View style={styles.optionContent}>
+                  <Text style={styles.optionTitle}>Informações pessoais</Text>
+                  <Text style={styles.optionDescription}>
+                    Nome, e-mail e chave Pix
+                  </Text>
+                </View>
 
+                <Text style={styles.optionArrow}>›</Text>
+              </TouchableOpacity>
+            </View>
 
-            {/* -------------------------------------------------
-                ALTERAR SENHA
-            -------------------------------------------------- */}
+            <View style={styles.optionGroupSpacing}>
+              <Text style={styles.sectionTitle}>Segurança</Text>
+              <TouchableOpacity
+                style={styles.optionCard}
+                onPress={alterarSenha}
+                activeOpacity={0.7}
+              >
+                <View style={styles.optionIcon}>
+                  <Text style={styles.optionIconText}>🔒</Text>
+                </View>
 
-            <TouchableOpacity
-              style={styles.optionCard}
-              onPress={alterarSenha}
-              activeOpacity={0.7}
-            >
+                <View style={styles.optionContent}>
+                  <Text style={styles.optionTitle}>Alterar senha</Text>
+                  <Text style={styles.optionDescription}>
+                    Atualize a senha da sua conta
+                  </Text>
+                </View>
 
-              <View style={styles.optionIcon}>
+                <Text style={styles.optionArrow}>›</Text>
+              </TouchableOpacity>
+            </View>
 
-                <Text style={styles.optionIconText}>
-                  🔒
-                </Text>
+            <View>
+              <Text style={styles.sectionTitle}>Conta</Text>
+              <TouchableOpacity
+                style={styles.optionCard}
+                onPress={() => router.push("/(main)/configuracoes")}
+                activeOpacity={0.7}
+              >
+                <View style={styles.optionIcon}>
+                  <Text style={styles.optionIconText}>⚙️</Text>
+                </View>
 
-              </View>
+                <View style={styles.optionContent}>
+                  <Text style={styles.optionTitle}>Configurações</Text>
+                  <Text style={styles.optionDescription}>
+                    Notificações, tema e privacidade
+                  </Text>
+                </View>
 
-
-              <View style={styles.optionContent}>
-
-                <Text style={styles.optionTitle}>
-                  Alterar senha
-                </Text>
-
-                <Text style={styles.optionDescription}>
-                  Atualize a senha da sua conta
-                </Text>
-
-              </View>
-
-
-              <Text style={styles.optionArrow}>
-                ›
-              </Text>
-
-            </TouchableOpacity>
+                <Text style={styles.optionArrow}>›</Text>
+              </TouchableOpacity>
+            </View>
 
           </View>
 
 
-          {/* =================================================
-              SEÇÃO: CONTA
-          ================================================== */}
-
           <View style={styles.section}>
-
-            <Text style={styles.sectionTitle}>
-              Conta
-            </Text>
-
-            <TouchableOpacity
-              style={styles.optionCard}
-              onPress={() => router.push("/(main)/configuracoes")}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.optionIcon, { backgroundColor: "#00C896" }]}>
-                <Text style={styles.optionIconText}>⚙️</Text>
-              </View>
-
-              <View style={styles.optionContent}>
-                <Text style={styles.optionTitle}>Configurações</Text>
-                <Text style={styles.optionDescription}>
-                  Notificações, tema e privacidade
-                </Text>
-              </View>
-
-              <Text style={styles.optionArrow}>›</Text>
-            </TouchableOpacity>
-
 
             {/* -------------------------------------------------
                 SAIR
             -------------------------------------------------- */}
 
             <TouchableOpacity
-              style={styles.logoutButton}
+              style={styles.optionCard}
               onPress={sairDaConta}
               activeOpacity={0.7}
             >
+              <View style={styles.optionIcon}>
+                <Text style={styles.optionIconText}>↪</Text>
+              </View>
 
-              <Text style={styles.logoutIcon}>
-                ↪
-              </Text>
+              <View style={styles.optionContent}>
+                <Text style={styles.optionTitle}>Sair da conta</Text>
+                <Text style={styles.optionDescription}>
+                  Desconecte sua conta deste dispositivo.
+                </Text>
+              </View>
 
-              <Text style={styles.logoutText}>
-                Sair da conta
-              </Text>
-
+              <Text style={styles.optionArrow}>›</Text>
             </TouchableOpacity>
 
           </View>
@@ -817,7 +513,7 @@ export default function GerenciamentoPerfilScreen() {
    STYLE SHEET
 ============================================================ */
 
-const styles = StyleSheet.create({
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
 
   /* ==========================================================
      CONTAINER PRINCIPAL
@@ -825,7 +521,7 @@ const styles = StyleSheet.create({
 
   container: {
     flex: 1,
-    backgroundColor: "#F5FBF7",
+    backgroundColor: Cores.fundo,
   },
 
 
@@ -836,7 +532,7 @@ const styles = StyleSheet.create({
 
   screen: {
     flex: 1,
-    backgroundColor: "#F5FBF7",
+    backgroundColor: Cores.fundo,
   },
 
 
@@ -869,18 +565,18 @@ const styles = StyleSheet.create({
 
     borderRadius: 12,
 
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
 
     justifyContent: "center",
     alignItems: "center",
 
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
   },
 
 
   backText: {
-    color: "#0B3B33",
+    color: Cores.texto,
 
     fontSize: 28,
 
@@ -904,7 +600,7 @@ const styles = StyleSheet.create({
 
     fontWeight: "700",
 
-    color: "#0B3B33",
+    color: Cores.texto,
   },
 
 
@@ -913,7 +609,7 @@ const styles = StyleSheet.create({
 
     fontSize: 10.5,
 
-    color: "#6B8F86",
+    color: Cores.textoSuave,
   },
 
 
@@ -941,7 +637,7 @@ const styles = StyleSheet.create({
 
     borderRadius: 28,
 
-    backgroundColor: "#0B3B33",
+    backgroundColor: Cores.superficieMarca,
 
     justifyContent: "center",
     alignItems: "center",
@@ -949,11 +645,17 @@ const styles = StyleSheet.create({
 
 
   profileAvatarText: {
-    color: "#FFFFFF",
+    color: Cores.textoSobreMarca,
 
     fontSize: 24,
 
     fontWeight: "800",
+  },
+
+  profileAvatarImage: {
+    width: 84,
+    height: 84,
+    borderRadius: 28,
   },
 
 
@@ -964,7 +666,7 @@ const styles = StyleSheet.create({
 
     fontWeight: "700",
 
-    color: "#0B3B33",
+    color: Cores.texto,
   },
 
 
@@ -973,7 +675,7 @@ const styles = StyleSheet.create({
 
     fontSize: 11,
 
-    color: "#6B8F86",
+    color: Cores.textoSuave,
   },
 
 
@@ -985,10 +687,14 @@ const styles = StyleSheet.create({
 
     borderRadius: 20,
 
-    backgroundColor: "#F0F8F4",
+    backgroundColor: Cores.fundoCampo,
 
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
+  },
+
+  photoButtonDisabled: {
+    opacity: 0.6,
   },
 
 
@@ -997,7 +703,7 @@ const styles = StyleSheet.create({
 
     fontWeight: "700",
 
-    color: "#00A17A",
+    color: Cores.textoPositivo,
   },
 
 
@@ -1019,79 +725,12 @@ const styles = StyleSheet.create({
 
     fontWeight: "700",
 
-    color: "#0B3B33",
+    color: Cores.texto,
   },
 
-
-  /* ==========================================================
-     CAMPOS
-  ========================================================== */
-
-  field: {
+  optionGroupSpacing: {
     marginBottom: 12,
   },
-
-
-  label: {
-    marginBottom: 6,
-
-    fontSize: 11,
-
-    fontWeight: "600",
-
-    color: "#6B8F86",
-  },
-
-
-  input: {
-    minHeight: 50,
-
-    paddingHorizontal: 13,
-
-    borderRadius: 12,
-
-    backgroundColor: "#F0F8F4",
-
-    borderWidth: 1,
-    borderColor: "#E1EEE8",
-
-    fontSize: 13,
-
-    color: "#0B3B33",
-  },
-
-
-  /* ==========================================================
-     BOTÃO SALVAR
-  ========================================================== */
-
-  saveButton: {
-    minHeight: 50,
-
-    marginTop: 6,
-
-    borderRadius: 12,
-
-    backgroundColor: "#00C896",
-
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-
-  saveButtonDisabled: {
-    opacity: 0.6,
-  },
-
-
-  saveButtonText: {
-    fontSize: 13,
-
-    fontWeight: "700",
-
-    color: "#0B3B33",
-  },
-
 
   /* ==========================================================
      OPÇÕES
@@ -1109,23 +748,18 @@ const styles = StyleSheet.create({
 
     borderRadius: 14,
 
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
 
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
   },
 
 
   optionIcon: {
     width: 40,
     height: 40,
-
-    borderRadius: 12,
-
     justifyContent: "center",
     alignItems: "center",
-
-    backgroundColor: "#F0F8F4",
   },
 
 
@@ -1146,7 +780,7 @@ const styles = StyleSheet.create({
 
     fontWeight: "700",
 
-    color: "#0B3B33",
+    color: Cores.texto,
   },
 
 
@@ -1155,7 +789,7 @@ const styles = StyleSheet.create({
 
     fontSize: 10,
 
-    color: "#6B8F86",
+    color: Cores.textoSuave,
   },
 
 
@@ -1166,47 +800,7 @@ const styles = StyleSheet.create({
 
     fontWeight: "300",
 
-    color: "#6B8F86",
-  },
-
-
-  /* ==========================================================
-     SAIR
-  ========================================================== */
-
-  logoutButton: {
-    minHeight: 50,
-
-    flexDirection: "row",
-
-    alignItems: "center",
-    justifyContent: "center",
-
-    borderRadius: 12,
-
-    borderWidth: 1,
-
-    borderColor: "#FFB5AA",
-
-    backgroundColor: "#FFF7F5",
-  },
-
-
-  logoutIcon: {
-    marginRight: 8,
-
-    fontSize: 18,
-
-    color: "#D24A3B",
-  },
-
-
-  logoutText: {
-    fontSize: 13,
-
-    fontWeight: "700",
-
-    color: "#D24A3B",
+    color: Cores.textoSuave,
   },
 
 
@@ -1230,7 +824,7 @@ const styles = StyleSheet.create({
 
     letterSpacing: 1.5,
 
-    color: "#6B8F86",
+    color: Cores.textoSuave,
   },
 
 
@@ -1239,6 +833,6 @@ const styles = StyleSheet.create({
 
     fontSize: 9,
 
-    color: "#6B8F86",
+    color: Cores.textoSuave,
   },
 });

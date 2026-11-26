@@ -1,0 +1,12 @@
+[Unit]
+Description=Schedule WePay password recovery email outbox health checks
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Persistent=true
+Unit=wepay-email-outbox-health.service
+
+[Install]
+WantedBy=timers.target

@@ -2,6 +2,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import { API_BASE_URL } from "@/services/apiConfig";
+import {
+  API_REQUEST_TIMEOUT_MS,
+  ApiTimeoutError,
+  getAbortError,
+} from "@/services/apiRequestErrors";
 
 const ACCESS_TOKEN_KEY = "wepay_access_token";
 const REFRESH_TOKEN_KEY = "wepay_refresh_token";
@@ -9,6 +14,10 @@ const LEGACY_ACCESS_TOKEN_KEY = "@wepay:token";
 const LEGACY_REFRESH_TOKEN_KEY = "@wepay:refresh_token";
 
 type SessionExpiredListener = () => void;
+type RefreshAccessTokenOptions = {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+};
 type RefreshResponse = {
   data?: {
     token?: unknown;
@@ -18,7 +27,15 @@ type RefreshResponse = {
 };
 
 const sessionExpiredListeners = new Set<SessionExpiredListener>();
-let refreshInProgress: Promise<string | null> | null = null;
+type RefreshOperation = {
+  controller: AbortController;
+  promise: Promise<string | null>;
+  timeoutId: ReturnType<typeof setTimeout>;
+  timedOut: boolean;
+  settled: boolean;
+  waiters: number;
+};
+let refreshInProgress: RefreshOperation | null = null;
 let webAccessToken: string | null = null;
 let webLegacyTokensRemoved: Promise<void> | null = null;
 
@@ -119,10 +136,20 @@ export async function expireSession(): Promise<void> {
   }
 }
 
-export function refreshAccessToken(): Promise<string | null> {
-  if (refreshInProgress) return refreshInProgress;
+function startRefresh(timeoutMs: number): RefreshOperation {
+  const operation = {
+    controller: new AbortController(),
+    promise: Promise.resolve(null) as Promise<string | null>,
+    timeoutId: setTimeout(() => {
+      operation.timedOut = true;
+      operation.controller.abort();
+    }, timeoutMs),
+    timedOut: false,
+    settled: false,
+    waiters: 0,
+  };
 
-  refreshInProgress = (async () => {
+  operation.promise = (async () => {
     const refreshToken = await getRefreshToken();
     if (isNativePlatform() && !refreshToken) {
       await expireSession();
@@ -138,8 +165,13 @@ export function refreshAccessToken(): Promise<string | null> {
         body: JSON.stringify(
           refreshToken ? { refresh_token: refreshToken } : {},
         ),
+        signal: operation.controller.signal,
       });
     } catch {
+      if (operation.timedOut) throw new ApiTimeoutError(timeoutMs);
+      if (operation.controller.signal.aborted) {
+        throw getAbortError(operation.controller.signal);
+      }
       throw new Error("Não foi possível conectar ao servidor.");
     }
 
@@ -173,9 +205,79 @@ export function refreshAccessToken(): Promise<string | null> {
       typeof nextRefreshToken === "string" ? nextRefreshToken : undefined,
     );
     return accessToken;
-  })().finally(() => {
-    refreshInProgress = null;
+  })().catch((error: unknown) => {
+    if (operation.timedOut) throw new ApiTimeoutError(timeoutMs);
+    if (operation.controller.signal.aborted) {
+      throw getAbortError(operation.controller.signal);
+    }
+    throw error;
+  }).finally(() => {
+    clearTimeout(operation.timeoutId);
+    operation.settled = true;
+    if (refreshInProgress === operation) refreshInProgress = null;
   });
 
-  return refreshInProgress;
+  refreshInProgress = operation;
+  return operation;
+}
+
+function waitForRefresh(
+  operation: RefreshOperation,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  if (signal?.aborted) return Promise.reject(getAbortError(signal));
+
+  operation.waiters += 1;
+  return new Promise((resolve, reject) => {
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      signal?.removeEventListener("abort", onAbort);
+      operation.waiters -= 1;
+      if (!operation.settled && operation.waiters === 0) {
+        operation.controller.abort();
+        if (refreshInProgress === operation) refreshInProgress = null;
+      }
+    };
+    const onAbort = () => {
+      release();
+      reject(getAbortError(signal));
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+
+    operation.promise.then(
+      (token) => {
+        release();
+        resolve(token);
+      },
+      (error: unknown) => {
+        release();
+        reject(error);
+      },
+    );
+  });
+}
+
+export function refreshAccessToken(
+  options: RefreshAccessTokenOptions = {},
+): Promise<string | null> {
+  const { signal, timeoutMs = API_REQUEST_TIMEOUT_MS } = options;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return Promise.reject(
+      new RangeError("timeoutMs deve ser um número maior que zero."),
+    );
+  }
+  if (signal?.aborted) return Promise.reject(getAbortError(signal));
+
+  const operation =
+    refreshInProgress && !refreshInProgress.controller.signal.aborted
+      ? refreshInProgress
+      : startRefresh(timeoutMs);
+  return waitForRefresh(operation, signal);
 }

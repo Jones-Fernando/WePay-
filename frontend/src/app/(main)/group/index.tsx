@@ -1,7 +1,8 @@
+import { useAppTheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   RefreshControl,
   SafeAreaView,
@@ -13,22 +14,14 @@ import {
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { gruposApi, Grupo } from "@/services/api";
+import { IconeCategoria } from "@/components/IconeCategoria";
+import { Alert } from "@/services/feedback";
 import type { Paginacao } from "@/types/api";
 import {
   appendUniqueById,
   createPaginationRequestGate,
 } from "@/utils/paginationRequestGate";
-
-const CORES = {
-  paper: "#F5FBF7",
-  ink: "#0B3B33",
-  surface: "#FFFFFF",
-  accent: "#00C896",
-  accentDark: "#00A17A",
-  muted: "#6B8F86",
-  line: "#E1EEE8",
-  field: "#F0F8F4",
-};
+import { useFieldFocus } from "@/hooks/useFieldFocus";
 
 function iniciais(nome: string) {
   return nome
@@ -41,12 +34,15 @@ function iniciais(nome: string) {
 }
 
 export default function ListaGrupos() {
+  const CORES = useAppTheme();
+  const styles = createStyles(CORES);
   const [grupos, setGrupos] = useState<Grupo[]>([]);
   const [busca, setBusca] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [atualizando, setAtualizando] = useState(false);
   const [carregandoMais, setCarregandoMais] = useState(false);
   const [paginacao, setPaginacao] = useState<Paginacao | null>(null);
+  const { focusedField, focusHandlers } = useFieldFocus();
   const gate = useRef(createPaginationRequestGate()).current;
 
   const carregar = useCallback(async (mostrarLoading = true) => {
@@ -193,7 +189,10 @@ export default function ListaGrupos() {
             </View>
           </View>
 
-          <View style={styles.buscaContainer}>
+          <View style={[
+            styles.buscaContainer,
+            focusedField === "busca" && styles.buscaContainerFocused,
+          ]}>
             <Text style={styles.buscaIcone}>⌕</Text>
             <TextInput
               style={styles.buscaInput}
@@ -203,6 +202,7 @@ export default function ListaGrupos() {
               onChangeText={setBusca}
               returnKeyType="search"
               accessibilityLabel="Pesquisar grupos"
+              {...focusHandlers("busca")}
             />
           </View>
 
@@ -272,32 +272,38 @@ export default function ListaGrupos() {
                 </View>
               )
             }
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.cardGrupo}
-                onPress={() => abrirGrupo(item)}
-                activeOpacity={0.8}
-                accessibilityRole="button"
-                accessibilityLabel={`Abrir grupo ${item.nome}`}
-              >
-                <View style={styles.cardGrupoConteudo}>
-                  <View style={styles.avatar}>
-                    <Text style={styles.avatarTexto}>
-                      {iniciais(item.nome)}
-                    </Text>
+            renderItem={({ item }) => {
+              return (
+                <TouchableOpacity
+                  style={styles.cardGrupo}
+                  onPress={() => abrirGrupo(item)}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Abrir grupo ${item.nome}`}
+                >
+                  <View style={styles.cardGrupoConteudo}>
+                    <View style={styles.avatar}>
+                      {item.icone ? (
+                        <IconeCategoria icone={item.icone} tamanho={25} />
+                      ) : (
+                        <Text style={styles.avatarTexto} accessible={false}>
+                          {iniciais(item.nome)}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={styles.cardTextos}>
+                      <Text style={styles.nomeGrupo} numberOfLines={1}>
+                        {item.nome}
+                      </Text>
+                      <Text style={styles.descricaoGrupo} numberOfLines={1}>
+                        {item.descricao || "Despesas compartilhadas"}
+                      </Text>
+                    </View>
+                    <Text style={styles.seta}>›</Text>
                   </View>
-                  <View style={styles.cardTextos}>
-                    <Text style={styles.nomeGrupo} numberOfLines={1}>
-                      {item.nome}
-                    </Text>
-                    <Text style={styles.descricaoGrupo} numberOfLines={1}>
-                      {item.descricao || "Despesas compartilhadas"}
-                    </Text>
-                  </View>
-                  <Text style={styles.seta}>›</Text>
-                </View>
-              </TouchableOpacity>
-            )}
+                </TouchableOpacity>
+              );
+            }}
             ListFooterComponent={
               carregandoMais ? (
                 <ActivityIndicator color={CORES.accentDark} style={styles.estado} />
@@ -321,7 +327,7 @@ export default function ListaGrupos() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (CORES: PaletaSemantica) => StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: CORES.paper,
@@ -427,7 +433,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 15,
-    backgroundColor: "#DDF7EE",
+    backgroundColor: CORES.superficieVerdeSelecionada,
     justifyContent: "center",
     alignItems: "center",
     marginLeft: 12,
@@ -462,11 +468,15 @@ const styles = StyleSheet.create({
     backgroundColor: CORES.surface,
     borderWidth: 1,
     borderColor: CORES.line,
-    borderRadius: 13,
+    borderRadius: 12,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 15,
     marginBottom: 10,
+  },
+  buscaContainerFocused: {
+    borderWidth: 2,
+    borderColor: CORES.accentDark,
   },
   buscaIcone: {
     color: CORES.muted,
@@ -478,6 +488,8 @@ const styles = StyleSheet.create({
     color: CORES.ink,
     fontSize: 14,
     paddingVertical: 0,
+    outlineStyle: "solid",
+    outlineWidth: 0,
   },
   flatList: {
     flex: 1,
@@ -520,9 +532,9 @@ const styles = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: 14,
-    backgroundColor: "#DDF7EE",
     justifyContent: "center",
     alignItems: "center",
+    overflow: "hidden",
   },
   avatarTexto: {
     color: CORES.ink,

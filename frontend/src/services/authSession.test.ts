@@ -135,6 +135,74 @@ describe("authSession", () => {
     expect(AsyncStorage.multiRemove).not.toHaveBeenCalled();
   });
 
+  it("aborts a stalled refresh when its timeout expires", async () => {
+    asyncGetItem.mockResolvedValueOnce("usable-refresh-token");
+    const fetchMock = jest.spyOn(globalThis, "fetch").mockImplementation(
+      (_input, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new Error("aborted")),
+            { once: true },
+          );
+        }),
+    );
+
+    await expect(refreshAccessToken({ timeoutMs: 20 })).rejects.toMatchObject({
+      name: "ApiTimeoutError",
+      message: expect.stringContaining("20 ms"),
+    });
+
+    expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    expect(secureDeleteItem).not.toHaveBeenCalled();
+  });
+
+  it("does not cancel a shared refresh while another caller is waiting", async () => {
+    asyncGetItem.mockResolvedValueOnce("usable-refresh-token");
+    let startFetch!: () => void;
+    let finishFetch!: () => void;
+    let refreshSignal: AbortSignal | undefined;
+    const fetchStarted = new Promise<void>((resolve) => {
+      startFetch = resolve;
+    });
+    jest.spyOn(globalThis, "fetch").mockImplementation(
+      (_input, init) =>
+        new Promise((resolve, reject) => {
+          refreshSignal = init?.signal ?? undefined;
+          startFetch();
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new Error("aborted")),
+            { once: true },
+          );
+          finishFetch = () => resolve({
+            status: 200,
+            ok: true,
+            text: async () => JSON.stringify({
+              data: {
+                token: "new-access-token",
+                refresh_token: "new-refresh-token",
+              },
+            }),
+          } as Response);
+        }),
+    );
+
+    const firstController = new AbortController();
+    const firstRefresh = refreshAccessToken({
+      signal: firstController.signal,
+      timeoutMs: 1_000,
+    });
+    const secondRefresh = refreshAccessToken({ timeoutMs: 1_000 });
+    await fetchStarted;
+    firstController.abort();
+
+    await expect(firstRefresh).rejects.toMatchObject({ name: "AbortError" });
+    expect(refreshSignal?.aborted).toBe(false);
+    finishFetch();
+    await expect(secondRefresh).resolves.toBe("new-access-token");
+  });
+
   it("keeps web access tokens only in memory and never persists refresh tokens", async () => {
     const originalPlatform = Platform.OS;
     Object.defineProperty(Platform, "OS", { configurable: true, value: "web" });

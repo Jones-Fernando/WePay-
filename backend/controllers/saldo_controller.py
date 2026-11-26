@@ -1,5 +1,6 @@
 from models.grupo_model import GrupoModel
 from models.participante_model import ParticipanteModel
+from models.usuario_model import UsuarioModel
 from services.financeiro_service import FinanceiroService
 from utils.response_utils import ResponseUtils
 
@@ -15,6 +16,16 @@ class SaldoController:
 
         saldos = FinanceiroService.saldos_grupo(grupo_id)
         simplificadas = FinanceiroService.simplificar_saldos(saldos)
+        chaves_dos_credores = UsuarioModel.buscar_chaves_pix(
+            divida["credor_id"]
+            for divida in simplificadas
+            if int(divida["devedor_id"]) == int(current_user_id)
+        )
+        for divida in simplificadas:
+            if int(divida["devedor_id"]) == int(current_user_id):
+                divida["chave_pix"] = chaves_dos_credores.get(
+                    int(divida["credor_id"])
+                )
         return ResponseUtils.sucesso(
             dados={
                 "grupo_id": grupo_id,

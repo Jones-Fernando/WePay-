@@ -3,7 +3,10 @@ from controllers.auth_controller import AuthController
 from middlewares.auth_middleware import token_required
 from config import Config
 from utils.rate_limiter import limiter
-from utils.rate_limit_keys import refresh_user_or_ip
+from utils.rate_limit_keys import (
+    password_reset_email_or_ip,
+    refresh_user_or_ip,
+)
 
 
 auth_bp = Blueprint("auth_bp", __name__)
@@ -25,9 +28,15 @@ auth_bp.route("/refresh", methods=["POST"])(
 )
 auth_bp.route("/esqueci-senha", methods=["POST"])(
     limiter.shared_limit(
-        Config.RATE_LIMIT_PASSWORD_RESET_REQUEST,
-        scope="password-reset-request",
-    )(AuthController.esqueci_senha)
+        "3 per hour",
+        scope="password-reset-account",
+        key_func=password_reset_email_or_ip,
+    )(
+        limiter.shared_limit(
+            Config.RATE_LIMIT_PASSWORD_RESET_REQUEST,
+            scope="password-reset-request",
+        )(AuthController.esqueci_senha)
+    )
 )
 auth_bp.route("/redefinir-senha", methods=["POST"])(
     limiter.shared_limit(
@@ -54,6 +63,12 @@ def perfil(current_user_id):
 @token_required
 def atualizar(current_user_id):
     return AuthController.atualizar(current_user_id)
+
+
+@auth_bp.route("/avatar", methods=["PUT"])
+@token_required
+def atualizar_avatar(current_user_id):
+    return AuthController.atualizar_avatar(current_user_id)
 
 
 @auth_bp.route("/alterar-senha", methods=["PUT"])

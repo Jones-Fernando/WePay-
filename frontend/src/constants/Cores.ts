@@ -1,11 +1,96 @@
-/**
- /**
- * WEPAY — IDENTIDADE VISUAL
- *
- * Os valores abaixo reproduzem a paleta do projeto de referência.
- */
-export const Cores = {
+export type TemaResolvido = "light" | "dark";
+export type PreferenciaTema = "Sistema" | "Claro" | "Escuro";
+
+export type PaletaSemantica = {
+  fundo: string;
+  fundoElevado: string;
+  texto: string;
+  textoSuave: string;
+  principal: string;
+  principalEscuro: string;
+  negativo: string;
+  borda: string;
+  campo: string;
+  branco: string;
+  textoSecundario: string;
+  tinta: string;
+  destaque: string;
+  subtexto: string;
+  cartaoFundo: string;
+  fundoCampo: string;
+  alerta: string;
+  superficieMarca: string;
+  superficieVerde: string;
+  superficieVerdeSelecionada: string;
+  superficieNegativa: string;
+  superficieAviso: string;
+  textoSobreMarca: string;
+  textoSuaveSobreMarca: string;
+  textoPositivo: string;
+  textoNegativo: string;
+  textoAviso: string;
+  desabilitado: string;
+  placeholder: string;
+  bordaDestaque: string;
+  sombra: string;
+  textoSobreAcao: string;
+  superficieBorda: string;
+  superficieMintSuave: string;
+  superficieMintClara: string;
+  superficieIcone: string;
+  superficieMintPale: string;
+  superficieNaoLida: string;
+  superficiePositiva: string;
+  superficieAvatar: string;
+  superficieAnalisar: string;
+  superficieErro: string;
+  superficieErroToast: string;
+  superficieErroClara: string;
+  superficieFiltro: string;
+  textoSucesso: string;
+  textoPositivoAlternativo: string;
+  textoPositivoSuave: string;
+  textoErro: string;
+  textoErroFormulario: string;
+  textoErroPrincipal: string;
+  textoErroBorda: string;
+  textoNegativoClaro: string;
+  textoAvisoForte: string;
+  textoSecundarioSuave: string;
+  textoSecundarioProfundo: string;
+  textoMutedAlternativo: string;
+  textoPositivoSaldo: string;
+  textoNegativoSaldo: string;
+  superficieNotificacao: string;
+  fundoToastSucesso: string;
+  fundoToastErro: string;
+  fundoToastInfo: string;
+  textoToast: string;
+  fecharToast: string;
+  bordaCampo: string;
+  bordaNeutra: string;
+  bordaNaoLida: string;
+  bordaSelecao: string;
+  bordaSuave: string;
+  bordaErroFormulario: string;
+  bordaErroPrincipal: string;
+  bordaNegativoSuave: string;
+  bordaAviso: string;
+  bordaErroForte: string;
+  textoSobrePrincipal: string;
+  paper: string;
+  ink: string;
+  surface: string;
+  accent: string;
+  accentDark: string;
+  muted: string;
+  line: string;
+  field: string;
+};
+
+const paletaClara: PaletaSemantica = {
   fundo: "#F5FBF7",
+  fundoElevado: "#FFFFFF",
   texto: "#0B3B33",
   textoSuave: "#6B8F86",
   principal: "#00C896",
@@ -15,12 +100,181 @@ export const Cores = {
   campo: "#F0F8F4",
   branco: "#FFFFFF",
   textoSecundario: "#12483F",
+  tinta: "#0B3B33",
+  destaque: "#00C896",
+  subtexto: "#6B8F86",
+  cartaoFundo: "#FFFFFF",
+  fundoCampo: "#F0F8F4",
+  alerta: "#FF6B5C",
+  superficieMarca: "#0B3B33",
+  superficieVerde: "#E8F9F2",
+  superficieVerdeSelecionada: "#DDF7EE",
+  superficieNegativa: "#FFE7E2",
+  superficieAviso: "#FFF7E6",
+  textoSobreMarca: "#FFFFFF",
+  textoSuaveSobreMarca: "#BFE0D6",
+  textoPositivo: "#00A17A",
+  textoNegativo: "#D24A3B",
+  textoAviso: "#8A6A20",
+  desabilitado: "#A7B7B1",
+  placeholder: "#8AA69E",
+  bordaDestaque: "#C9EFE1",
+  sombra: "#0B3B33",
+  textoSobreAcao: "#FFFFFF",
+  superficieBorda: "#E1EEE8",
+  superficieMintSuave: "#EAF5F0",
+  superficieMintClara: "#EAF7F3",
+  superficieIcone: "#EAF8F2",
+  superficieMintPale: "#E9F9F3",
+  superficieNaoLida: "#F1FBF7",
+  superficiePositiva: "#DEF7EC",
+  superficieAvatar: "#DDF6ED",
+  superficieAnalisar: "#BDF3DF",
+  superficieErro: "#FCE8E6",
+  superficieErroToast: "#FFF0EF",
+  superficieErroClara: "#FFF7F5",
+  superficieFiltro: "#D7E7E0",
+  textoSucesso: "#087F5B",
+  textoPositivoAlternativo: "#008A69",
+  textoPositivoSuave: "#087A5C",
+  textoErro: "#A72F2F",
+  textoErroFormulario: "#D64545",
+  textoErroPrincipal: "#B42318",
+  textoErroBorda: "#D92D20",
+  textoNegativoClaro: "#E85D5D",
+  textoAvisoForte: "#946200",
+  textoSecundarioSuave: "#46685F",
+  textoSecundarioProfundo: "#45675F",
+  textoMutedAlternativo: "#819B94",
+  textoPositivoSaldo: "#79E5BB",
+  textoNegativoSaldo: "#FFAD9F",
+  superficieNotificacao: "#D24A3B",
+  fundoToastSucesso: "#E8F8F1",
+  fundoToastErro: "#FFF0EF",
+  fundoToastInfo: "#EAF5F0",
+  textoToast: "#355B52",
+  fecharToast: "#52746B",
+  bordaCampo: "#D7E7E0",
+  bordaNeutra: "#F0F6F3",
+  bordaNaoLida: "#F1FBF7",
+  bordaSelecao: "#DDF7EE",
+  bordaSuave: "#B7CEC5",
+  bordaErroFormulario: "#D64545",
+  bordaErroPrincipal: "#D92D20",
+  bordaNegativoSuave: "#FFB5AA",
+  bordaAviso: "#D99A20",
+  bordaErroForte: "#E85D5D",
+  textoSobrePrincipal: "#0B3B33",
+  paper: "#F5FBF7",
+  ink: "#0B3B33",
+  surface: "#FFFFFF",
+  accent: "#00C896",
+  accentDark: "#00A17A",
+  muted: "#6B8F86",
+  line: "#E1EEE8",
+  field: "#F0F8F4",
+};
 
-  // Aliases semânticos usados pelos componentes
-  tinta: "#0B3B33",       // Equivale a `texto` — cor de texto principal
-  destaque: "#00C896",    // Equivale a `principal` — verde de destaque
-  subtexto: "#6B8F86",    // Equivale a `textoSuave` — texto secundário
-  cartaoFundo: "#FFFFFF", // Fundo de cards e cartões
-  fundoCampo: "#F0F8F4",  // Fundo de campos de formulário
-  alerta: "#FF6B5C",      // Equivale a `negativo` — vermelho de alerta
-} as const;
+const paletaEscura: PaletaSemantica = {
+  fundo: "#050505",
+  fundoElevado: "#141617",
+  texto: "#F4F6F5",
+  textoSuave: "#A6B0AD",
+  principal: "#00C896",
+  principalEscuro: "#007F63",
+  negativo: "#C9544A",
+  borda: "#2B3030",
+  campo: "#1A1D1D",
+  branco: "#F4F6F5",
+  textoSecundario: "#D5DCDA",
+  tinta: "#F4F6F5",
+  destaque: "#00C896",
+  subtexto: "#A6B0AD",
+  cartaoFundo: "#141617",
+  fundoCampo: "#1A1D1D",
+  alerta: "#FF7A6B",
+  superficieMarca: "#0B3027",
+  superficieVerde: "#14231E",
+  superficieVerdeSelecionada: "#173329",
+  superficieNegativa: "#351E1C",
+  superficieAviso: "#302719",
+  textoSobreMarca: "#F4F6F5",
+  textoSuaveSobreMarca: "#C2D0CB",
+  textoPositivo: "#55D9AF",
+  textoNegativo: "#FF8D80",
+  textoAviso: "#F0C46E",
+  desabilitado: "#77827E",
+  placeholder: "#8C9793",
+  bordaDestaque: "#334B42",
+  sombra: "#000000",
+  textoSobreAcao: "#06251D",
+  superficieBorda: "#202424",
+  superficieMintSuave: "#17211D",
+  superficieMintClara: "#17211D",
+  superficieIcone: "#17211D",
+  superficieMintPale: "#17211D",
+  superficieNaoLida: "#14231E",
+  superficiePositiva: "#0F3027",
+  superficieAvatar: "#173329",
+  superficieAnalisar: "#173329",
+  superficieErro: "#351E1C",
+  superficieErroToast: "#351E1C",
+  superficieErroClara: "#351E1C",
+  superficieFiltro: "#1A1D1D",
+  textoSucesso: "#55D9AF",
+  textoPositivoAlternativo: "#55D9AF",
+  textoPositivoSuave: "#55D9AF",
+  textoErro: "#FF8D80",
+  textoErroFormulario: "#FF8D80",
+  textoErroPrincipal: "#FF8D80",
+  textoErroBorda: "#FF8D80",
+  textoNegativoClaro: "#FF8D80",
+  textoAvisoForte: "#F0C46E",
+  textoSecundarioSuave: "#D5DCDA",
+  textoSecundarioProfundo: "#D5DCDA",
+  textoMutedAlternativo: "#A6B0AD",
+  textoPositivoSaldo: "#55D9AF",
+  textoNegativoSaldo: "#FF8D80",
+  superficieNotificacao: "#A73E37",
+  fundoToastSucesso: "#0F3027",
+  fundoToastErro: "#351E1C",
+  fundoToastInfo: "#17211D",
+  textoToast: "#D5DCDA",
+  fecharToast: "#A6B0AD",
+  bordaCampo: "#303737",
+  bordaNeutra: "#202424",
+  bordaNaoLida: "#14231E",
+  bordaSelecao: "#2D604A",
+  bordaSuave: "#334B42",
+  bordaErroFormulario: "#C9544A",
+  bordaErroPrincipal: "#C9544A",
+  bordaNegativoSuave: "#663934",
+  bordaAviso: "#8B6423",
+  bordaErroForte: "#C9544A",
+  textoSobrePrincipal: "#06251D",
+  paper: "#050505",
+  ink: "#F4F6F5",
+  surface: "#141617",
+  accent: "#00C896",
+  accentDark: "#007F63",
+  muted: "#A6B0AD",
+  line: "#2B3030",
+  field: "#1A1D1D",
+};
+
+export const CoresPorTema: Record<TemaResolvido, PaletaSemantica> = {
+  light: paletaClara,
+  dark: paletaEscura,
+};
+
+// Mantém os consumidores legados no tema claro até que usem o hook semântico.
+export const Cores = paletaClara;
+
+export function resolverTema(
+  preferencia: PreferenciaTema,
+  esquemaDoSistema?: TemaResolvido | null,
+): TemaResolvido {
+  if (preferencia === "Claro") return "light";
+  if (preferencia === "Escuro") return "dark";
+  return esquemaDoSistema === "dark" ? "dark" : "light";
+}

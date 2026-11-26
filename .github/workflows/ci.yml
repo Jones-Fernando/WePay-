@@ -21,9 +21,15 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - name: Audit npm dependencies
+        run: npm run audit:dependencies
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm test -- --runInBand
+      - name: Export production bundles for iOS, Android, and web
+        run: npx expo export --platform all --output-dir "$RUNNER_TEMP/wepay-expo-export"
+        env:
+          EXPO_PUBLIC_API_URL: https://api.example.com/api
 
   backend:
     runs-on: ubuntu-latest
@@ -63,6 +69,8 @@ jobs:
             backend/requirements.txt
             backend/requirements-dev.txt
       - run: python -m pip install -r requirements-dev.txt
+      - name: Audit Python dependencies
+        run: pip-audit -r requirements.txt
       - run: ruff check .
       - run: python -m pytest --cov=controllers --cov=models --cov=services --cov=utils --cov=middlewares --cov=routes --cov=database --cov-report=term-missing --cov-report=json:coverage.json
       - run: python scripts/check_critical_coverage.py coverage.json

@@ -3,8 +3,9 @@ import re
 from flask import request
 
 from models.notificacao_model import NotificacaoModel
+from services.notificacao_service import ErroCobranca, NotificacaoService
 from utils.response_utils import ResponseUtils
-from utils.validators import parse_pagination
+from utils.validators import parse_pagination, parse_positive_int
 
 _TOKEN_EXPO_RE = re.compile(
     r"(?:Expo|Exponent)PushToken\[[A-Za-z0-9._-]{1,200}\]"
@@ -24,18 +25,32 @@ class NotificacaoController:
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return ResponseUtils.erro("Corpo da requisicao invalido.")
-        notificacoes = data.get("notificacoes")
-        sons = data.get("sons")
-        if not isinstance(notificacoes, bool) or not isinstance(sons, bool):
+        chaves_validas = {"notificacoes", "sons", "despesas", "cobrancas"}
+        if not data or not set(data).issubset(chaves_validas):
+            return ResponseUtils.erro("Preferencias de notificacao invalidas.")
+        if any(not isinstance(valor, bool) for valor in data.values()):
             return ResponseUtils.erro(
                 "As preferencias de notificacao devem ser booleanas."
             )
+        atuais = NotificacaoModel.obter_preferencias(current_user_id)
+        if atuais is None:
+            return ResponseUtils.erro("Usuario nao encontrado.", status=404)
+        atualizadas = {
+            "notificacoes": data.get("notificacoes", atuais["notificacoes"]),
+            "sons": data.get("sons", atuais["sons"]),
+            "despesas": data.get("despesas", atuais["despesas"]),
+            "cobrancas": data.get("cobrancas", atuais["cobrancas"]),
+        }
         if not NotificacaoModel.atualizar_preferencias(
-            current_user_id, notificacoes, sons
+            current_user_id,
+            atualizadas["notificacoes"],
+            atualizadas["sons"],
+            atualizadas["despesas"],
+            atualizadas["cobrancas"],
         ):
             return ResponseUtils.erro("Usuario nao encontrado.", status=404)
         return ResponseUtils.sucesso(
-            dados={"notificacoes": notificacoes, "sons": sons},
+            dados=atualizadas,
             mensagem="Preferencias atualizadas.",
         )
 
@@ -96,3 +111,47 @@ class NotificacaoController:
         if not NotificacaoModel.marcar_lida(current_user_id, notificacao_id):
             return ResponseUtils.erro("Notificacao nao encontrada.", status=404)
         return ResponseUtils.sucesso(mensagem="Notificacao marcada como lida.")
+
+    @staticmethod
+    def marcar_todas_lidas(current_user_id):
+        atualizadas = NotificacaoModel.marcar_todas_lidas(current_user_id)
+        return ResponseUtils.sucesso(
+            dados={"atualizadas": atualizadas},
+            mensagem="Notificacoes marcadas como lidas.",
+        )
+
+    @staticmethod
+    def cobrar(current_user_id, grupo_id):
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return ResponseUtils.erro("Corpo da requisicao invalido.")
+        try:
+            devedor_id = parse_positive_int(
+                data.get("devedor_id"), "devedor_id"
+            )
+        except ValueError as exc:
+            return ResponseUtils.erro(str(exc))
+
+        try:
+            notificacao_id, valor = NotificacaoService.cobrar_saldo(
+                grupo_id, current_user_id, devedor_id
+            )
+        except ErroCobranca as exc:
+            return ResponseUtils.erro(str(exc), status=exc.status)
+        except Exception:
+            from flask import current_app
+
+            current_app.logger.exception(
+                "Falha ao criar cobranca (grupo_id=%s, credor_id=%s).",
+                grupo_id,
+                current_user_id,
+            )
+            return ResponseUtils.erro(
+                "Nao foi possivel enviar o lembrete de cobranca.", status=500
+            )
+
+        return ResponseUtils.sucesso(
+            dados={"id": notificacao_id, "valor": str(valor)},
+            mensagem="Lembrete de cobranca enviado.",
+            status=201,
+        )
