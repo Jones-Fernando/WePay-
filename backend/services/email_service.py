@@ -75,35 +75,75 @@ class EmailService:
     @staticmethod
     def enviar_recuperacao_senha(email_destino: str, token: str) -> bool:
         if Config.PASSWORD_RESET_URL:
-            link = (
-                f"{Config.PASSWORD_RESET_URL.rstrip('/')}"
-                f"?{urlencode({'token': token})}"
-            )
+            reset_config = Config.PASSWORD_RESET_URL.rstrip("/")
+            from urllib.parse import urlparse
+
+            scheme = urlparse(reset_config).scheme.lower()
+            if scheme in {"exp", "wepay"}:
+                app_link = f"{reset_config}?{urlencode({'token': token})}"
+                web_link = EmailService._frontend_link(
+                    "redefinir-senha", {"token": token}
+                )
+                link = app_link
+            else:
+                app_link = None
+                web_link = f"{reset_config}?{urlencode({'token': token})}"
+                link = web_link
         else:
-            link = EmailService._frontend_link(
+            app_link = None
+            web_link = EmailService._frontend_link(
                 "redefinir-senha", {"token": token}
             )
+            link = web_link
+
         link_html = escape(link, quote=True)
-        texto = (
-            "Olá!\n\n"
-            "Recebemos uma solicitação de recuperação da sua conta WePay.\n\n"
-            f"Use este link para criar uma nova senha:\n{link}\n\n"
-            "O link expira em 30 minutos e pode ser usado uma única vez.\n\n"
-            "Caso você não tenha solicitado a recuperação, ignore este e-mail.\n\n"
-            "Equipe WePay"
-        )
-        html = f"""
-        <html><body style='font-family:Arial,sans-serif;background:#F5FBF7;padding:20px'>
-          <div style='max-width:480px;margin:auto;background:#FFFFFF;border-radius:16px;padding:28px'>
-            <h2 style='color:#0B3B33'>WePay</h2>
-            <p>Recebemos uma solicitação de recuperação de senha.</p>
-            <p><a href='{link_html}' style='display:inline-block;background:#00C896;color:#0B3B33;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:bold'>Redefinir senha</a></p>
-            <p>Se o botão não funcionar, copie e cole este endereço no navegador:</p>
-            <p><a href='{link_html}'>{link_html}</a></p>
-            <p style='color:#6B8F86;font-size:13px'>O link expira em 30 minutos e pode ser usado uma única vez.</p>
-          </div>
-        </body></html>
-        """
+        web_html = escape(web_link, quote=True)
+        if app_link:
+            app_html = escape(app_link, quote=True)
+            texto = (
+                "Olá!\n\n"
+                "Recebemos uma solicitação de recuperação da sua conta WePay.\n\n"
+                f"Abra no app (Expo Go ou app instalado):\n{app_link}\n\n"
+                f"Ou abra a versão web:\n{web_link}\n\n"
+                "Os links expiram em 30 minutos e podem ser usados uma única vez.\n"
+                "Links personalizados de aplicativo nem sempre são suportados por "
+                "todos os aplicativos de e-mail.\n\n"
+                "Caso você não tenha solicitado a recuperação, ignore este e-mail.\n\n"
+                "Equipe WePay"
+            )
+            html = f"""
+            <html><body style='font-family:Arial,sans-serif;background:#F5FBF7;padding:20px'>
+              <div style='max-width:480px;margin:auto;background:#FFFFFF;border-radius:16px;padding:28px'>
+                <h2 style='color:#0B3B33'>WePay</h2>
+                <p>Recebemos uma solicitação de recuperação de senha.</p>
+                <p><strong>Abrir no app:</strong> &nbsp;<a href='{app_html}' style='color:#087A63'>Abrir no Expo Go ou app WePay</a></p>
+                <p><strong>Versão web:</strong> &nbsp;<a href='{web_html}' style='display:inline-block;background:#00C896;color:#0B3B33;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:bold'>Abrir no navegador</a></p>
+                <p style='font-size:13px'>Nem todos os aplicativos de e-mail suportam links personalizados de aplicativo. Use a versão web se o link do app não abrir.</p>
+                <p style='color:#6B8F86;font-size:13px'>O link expira em 30 minutos e pode ser usado uma única vez.</p>
+              </div>
+            </body></html>
+            """
+        else:
+            texto = (
+                "Olá!\n\n"
+                "Recebemos uma solicitação de recuperação da sua conta WePay.\n\n"
+                f"Use este link para criar uma nova senha:\n{link}\n\n"
+                "O link expira em 30 minutos e pode ser usado uma única vez.\n\n"
+                "Caso você não tenha solicitado a recuperação, ignore este e-mail.\n\n"
+                "Equipe WePay"
+            )
+            html = f"""
+            <html><body style='font-family:Arial,sans-serif;background:#F5FBF7;padding:20px'>
+              <div style='max-width:480px;margin:auto;background:#FFFFFF;border-radius:16px;padding:28px'>
+                <h2 style='color:#0B3B33'>WePay</h2>
+                <p>Recebemos uma solicitação de recuperação de senha.</p>
+                <p><a href='{link_html}' style='display:inline-block;background:#00C896;color:#0B3B33;padding:12px 18px;border-radius:12px;text-decoration:none;font-weight:bold'>Redefinir senha</a></p>
+                <p>Se o botão não funcionar, copie e cole este endereço no navegador:</p>
+                <p><a href='{link_html}'>{link_html}</a></p>
+                <p style='color:#6B8F86;font-size:13px'>O link expira em 30 minutos e pode ser usado uma única vez.</p>
+              </div>
+            </body></html>
+            """
         return EmailService._enviar_email(email_destino, "WePay - Recuperação de senha", texto, html)
 
     @staticmethod

@@ -20,8 +20,12 @@ frontend em `CORS_ORIGINS`. Se o IP do computador mudar, atualize o `.env` e
 reinicie o Expo para carregar a nova URL. Restrinja o acesso ao firewall/rede
 local. Em produção, use HTTPS.
 
-Senhas novas devem ter pelo menos 12 caracteres. Senhas existentes continuam
-válidas para login.
+Senhas criadas ou alteradas devem ter pelo menos 6 caracteres, incluindo uma
+letra maiúscula (`A`-`Z`), um número (`0`-`9`) e um símbolo permitido:
+`! @ # $ % ^ & * ( ) - _ = + [ ] { } ; : , . ?`. Espaços não contam como
+símbolos. Essa regra vale para cadastro, alteração e redefinição; senhas
+existentes continuam válidas para login. Seis caracteres ainda oferecem pouca
+proteção: prefira senhas únicas e mais longas.
 
 ## Verificações
 

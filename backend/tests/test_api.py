@@ -2101,22 +2101,24 @@ def test_signup_rejects_password_below_the_minimum_length(client):
         json={
             "nome": "Senha Curta",
             "email": "senha-curta@example.com",
-            "senha": "abc12",
+            "senha": "Ab1!c",
         },
     )
 
     assert resposta.status_code == 400
-    assert "12 caracteres" in resposta.get_json()["message"]
+    assert "6 caracteres" in resposta.get_json()["message"]
 
 
 @pytest.mark.parametrize(
     ("senha", "mensagem"),
     [
-        ("abcdefghijkl", "pelo menos um numero"),
-        ("123456789012", "pelo menos uma letra"),
+        ("ab1!cd", "letra maiuscula"),
+        ("Abc!de", "pelo menos um numero"),
+        ("Abc123", "caractere especial"),
+        ("Ab1 cd", "caractere especial"),
     ],
 )
-def test_signup_rejects_password_without_letter_or_number(
+def test_signup_rejects_password_missing_a_required_character_type(
     client, senha, mensagem
 ):
     resposta = client.post(
@@ -2129,6 +2131,24 @@ def test_signup_rejects_password_without_letter_or_number(
     )
     assert resposta.status_code == 400
     assert mensagem in resposta.get_json()["message"]
+
+
+def test_signup_accepts_password_at_minimum_length(client):
+    senha = "Ab1!cd"
+    resposta = client.post(
+        "/api/auth/cadastro",
+        json={
+            "nome": "Senha Minima",
+            "email": "senha-minima@example.com",
+            "senha": senha,
+        },
+    )
+
+    assert resposta.status_code == 201
+    assert client.post(
+        "/api/auth/login",
+        json={"email": "senha-minima@example.com", "senha": senha},
+    ).status_code == 200
 
 
 

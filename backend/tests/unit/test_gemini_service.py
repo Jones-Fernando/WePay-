@@ -1,3 +1,6 @@
+import logging
+
+import httpx
 import pytest
 
 from config import Config
@@ -195,7 +198,7 @@ def test_ler_recibo_wraps_unexpected_client_errors(monkeypatch):
         ler_recibo(b"image-bytes", "image/jpeg")
 
 
-@pytest.mark.parametrize("code", [429, 503])
+@pytest.mark.parametrize("code", [429, 503, 504])
 def test_ler_recibo_reports_temporary_provider_unavailability(monkeypatch, code):
     class FakeProviderError(Exception):
         def __init__(self):
@@ -258,3 +261,112 @@ def test_ler_recibo_usa_modelo_de_contingencia_quando_modelo_principal_esta_ocup
     assert modelos_tentados == ["primary-model", "fallback-model"]
     assert resultado["estabelecimento"] == "Mercado teste"
     assert resultado["valor_total"] == 12.34
+
+
+def test_ler_recibo_tenta_contingencia_quando_modelo_principal_tem_timeout(
+    monkeypatch,
+):
+    modelos_tentados = []
+
+    class FakeModels:
+        def generate_content(self, *, model, **_kwargs):
+            modelos_tentados.append(model)
+            if model == "primary-model":
+                raise httpx.ReadTimeout("primary timeout")
+            return type(
+                "GeminiResponse",
+                (),
+                {
+                    "text": (
+                        '{"estabelecimento":"Mercado teste",'
+                        '"data":null,"valor_total":12.34,'
+                        '"categoria_sugerida":"Mercado"}'
+                    )
+                },
+            )()
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(Config, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(Config, "GEMINI_MODEL", "primary-model")
+    monkeypatch.setattr(Config, "GEMINI_FALLBACK_MODEL", "fallback-model")
+    monkeypatch.setattr("services.gemini_service.genai.Client", FakeClient)
+
+    resultado = ler_recibo(b"image-bytes", "image/jpeg")
+
+    assert modelos_tentados == ["primary-model", "fallback-model"]
+    assert resultado["estabelecimento"] == "Mercado teste"
+
+
+def test_ler_recibo_retorna_indisponibilidade_quando_contingencia_tem_timeout(
+    monkeypatch,
+):
+    class PrimaryQuotaError(Exception):
+        code = 429
+
+    class FakeModels:
+        def generate_content(self, *, model, **_kwargs):
+            if model == "primary-model":
+                raise PrimaryQuotaError()
+            raise httpx.ReadTimeout("fallback timeout")
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(Config, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(Config, "GEMINI_MODEL", "primary-model")
+    monkeypatch.setattr(Config, "GEMINI_FALLBACK_MODEL", "fallback-model")
+    monkeypatch.setattr("services.gemini_service.genai.Client", FakeClient)
+
+    with pytest.raises(
+        GeminiUnavailableError,
+        match="temporariamente ocupado",
+    ):
+        ler_recibo(b"image-bytes", "image/jpeg")
+
+
+def test_ler_recibo_registra_erro_da_contingencia_sem_expor_chave(
+    monkeypatch,
+    caplog,
+):
+    class PrimaryUnavailableError(Exception):
+        code = 503
+
+    class FallbackRejectedError(Exception):
+        code = 400
+
+    class FakeModels:
+        def generate_content(self, *, model, **_kwargs):
+            if model == "primary-model":
+                raise PrimaryUnavailableError()
+            raise FallbackRejectedError("rejected key test-key")
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(Config, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(Config, "GEMINI_MODEL", "primary-model")
+    monkeypatch.setattr(Config, "GEMINI_FALLBACK_MODEL", "fallback-model")
+    monkeypatch.setattr("services.gemini_service.genai.Client", FakeClient)
+
+    with caplog.at_level(logging.ERROR, logger="services.gemini_service"):
+        with pytest.raises(GeminiReceiptError):
+            ler_recibo(b"image-bytes", "image/jpeg")
+
+    error_record = next(
+        record
+        for record in caplog.records
+        if record.getMessage().startswith(
+            "Falha na chamada ao modelo Gemini"
+        )
+    )
+    assert error_record.provider_code == 400
+    assert error_record.provider_error == "rejected key [REDACTED]"
+    assert error_record.fallback_attempt is True
+    assert "rejected key [REDACTED]" in error_record.getMessage()
+    assert "test-key" not in error_record.getMessage()
+    assert "test-key" not in error_record.provider_error

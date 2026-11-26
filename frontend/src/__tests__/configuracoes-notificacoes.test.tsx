@@ -1,5 +1,5 @@
 import { act } from "react";
-import { createRoot, type Root } from "test-renderer";
+import { createRoot, type Root, type TestInstance } from "test-renderer";
 import { useUsuario } from "@/contexts/UsuarioContext";
 import { usePreferencias } from "@/contexts/PreferenciasContext";
 import Configuracoes from "../app/(main)/configuracoes";
@@ -52,6 +52,14 @@ jest.mock("@/hooks/useAppTheme", () => ({
       "@/constants/Cores",
     ).Cores,
 }));
+
+function textContent(instance: TestInstance): string {
+  return instance.children
+    .map((child) =>
+      typeof child === "string" ? child : textContent(child),
+    )
+    .join("");
+}
 
 describe("controles de notificações nas Configurações", () => {
   let root: Root | undefined;
@@ -145,5 +153,27 @@ describe("controles de notificações nas Configurações", () => {
     );
     expect(switches).toHaveLength(4);
     expect(switches.every((item) => item.props.disabled)).toBe(true);
+  });
+
+  it("opens the account deletion modal from the delete button", async () => {
+    const currentRoot = createRoot({ textComponentTypes: ["Text"] });
+    root = currentRoot;
+    await act(async () => {
+      currentRoot.render(<Configuracoes />);
+    });
+
+    const deleteButton = currentRoot.container.queryAll(
+      (instance) =>
+        instance.type === "TouchableOpacity"
+        && textContent(instance).startsWith("Excluir minha conta"),
+    )[0];
+    expect(deleteButton).toBeTruthy();
+
+    act(() => deleteButton.props.onPress());
+
+    const modals = currentRoot.container.queryAll(
+      (instance) => instance.type === "Modal",
+    );
+    expect(modals.map((modal) => modal.props.visible)).toEqual([false, true]);
   });
 });

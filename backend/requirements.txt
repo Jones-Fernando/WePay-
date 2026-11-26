@@ -9,6 +9,7 @@ mysql-connector-python==9.1.0
 pytest==9.0.3
 pytest-cov==6.2.1
 google-genai==2.29.0
+httpx==0.28.1
 waitress==3.0.2
 redis==5.2.1
 cryptography==50.0.2

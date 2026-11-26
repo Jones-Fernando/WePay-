@@ -327,6 +327,10 @@ def test_password_recovery_email_uses_app_deep_link_when_configured(monkeypatch)
         "exp://192.168.0.105:8081/--/redefinir-senha",
     )
     monkeypatch.setattr(
+        "services.email_service.Config.FRONTEND_URL",
+        "https://wepay.example.com",
+    )
+    monkeypatch.setattr(
         EmailService,
         "_enviar_email",
         staticmethod(lambda *args: emails.append(args) or True),
@@ -337,8 +341,35 @@ def test_password_recovery_email_uses_app_deep_link_when_configured(monkeypatch)
     )
 
     link = "exp://192.168.0.105:8081/--/redefinir-senha?token=recovery-token"
+    web_link = "https://wepay.example.com/redefinir-senha?token=recovery-token"
     assert link in emails[0][2]
+    assert web_link in emails[0][2]
+    assert "Abra no app" in emails[0][2]
+    assert "Versão web" in emails[0][3]
     assert f"href='{link}'" in emails[0][3]
+    assert f"href='{web_link}'" in emails[0][3]
+
+
+def test_password_recovery_web_reset_url_does_not_add_app_link(monkeypatch):
+    emails = []
+    monkeypatch.setattr(
+        "services.email_service.Config.PASSWORD_RESET_URL",
+        "http://192.168.0.105:8081/redefinir-senha",
+    )
+    monkeypatch.setattr(
+        EmailService,
+        "_enviar_email",
+        staticmethod(lambda *args: emails.append(args) or True),
+    )
+
+    assert EmailService.enviar_recuperacao_senha(
+        "pessoa@example.com", "recovery-token"
+    )
+
+    link = "http://192.168.0.105:8081/redefinir-senha?token=recovery-token"
+    assert link in emails[0][2]
+    assert "exp://" not in emails[0][2]
+    assert "wepay://" not in emails[0][2]
 
 
 def test_recovery_email_scheduling_uses_persistent_outbox(monkeypatch):

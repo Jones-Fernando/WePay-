@@ -50,25 +50,9 @@ export default function Configuracoes() {
   const { focusedField, focusHandlers } = useFieldFocus();
 
   function excluirConta() {
-    Alert.alert(
-      "Excluir conta",
-      "Seus dados pessoais e gastos pessoais serão removidos. Grupos sem outros participantes também serão apagados. O histórico de grupos com outras pessoas será preservado com sua identidade anonimizada; a administração será transferida quando houver outro membro ativo. Descrições e observações desses registros permanecem.",
-      [
-        {
-          text: "Cancelar",
-          style: "cancel",
-        },
-        {
-          text: "Continuar",
-          style: "destructive",
-          onPress: () => {
-            setSenhaAtual("");
-            setErroExclusao("");
-            setModalExclusao(true);
-          },
-        },
-      ]
-    );
+    setSenhaAtual("");
+    setErroExclusao("");
+    setModalExclusao(true);
   }
 
   async function confirmarExclusao() {
@@ -389,7 +373,7 @@ export default function Configuracoes() {
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Confirme sua senha</Text>
             <Text style={styles.modalDescription}>
-              A exclusão é permanente. Informe sua senha atual para continuar.
+              A exclusão é permanente. Seus dados pessoais e gastos pessoais serão removidos. Grupos sem outros participantes serão apagados; o histórico compartilhado será preservado com sua identidade anonimizada. A administração será transferida quando houver outro membro ativo, mas descrições e observações permanecerão. Informe sua senha atual para confirmar.
             </Text>
             <TextInput
               style={[

@@ -176,56 +176,33 @@ export default function GerenciamentoPerfilScreen() {
    * FUNÇÃO SAIR
    ========================================================== */
 
+  async function confirmarSaida() {
+    try {
+      await logout();
+    } catch (erro) {
+      Alert.alert(
+        "Sessão encerrada",
+        erro instanceof Error
+          ? erro.message
+          : "A sessão local foi encerrada, mas o servidor não confirmou a revogação.",
+      );
+    }
+    router.replace("/(auth)/login");
+  }
+
   function sairDaConta() {
+    const mensagem = "Tem certeza que deseja sair da sua conta?";
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm(mensagem)) {
+        void confirmarSaida();
+      }
+      return;
+    }
 
-    /**
-     * Antes de sair, pedimos confirmação ao usuário.
-     *
-     * O Alert possui dois botões:
-     *
-     * Cancelar
-     * Sair
-     */
-
-    Alert.alert(
-      "Sair da conta",
-      "Tem certeza que deseja sair da sua conta?",
-      [
-        {
-          text: "Cancelar",
-          style: "cancel",
-        },
-
-        {
-          text: "Sair",
-
-          /**
-           * Aqui ficará futuramente a remoção do token
-           * armazenado no dispositivo.
-           *
-           * Exemplo futuro:
-           *
-           * await storage.removeToken();
-           */
-
-          onPress: async () => {
-            try {
-              await logout();
-            } catch (erro) {
-              Alert.alert(
-                "Sessão encerrada",
-                erro instanceof Error
-                  ? erro.message
-                  : "A sessão local foi encerrada, mas o servidor não confirmou a revogação.",
-              );
-            }
-            router.replace("/(auth)/login");
-
-          },
-        },
-      ]
-    );
-
+    Alert.alert("Sair da conta", mensagem, [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Sair", onPress: () => void confirmarSaida() },
+    ]);
   }
 
 

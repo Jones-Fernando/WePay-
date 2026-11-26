@@ -89,7 +89,7 @@ const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
   container: { flex: 1, backgroundColor: Cores.fundo },
   conteudo: { padding: 22, flex: 1 },
   voltar: { color: Cores.texto, fontSize: 14, fontWeight: "700" },
-  icone: { width: 64, height: 64, borderRadius: 20, backgroundColor: Cores.superficieVerdeSelecionada, alignItems: "center", justifyContent: "center", marginTop: 36, marginBottom: 20 },
+  icone: { width: 64, height: 64, borderRadius: 20, alignItems: "center", justifyContent: "center", marginTop: 36, marginBottom: 20 },
   titulo: { color: Cores.texto, fontSize: 24, fontWeight: "800" },
   subtitulo: { color: Cores.textoSuave, fontSize: 13, lineHeight: 20, marginTop: 8, marginBottom: 28 },
   label: { color: Cores.texto, fontSize: 13, fontWeight: "700", marginBottom: 8 },

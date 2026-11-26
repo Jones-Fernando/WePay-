@@ -78,11 +78,19 @@ precisa das permissões de DDL e de dados exigidas pelas migrações. Um erro
 `DELETE command denied` durante a migração indica uma permissão ausente nessa
 conta; não resolva ampliando os privilégios da conta de runtime.
 
-Senhas novas devem ter pelo menos 12 caracteres e no máximo 72 bytes UTF-8
-(limite do bcrypt). A regra é aplicada ao cadastro, à alteração e à redefinição.
-Hashes SHA-256 legados não são aceitos no login. Antes de ativar esta versão,
-comunique a redefinição obrigatória aos usuários e faça backup do banco. Com a
-API parada, execute primeiro a simulação e depois a migração:
+Senhas criadas ou alteradas devem ter pelo menos 6 caracteres, uma letra
+maiúscula ASCII (`A`-`Z`), um número (`0`-`9`) e pelo menos um símbolo desta
+lista: `! @ # $ % ^ & * ( ) - _ = + [ ] { } ; : , . ?`. Espaços não contam como
+símbolos. O backend também limita a senha a 72 bytes UTF-8 (limite do bcrypt).
+Essas regras se aplicam ao cadastro, à alteração e à redefinição; senhas
+existentes armazenadas com bcrypt continuam válidas no login, sem migração do
+banco para essa regra. Seis caracteres ainda oferecem pouca proteção, então
+prefira senhas únicas e mais longas.
+
+Hashes SHA-256 legados não são aceitos no login. Se ainda houver hashes desse
+tipo no banco, comunique aos usuários afetados que será necessário redefinir a
+senha e faça backup do banco. Com a API parada, execute primeiro a simulação e
+depois a migração:
 
 ```bash
 APP_ENV=production flask --app app invalidate-legacy-passwords
@@ -126,8 +134,16 @@ Os links dos e-mails de convite apontam para a rota web `convite` na
 `wepay://redefinir-senha` (o esquema `wepay` está configurado em
 `frontend/app.json`). Em produção, esse valor aceita somente uma URL HTTPS ou
 `wepay://redefinir-senha`; o esquema `exp://` é exclusivo para desenvolvimento.
-O Expo Go e o servidor de desenvolvimento precisam estar ativos e acessíveis na
-mesma rede. Convites expiram em sete dias.
+Quando `PASSWORD_RESET_URL` é um link de app (`exp://` ou `wepay://`), o
+e-mail apresenta esse link como alternativa do app e inclui uma alternativa
+web baseada em `FRONTEND_URL`. Quando o valor configurado já é uma URL web,
+o e-mail mantém o comportamento existente e não cria links de app fictícios.
+Para que o link seja aberto pelo navegador a partir do e-mail durante o
+desenvolvimento, configure `PASSWORD_RESET_URL` com
+`http://IP_DO_COMPUTADOR:8081/redefinir-senha`, inicie o frontend com
+`npm run web` e permita essa origem em `CORS_ORIGINS`. O telefone e o computador
+precisam estar na mesma rede. Alguns leitores de e-mail não abrem esquemas
+personalizados como `exp://` ou `wepay://`. Convites expiram em sete dias.
 
 O app não aplica migrações durante a importação nem ao iniciar. Antes de subir
 a API, inicialize o schema com uma conta de migração autorizada:
@@ -258,6 +274,10 @@ pip install -r requirements.txt
 ```bash
 python app.py
 ```
+
+No ambiente de desenvolvimento, esse comando também inicia o worker que envia
+os e-mails da fila. Ele é encerrado junto com a API; não é necessário iniciar
+um segundo terminal para o worker.
 
 API base local: `http://127.0.0.1:5000`
 
@@ -506,9 +526,13 @@ Consulte os totais globais com `flask --app app gemini-usage --days 7`.
 Esses dados medem volume, não custo financeiro real; para alertas monetários,
 configure também orçamentos e alertas de faturamento no Google Cloud.
 Configure `GEMINI_MODEL` para o modelo principal e
-`GEMINI_FALLBACK_MODEL` para a contingência. Em caso de HTTP 429 ou 503, o
-backend tenta o modelo de contingência uma vez; cada tentativa tem timeout de
-25 segundos para respeitar o limite de espera do app.
+`GEMINI_FALLBACK_MODEL` para a contingência. Em caso de HTTP 429, 503, 504 ou
+timeout de rede, o backend tenta uma vez o modelo de contingência, que deve ser
+diferente e estar disponível para a chave configurada; cada tentativa tem
+timeout de 25 segundos para respeitar o limite de espera do app. Os valores de exemplo usam
+`gemini-3.8-flash` e `gemini-3.6-flash`; confirme a disponibilidade e os limites
+de ambos no projeto Google AI Studio. Os logs registram código e mensagem
+resumida do provedor, sem registrar a chave nem o conteúdo da imagem.
 
 ## Notificações push
 

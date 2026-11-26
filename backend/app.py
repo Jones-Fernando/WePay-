@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 
 import click
 from flask import Flask
@@ -305,16 +307,50 @@ def create_app():
     return app
 
 
-if __name__ == "__main__":
+def _start_email_outbox_worker():
+    return subprocess.Popen(
+        [sys.executable, "-m", "services.email_outbox_worker"],
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+    )
+
+
+def _stop_email_outbox_worker(worker_process):
+    if worker_process is None or worker_process.poll() is not None:
+        return
+    worker_process.terminate()
+    try:
+        worker_process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        worker_process.kill()
+        worker_process.wait()
+
+
+def run_development_server():
     if Config.ENVIRONMENT != "development":
         raise RuntimeError(
             "Execute o backend em produção com "
             "`waitress-serve --host=0.0.0.0 --port=5000 wsgi:app`."
         )
     app = create_app()
-    app.run(
-        debug=os.getenv("FLASK_DEBUG", "").strip().lower()
-        in {"1", "true", "yes", "on"},
-        host=os.getenv("HOST", "127.0.0.1"),
-        port=int(os.getenv("PORT", 5000)),
-    )
+    debug = os.getenv("FLASK_DEBUG", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    worker_process = None
+    if not debug or os.getenv("WERKZEUG_RUN_MAIN") == "true":
+        worker_process = _start_email_outbox_worker()
+        app.logger.info("Worker de e-mails iniciado com a API.")
+    try:
+        app.run(
+            debug=debug,
+            host=os.getenv("HOST", "127.0.0.1"),
+            port=int(os.getenv("PORT", 5000)),
+        )
+    finally:
+        _stop_email_outbox_worker(worker_process)
+
+
+if __name__ == "__main__":
+    run_development_server()

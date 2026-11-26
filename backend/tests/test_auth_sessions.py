@@ -347,7 +347,7 @@ def test_policy_de_senha_e_aplicada_na_alteracao_e_recuperacao(client):
 
     alterar = client.put(
         "/api/auth/alterar-senha",
-        json={"senha_atual": "SenhaSegura123!", "nova_senha": "abc12"},
+        json={"senha_atual": "SenhaSegura123!", "nova_senha": "Abc123"},
         headers=headers,
     )
     assert alterar.status_code == 400
@@ -357,9 +357,28 @@ def test_policy_de_senha_e_aplicada_na_alteracao_e_recuperacao(client):
     ).get_json()["data"]["token_teste"]
     redefinir = client.post(
         "/api/auth/redefinir-senha",
-        json={"token": token, "nova_senha": "abc12"},
+        json={"token": token, "nova_senha": "Abc123"},
     )
     assert redefinir.status_code == 400
+
+    alterar = client.put(
+        "/api/auth/alterar-senha",
+        json={"senha_atual": "SenhaSegura123!", "nova_senha": "Ab1!cd"},
+        headers=headers,
+    )
+    assert alterar.status_code == 200
+
+    token = client.post(
+        "/api/auth/esqueci-senha", json={"email": email}
+    ).get_json()["data"]["token_teste"]
+    redefinir = client.post(
+        "/api/auth/redefinir-senha",
+        json={"token": token, "nova_senha": "Xy2@ab"},
+    )
+    assert redefinir.status_code == 200
+    assert client.post(
+        "/api/auth/login", json={"email": email, "senha": "Xy2@ab"}
+    ).status_code == 200
 
 
 def test_alias_de_recuperacao_nao_expoe_token_fora_de_testes(

@@ -173,6 +173,10 @@ export default function AlterarSenha() {
           </TouchableOpacity>
         </View>
 
+        <Text style={styles.passwordHint}>
+          Use pelo menos 6 caracteres, uma letra maiúscula, um número e um símbolo (por exemplo, !, @ ou #). Espaços não contam como símbolo. Senhas mais longas são mais seguras.
+        </Text>
+
         <Text style={styles.label}>
           Confirmar nova senha
         </Text>
@@ -301,6 +305,14 @@ const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
     paddingLeft: 15,
     paddingRight: 12,
   },
+
+  passwordHint: {
+    color: Cores.textoSuave,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 7,
+  },
+
   passwordInput: {
     flex: 1,
     color: Cores.texto,

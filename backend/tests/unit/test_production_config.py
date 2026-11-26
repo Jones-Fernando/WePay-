@@ -5,7 +5,33 @@ from config import (
     _validate_password_reset_url,
     _validate_production_database_credentials,
     _validate_production_database_tls,
+    _parse_cors_origins,
 )
+
+
+def test_default_cors_origins_allow_expo_web_on_localhost():
+    assert _parse_cors_origins(None, "development") == [
+        "http://localhost:8081",
+        "http://127.0.0.1:8081",
+    ]
+
+
+def test_development_cors_keeps_configured_origins_and_adds_expo_defaults():
+    assert _parse_cors_origins(
+        "http://localhost:3000",
+        "development",
+    ) == [
+        "http://localhost:3000",
+        "http://localhost:8081",
+        "http://127.0.0.1:8081",
+    ]
+
+
+def test_other_environments_use_only_configured_cors_origins():
+    assert _parse_cors_origins(
+        "https://wepay.example.com",
+        "production",
+    ) == ["https://wepay.example.com"]
 
 
 @pytest.mark.parametrize("environment", ["development", "production"])

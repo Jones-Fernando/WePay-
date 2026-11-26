@@ -101,6 +101,24 @@ def _validate_password_reset_url(environment: str, reset_url: str) -> None:
         )
 
 
+def _parse_cors_origins(value: str | None, environment: str) -> list[str]:
+    configured_origins = [
+        origin.strip()
+        for origin in (value or "").split(",")
+        if origin.strip()
+    ]
+    if environment == "development":
+        configured_origins.extend(
+            ["http://localhost:8081", "http://127.0.0.1:8081"]
+        )
+    if not configured_origins:
+        configured_origins = [
+            "http://localhost:8081",
+            "http://127.0.0.1:8081",
+        ]
+    return list(dict.fromkeys(configured_origins))
+
+
 class Config:
     """Configuração única do backend WEPAY."""
 
@@ -200,13 +218,10 @@ class Config:
     )
     if GEMINI_DAILY_ALERT_REQUESTS < 1:
         raise RuntimeError("GEMINI_DAILY_ALERT_REQUESTS deve ser maior que zero.")
-    CORS_ORIGINS = [
-        origin.strip()
-        for origin in os.getenv(
-            "CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
-        ).split(",")
-        if origin.strip()
-    ]
+    CORS_ORIGINS = _parse_cors_origins(
+        os.getenv("CORS_ORIGINS"),
+        ENVIRONMENT,
+    )
     AUTH_REFRESH_COOKIE_NAME = os.getenv(
         "AUTH_REFRESH_COOKIE_NAME", "wepay_refresh"
     )
@@ -249,9 +264,9 @@ class Config:
         )
 
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
     GEMINI_FALLBACK_MODEL = os.getenv(
         "GEMINI_FALLBACK_MODEL",
-        "gemini-3.5-flash",
+        "gemini-3.6-flash",
     )
     EXPO_ACCESS_TOKEN = os.getenv("EXPO_ACCESS_TOKEN", "")
