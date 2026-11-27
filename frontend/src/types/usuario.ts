@@ -10,5 +10,6 @@ export interface Usuario {
   telefone: string;   // Número de telefone do usuário (opcional)
   iniciais : string;  // Inciais do nome do Usuários ( ex: Jones Smith => JS )
   avatarUrl?: string; // Opcional: O usuário pode não ter feito o upload de uma foto de perfil ainda.
+  pixChave?: string;  // Chave Pix opcional para receber reembolsos em grupos.
   saldoTotal: number; // Saldo geral consolidado (Pode ser positivo a receber ou negativo a pagar)
 }

@@ -1,21 +1,28 @@
+import { useAppTheme, useAppThemeScheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 import React, { useCallback, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform, StatusBar } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { Alert } from "@/services/feedback";
+import { Feather } from "@expo/vector-icons";
+import CalendarioData from "@/components/CalendarioData";
 import { despesasPessoaisApi } from "@/services/api";
 import { CATEGORIAS_PESSOAIS } from "@/constants/financeCategories";
+import { useFieldFocus } from "@/hooks/useFieldFocus";
 import { useCategoriasFinanceiras } from "@/hooks/useCategoriasFinanceiras";
+import { IconeCategoria } from "@/components/IconeCategoria";
 import {
-  formatDateForInput,
   normalizeDateInput,
   parseCurrencyInput,
-  parseDateInputToDate,
   parseDateInputToIso,
 } from "@/utils/financeInput";
 
 type CampoFormulario = "descricao" | "valor" | "data";
 
 export default function EditarDespesaPessoal() {
+  const Cores = useAppTheme();
+  const esquema = useAppThemeScheme();
+  const styles = createStyles(Cores);
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { categorias, erro: erroCategorias } = useCategoriasFinanceiras("pessoal", CATEGORIAS_PESSOAIS);
   const [descricao, setDescricao] = useState("");
@@ -26,6 +33,7 @@ export default function EditarDespesaPessoal() {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [mostrarSeletorData, setMostrarSeletorData] = useState(false);
+  const { focusedField, focusHandlers } = useFieldFocus();
   const [camposVisitados, setCamposVisitados] = useState<Record<CampoFormulario, boolean>>({
     descricao: false,
     valor: false,
@@ -37,14 +45,11 @@ export default function EditarDespesaPessoal() {
     data: null,
   });
 
-  function selecionarData(_evento: DateTimePickerEvent, dataSelecionada?: Date) {
+  function selecionarData(dataSelecionada: string) {
     setMostrarSeletorData(false);
-    if (dataSelecionada) {
-      const novaData = formatDateForInput(dataSelecionada);
-      setData(novaData);
-      setCamposVisitados((atuais) => ({ ...atuais, data: true }));
-      setErros((atuais) => ({ ...atuais, data: validarCampo("data", novaData) }));
-    }
+    setData(dataSelecionada);
+    setCamposVisitados((atuais) => ({ ...atuais, data: true }));
+    setErros((atuais) => ({ ...atuais, data: validarCampo("data", dataSelecionada) }));
   }
 
   function validarCampo(campo: CampoFormulario, valorCampo: string): string | null {
@@ -134,73 +139,147 @@ export default function EditarDespesaPessoal() {
     }
   }
 
-  if (carregando) return <SafeAreaView style={styles.container}><ActivityIndicator color="#00C896" style={{ marginTop: 60 }} /></SafeAreaView>;
+  if (carregando) return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle={esquema === "dark" ? "light-content" : "dark-content"} />
+      <ActivityIndicator color={Cores.principal} style={{ marginTop: 60 }} />
+    </SafeAreaView>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
+      <StatusBar barStyle={esquema === "dark" ? "light-content" : "dark-content"} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
-            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-              <Text style={styles.backText}>‹</Text>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Voltar"
+            >
+              <Feather name="arrow-left" size={20} color={Cores.texto} accessible={false} />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Editar despesa</Text>
-            <View style={{ width: 42 }} />
+            <View style={styles.headerText}>
+              <Text style={styles.headerTitle}>Editar despesa pessoal</Text>
+              <Text style={styles.headerSubtitle}>Atualize os dados da sua movimentação.</Text>
+            </View>
           </View>
 
-          <Text style={styles.label}>Descrição</Text>
-          <TextInput style={[styles.input, erros.descricao && styles.inputComErro]}
-            value={descricao} onChangeText={(texto) => atualizarCampo("descricao", texto)}
-            onBlur={() => visitarCampo("descricao", descricao)} autoCapitalize="sentences" />
-          {erros.descricao && <Text style={styles.erroCampo}>{erros.descricao}</Text>}
-
-          <Text style={styles.label}>Valor</Text>
-          <View style={styles.valueContainer}>
-            <Text style={styles.currency}>R$</Text>
-            <TextInput style={styles.valueInput} value={valor}
-              onChangeText={(texto) => atualizarCampo("valor", texto)}
-              onBlur={() => visitarCampo("valor", valor)} keyboardType="decimal-pad" />
-          </View>
-          {erros.valor && <Text style={styles.erroCampo}>{erros.valor}</Text>}
-
-          <Text style={styles.label}>Data</Text>
-          <TouchableOpacity style={[styles.seletorData, erros.data && styles.inputComErro]}
-            onPress={() => setMostrarSeletorData(true)} activeOpacity={0.8}>
-            <Text style={[styles.textoSeletorData, !data && styles.placeholderSeletorData]}>{data || "Escolher data"}</Text>
-          </TouchableOpacity>
-          {erros.data && <Text style={styles.erroCampo}>{erros.data}</Text>}
-          {mostrarSeletorData && (
-            <DateTimePicker
-              value={parseDateInputToDate(data) ?? new Date()}
-              mode="date"
-              display="default"
-              locale="pt-BR"
-              maximumDate={new Date()}
-              onChange={selecionarData}
+          <View style={styles.campo}>
+            <Text style={styles.label}>Descrição</Text>
+            <TextInput
+              style={[
+                styles.input,
+                erros.descricao && styles.inputComErro,
+                !erros.descricao && focusedField === "descricao" && styles.focusedField,
+              ]}
+              placeholder="Ex.: Mercado"
+              placeholderTextColor={Cores.placeholder}
+              value={descricao}
+              onChangeText={(texto) => atualizarCampo("descricao", texto)}
+              {...focusHandlers("descricao", () => visitarCampo("descricao", descricao))}
+              autoCapitalize="sentences"
+              accessibilityLabel="Descrição"
             />
-          )}
-
-          <Text style={styles.label}>Tipo</Text>
-          <View style={styles.tipoContainer}>
-            {(["despesa", "receita"] as const).map((t) => (
-              <TouchableOpacity key={t} style={[styles.tipoBotao, tipo === t && styles.tipoBotaoAtivo]} onPress={() => setTipo(t)}>
-                <Text style={[styles.tipoTexto, tipo === t && styles.tipoTextoAtivo]}>{t === "despesa" ? "Despesa" : "Receita"}</Text>
-              </TouchableOpacity>
-            ))}
+            {erros.descricao && <Text style={styles.erroCampo}>{erros.descricao}</Text>}
           </View>
 
-          <Text style={styles.label}>Categoria</Text>
-          <View style={styles.categories}>
-            {categorias.map(({ nome }) => (
-              <TouchableOpacity key={nome} style={[styles.category, categoria === nome && styles.categoryActive]} onPress={() => setCategoria(nome)}>
-                <Text style={[styles.categoryText, categoria === nome && styles.categoryTextActive]}>{nome}</Text>
-              </TouchableOpacity>
-            ))}
+          <View style={styles.valorCampo}>
+            <Text style={styles.valorLabel}>Valor</Text>
+            <View style={[
+              styles.valueContainer,
+              erros.valor && styles.inputComErro,
+              focusedField === "valor" && styles.focusedValueContainer,
+            ]}>
+              <Text style={styles.currency}>R$</Text>
+              <TextInput
+                style={styles.valueInput}
+                value={valor}
+                placeholder="0,00"
+                placeholderTextColor={Cores.placeholder}
+                onChangeText={(texto) => atualizarCampo("valor", texto)}
+                {...focusHandlers("valor", () => visitarCampo("valor", valor))}
+                keyboardType="decimal-pad"
+                accessibilityLabel="Valor da movimentação"
+              />
+            </View>
+            {erros.valor && <Text style={styles.erroCampo}>{erros.valor}</Text>}
           </View>
-          {erroCategorias && <Text style={styles.erroCampo}>{erroCategorias}</Text>}
 
-          <TouchableOpacity style={[styles.saveButton, salvando && { opacity: 0.6 }]} onPress={salvar} disabled={salvando}>
-            {salvando ? <ActivityIndicator color="#0B3B33" /> : <Text style={styles.saveButtonText}>Salvar alterações</Text>}
+          <View style={styles.campo}>
+            <Text style={styles.label}>Data</Text>
+            <TouchableOpacity
+              testID="date-selector"
+              style={[styles.seletorData, erros.data && styles.inputComErro]}
+              onPress={() => setMostrarSeletorData(true)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={`Data ${data}. Abrir calendário`}
+            >
+              <Text
+                style={[styles.textoSeletorData, !data && styles.placeholderSeletorData]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {data || "Escolher data"}
+              </Text>
+              <Feather name="calendar" size={16} color={Cores.textoSuave} accessible={false} />
+            </TouchableOpacity>
+            {erros.data && <Text style={styles.erroCampo}>{erros.data}</Text>}
+            {mostrarSeletorData && (
+              <CalendarioData
+                value={data}
+                onClose={() => setMostrarSeletorData(false)}
+                onSelectDate={selecionarData}
+              />
+            )}
+          </View>
+
+          <View style={styles.campo}>
+            <Text style={styles.label}>Categoria</Text>
+            <ScrollView
+              horizontal
+              style={styles.categoryScroll}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 8, paddingRight: 10 }}
+            >
+              {categorias.map((item) => (
+                <TouchableOpacity
+                  key={item.nome}
+                  style={[styles.category, categoria === item.nome && styles.categoryActive]}
+                  onPress={() => setCategoria(item.nome)}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: categoria === item.nome }}
+                >
+                  <IconeCategoria icone={item.icone} tamanho={15} style={{ marginRight: 5 }} />
+                  <Text style={[styles.categoryText, categoria === item.nome && styles.categoryTextActive]}>{item.nome}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            {erroCategorias && <Text style={styles.erroCampo}>{erroCategorias}</Text>}
+          </View>
+
+          <TouchableOpacity
+            style={[styles.saveButton, salvando && { opacity: 0.6 }]}
+            onPress={salvar}
+            disabled={salvando}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: salvando, busy: salvando }}
+          >
+            {salvando ? <ActivityIndicator color={Cores.textoSobrePrincipal} /> : <Text style={styles.saveButtonText}>Salvar alterações</Text>}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.cancelButton}
+            onPress={() => router.back()}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+          >
+            <Text style={styles.cancelButtonText}>Cancelar</Text>
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -208,33 +287,36 @@ export default function EditarDespesaPessoal() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5FBF7" },
-  scroll: { paddingHorizontal: 20, paddingBottom: 40 },
-  header: { height: 65, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  backButton: { width: 42, height: 42, borderRadius: 12, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", justifyContent: "center", alignItems: "center" },
-  backText: { color: "#0B3B33", fontSize: 32 },
-  headerTitle: { color: "#0B3B33", fontWeight: "700", fontSize: 17 },
-  label: { color: "#0B3B33", fontSize: 13, fontWeight: "700", marginTop: 18, marginBottom: 8 },
-  input: { height: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 12, paddingHorizontal: 15, color: "#0B3B33", fontSize: 14 },
-  inputComErro: { borderColor: "#D64545" },
-  erroCampo: { color: "#D64545", fontSize: 12, marginTop: 5 },
-  seletorData: { height: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 12, paddingHorizontal: 15, justifyContent: "center" },
-  textoSeletorData: { color: "#0B3B33", fontSize: 14 },
-  placeholderSeletorData: { color: "#8AA69E" },
-  valueContainer: { height: 52, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", borderRadius: 12, flexDirection: "row", alignItems: "center", paddingHorizontal: 14 },
-  currency: { color: "#0B3B33", fontWeight: "700", marginRight: 8 },
-  valueInput: { flex: 1, color: "#0B3B33", fontSize: 18 },
-  tipoContainer: { flexDirection: "row", gap: 8 },
-  tipoBotao: { flex: 1, height: 44, borderRadius: 12, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8", justifyContent: "center", alignItems: "center" },
-  tipoBotaoAtivo: { backgroundColor: "#DDF7EE", borderColor: "#00C896" },
-  tipoTexto: { color: "#6B8F86", fontWeight: "600", fontSize: 13 },
-  tipoTextoAtivo: { color: "#0B3B33" },
-  categories: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  category: { paddingHorizontal: 13, paddingVertical: 9, borderRadius: 20, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1EEE8" },
-  categoryActive: { backgroundColor: "#DDF7EE", borderColor: "#00C896" },
-  categoryText: { color: "#6B8F86", fontSize: 12, fontWeight: "600" },
-  categoryTextActive: { color: "#0B3B33" },
-  saveButton: { height: 52, backgroundColor: "#00C896", borderRadius: 12, justifyContent: "center", alignItems: "center", marginTop: 30 },
-  saveButtonText: { color: "#0B3B33", fontWeight: "700", fontSize: 15 },
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: Cores.fundo },
+  scroll: { paddingHorizontal: 20, paddingBottom: 30 },
+  header: { flexDirection: "row", alignItems: "center", paddingTop: 12, paddingBottom: 18 },
+  backButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: Cores.cartaoFundo, borderWidth: 1, borderColor: Cores.borda, justifyContent: "center", alignItems: "center", marginRight: 12 },
+  headerText: { flex: 1, minWidth: 0 },
+  headerTitle: { color: Cores.texto, fontWeight: "700", fontSize: 20, flexShrink: 1 },
+  headerSubtitle: { color: Cores.textoSuave, fontSize: 12, marginTop: 4 },
+  valorCampo: { marginBottom: 20 },
+  valorLabel: { color: Cores.texto, fontSize: 13, fontWeight: "600", marginBottom: 8 },
+  campo: { marginBottom: 20 },
+  label: { color: Cores.texto, fontSize: 13, fontWeight: "600", marginBottom: 8 },
+  input: { height: 52, backgroundColor: Cores.cartaoFundo, borderWidth: 1, borderColor: Cores.borda, borderRadius: 12, paddingHorizontal: 15, color: Cores.texto, fontSize: 14, outlineStyle: "solid", outlineWidth: 0 },
+  inputComErro: { borderColor: Cores.negativo },
+  focusedField: { borderWidth: 2, borderColor: Cores.textoPositivo },
+  erroCampo: { color: Cores.textoNegativo, fontSize: 12, marginTop: 5 },
+  seletorData: { height: 52, backgroundColor: Cores.cartaoFundo, borderWidth: 1, borderColor: Cores.borda, borderRadius: 12, paddingHorizontal: 15, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  textoSeletorData: { color: Cores.texto, fontSize: 14, flex: 1, minWidth: 0, marginRight: 12 },
+  placeholderSeletorData: { color: Cores.placeholder },
+  valueContainer: { height: 52, backgroundColor: Cores.cartaoFundo, borderWidth: 1, borderColor: Cores.borda, borderRadius: 12, flexDirection: "row", alignItems: "center", paddingHorizontal: 15 },
+  focusedValueContainer: { borderWidth: 2, borderColor: Cores.textoPositivo },
+  currency: { color: Cores.texto, fontSize: 14, marginRight: 10 },
+  valueInput: { flex: 1, height: "100%", color: Cores.texto, fontSize: 14, outlineStyle: "solid", outlineWidth: 0 },
+  category: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, backgroundColor: Cores.cartaoFundo, borderWidth: 1, borderColor: Cores.borda },
+  categoryScroll: { width: "100%", flexGrow: 0, flexShrink: 1 },
+  categoryActive: { backgroundColor: Cores.superficieVerdeSelecionada, borderColor: Cores.principal },
+  categoryText: { color: Cores.textoSuave, fontSize: 11, fontWeight: "600" },
+  categoryTextActive: { color: Cores.textoPositivo },
+  saveButton: { height: 54, backgroundColor: Cores.principal, borderRadius: 15, justifyContent: "center", alignItems: "center", marginTop: 4 },
+  saveButtonText: { color: Cores.textoSobrePrincipal, fontWeight: "700", fontSize: 15 },
+  cancelButton: { height: 48, justifyContent: "center", alignItems: "center", marginTop: 5 },
+  cancelButtonText: { color: Cores.textoSuave, fontWeight: "600", fontSize: 13 },
 });

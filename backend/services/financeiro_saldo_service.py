@@ -9,6 +9,103 @@ from services.financeiro_calculo_service import CENT, ZERO, money
 
 class FinanceiroSaldoService:
     @staticmethod
+    def listar_pendencias_usuario(usuario_id):
+        with get_connection_context() as conn:
+            cursor = cursor_for(conn)
+            try:
+                cursor.execute(
+                    """
+                    SELECT g.id AS grupo_id, g.nome AS grupo_nome,
+                           p.usuario_id, COALESCE(s.saldo, 0) AS saldo,
+                           CASE WHEN u.excluido_em IS NULL THEN u.nome
+                                ELSE 'Usuário excluído' END AS nome,
+                           CASE WHEN u.excluido_em IS NULL THEN u.avatar_url
+                                ELSE NULL END AS avatar_url
+                    FROM grupos g
+                    JOIN participantes me
+                      ON me.grupo_id = g.id
+                     AND me.usuario_id = ?
+                     AND me.ativo = 1
+                    JOIN participantes p ON p.grupo_id = g.id
+                    JOIN usuarios u ON u.id = p.usuario_id
+                    LEFT JOIN saldos s
+                      ON s.grupo_id = g.id
+                     AND s.usuario_id = p.usuario_id
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM saldos meu_saldo
+                        WHERE meu_saldo.grupo_id = g.id
+                          AND meu_saldo.usuario_id = ?
+                          AND meu_saldo.saldo <> 0
+                    )
+                    ORDER BY g.id, u.nome, u.id
+                    """,
+                    (usuario_id, usuario_id),
+                )
+                linhas = fetch_all(cursor)
+            finally:
+                cursor.close()
+
+        grupos = {}
+        for linha in linhas:
+            grupo_id = int(linha["grupo_id"])
+            grupo = grupos.setdefault(
+                grupo_id,
+                {
+                    "grupo_id": grupo_id,
+                    "grupo_nome": linha["grupo_nome"],
+                    "saldos": [],
+                },
+            )
+            grupo["saldos"].append(
+                {
+                    "usuario_id": int(linha["usuario_id"]),
+                    "nome": linha["nome"],
+                    "saldo": linha["saldo"],
+                    "avatar_url": linha["avatar_url"],
+                }
+            )
+
+        a_receber = []
+        a_pagar = []
+        for grupo in grupos.values():
+            avatar_por_usuario = {
+                saldo["usuario_id"]: saldo["avatar_url"]
+                for saldo in grupo["saldos"]
+            }
+            for divida in FinanceiroSaldoService.simplificar_saldos(
+                grupo["saldos"]
+            ):
+                if int(divida["credor_id"]) == int(usuario_id):
+                    a_receber.append(
+                        {
+                            "pessoa_id": int(divida["devedor_id"]),
+                            "pessoa_nome": divida["devedor"],
+                            "pessoa_avatar_url": avatar_por_usuario.get(
+                                int(divida["devedor_id"])
+                            ),
+                            "grupo_id": grupo["grupo_id"],
+                            "grupo_nome": grupo["grupo_nome"],
+                            "valor": divida["valor"],
+                        }
+                    )
+                elif int(divida["devedor_id"]) == int(usuario_id):
+                    a_pagar.append(
+                        {
+                            "pessoa_id": int(divida["credor_id"]),
+                            "pessoa_nome": divida["credor"],
+                            "pessoa_avatar_url": avatar_por_usuario.get(
+                                int(divida["credor_id"])
+                            ),
+                            "grupo_id": grupo["grupo_id"],
+                            "grupo_nome": grupo["grupo_nome"],
+                            "valor": divida["valor"],
+                        }
+                    )
+
+        return {"a_receber": a_receber, "a_pagar": a_pagar}
+
+    @staticmethod
     def calcular_saldos_esperados(conn, grupo_id):
         cursor = cursor_for(conn)
         try:

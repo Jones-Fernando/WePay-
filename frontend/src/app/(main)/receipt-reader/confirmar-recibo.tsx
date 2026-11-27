@@ -1,3 +1,5 @@
+import { useAppTheme, useAppThemeScheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 /*
  * WEPAY — CONFIRMAR RECIBO
  * Exibe os dados extraídos pela IA e permite ao usuário
@@ -13,11 +15,12 @@ import {
   StyleSheet,
   ScrollView,
   StatusBar,
-  Alert,
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import { IconeCategoria } from "@/components/IconeCategoria";
+import { Alert } from "@/services/feedback";
 import { despesasPessoaisApi } from "@/services/api";
 import {
   parseCurrencyInput,
@@ -25,8 +28,12 @@ import {
 } from "@/utils/financeInput";
 import { CATEGORIAS_RECIBO as CATEGORIAS } from "@/constants/financeCategories";
 import { useCategoriasFinanceiras } from "@/hooks/useCategoriasFinanceiras";
+import { useFieldFocus } from "@/hooks/useFieldFocus";
 
 export default function ConfirmarRecibo() {
+  const Cores = useAppTheme();
+  const styles = createStyles(Cores);
+  const esquema = useAppThemeScheme();
   const { categorias, erro: erroCategorias } = useCategoriasFinanceiras("pessoal", CATEGORIAS);
   const params = useLocalSearchParams<{
     descricao: string;
@@ -45,6 +52,7 @@ export default function ConfirmarRecibo() {
   const [data, setData] = useState(params.data ?? "");
   const [categoria, setCategoria] = useState(params.categoria ?? "Alimentação");
   const [salvando, setSalvando] = useState(false);
+  const { focusedField, focusHandlers } = useFieldFocus();
 
   async function salvarDespesa() {
     const descricaoLimpa = descricao.trim();
@@ -119,7 +127,7 @@ export default function ConfirmarRecibo() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={esquema === "dark" ? "light-content" : "dark-content"} />
 
       <KeyboardAvoidingView
         style={styles.flex}
@@ -158,27 +166,35 @@ export default function ConfirmarRecibo() {
           <View style={styles.campo}>
             <Text style={styles.label}>Descrição</Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                focusedField === "descricao" && styles.focusedField,
+              ]}
               placeholder="Ex.: Mercado"
-              placeholderTextColor="#8AA69E"
+              placeholderTextColor={Cores.placeholder}
               value={descricao}
               onChangeText={setDescricao}
               autoCapitalize="sentences"
+              {...focusHandlers("descricao")}
             />
           </View>
 
           {/* VALOR */}
           <View style={styles.campo}>
             <Text style={styles.label}>Valor</Text>
-            <View style={styles.valorContainer}>
+            <View style={[
+              styles.valorContainer,
+              focusedField === "valor" && styles.valorContainerFocado,
+            ]}>
               <Text style={styles.simbolo}>R$</Text>
               <TextInput
                 style={styles.inputValor}
                 placeholder="0,00"
-                placeholderTextColor="#8AA69E"
+                placeholderTextColor={Cores.placeholder}
                 value={valor}
                 onChangeText={setValor}
                 keyboardType="decimal-pad"
+                {...focusHandlers("valor")}
               />
             </View>
           </View>
@@ -187,12 +203,16 @@ export default function ConfirmarRecibo() {
           <View style={styles.campo}>
             <Text style={styles.label}>Data</Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                focusedField === "data" && styles.focusedField,
+              ]}
               placeholder="Ex.: 10/09/2026"
-              placeholderTextColor="#8AA69E"
+              placeholderTextColor={Cores.placeholder}
               value={data}
               onChangeText={setData}
               keyboardType="numbers-and-punctuation"
+              {...focusHandlers("data")}
             />
           </View>
 
@@ -213,7 +233,7 @@ export default function ConfirmarRecibo() {
                     onPress={() => setCategoria(item.nome)}
                     activeOpacity={0.8}
                   >
-                    <Text style={styles.categoriaIcone}>{item.icone}</Text>
+                    <IconeCategoria icone={item.icone} tamanho={15} style={{ marginRight: 5 }} />
                     <Text style={[styles.categoriaTexto, selecionada && styles.categoriaTextoSelecionado]}>
                       {item.nome}
                     </Text>
@@ -249,12 +269,12 @@ export default function ConfirmarRecibo() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (Cores: PaletaSemantica) => StyleSheet.create({
   flex: { flex: 1 },
 
   container: {
     flex: 1,
-    backgroundColor: "#F5FBF7",
+    backgroundColor: Cores.fundo,
   },
 
   scroll: {
@@ -273,9 +293,9 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
@@ -283,7 +303,7 @@ const styles = StyleSheet.create({
 
   voltar: {
     fontSize: 32,
-    color: "#0B3B33",
+    color: Cores.texto,
     marginTop: -3,
   },
 
@@ -292,21 +312,21 @@ const styles = StyleSheet.create({
   titulo: {
     fontSize: 22,
     fontWeight: "700",
-    color: "#0B3B33",
+    color: Cores.texto,
   },
 
   subtitulo: {
     fontSize: 12,
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     marginTop: 4,
   },
 
   bannerIA: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#E8F9F2",
+    backgroundColor: Cores.superficieVerde,
     borderWidth: 1,
-    borderColor: "#C9EFE1",
+    borderColor: Cores.bordaDestaque,
     borderRadius: 14,
     padding: 14,
     marginBottom: 24,
@@ -320,7 +340,7 @@ const styles = StyleSheet.create({
   bannerTexto: {
     flex: 1,
     fontSize: 12,
-    color: "#0B3B33",
+    color: Cores.texto,
     lineHeight: 18,
     fontWeight: "600",
   },
@@ -330,36 +350,50 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#0B3B33",
+    color: Cores.texto,
     marginBottom: 8,
   },
 
   input: {
     height: 52,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
-    borderRadius: 13,
+    borderColor: Cores.borda,
+    borderRadius: 12,
     paddingHorizontal: 15,
     fontSize: 14,
-    color: "#0B3B33",
+    color: Cores.texto,
+    outlineStyle: "solid",
+    outlineWidth: 0,
+  },
+
+  focusedField: {
+    borderWidth: 2,
+    borderColor: Cores.textoPositivo,
   },
 
   valorContainer: {
     height: 52,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
-    borderRadius: 13,
+    borderColor: Cores.borda,
+    borderRadius: 12,
     paddingHorizontal: 15,
+    outlineStyle: "solid",
+    outlineWidth: 0,
+  },
+
+  valorContainerFocado: {
+    borderWidth: 2,
+    borderColor: Cores.textoPositivo,
   },
 
   simbolo: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#0B3B33",
+    color: Cores.texto,
     marginRight: 8,
   },
 
@@ -367,11 +401,13 @@ const styles = StyleSheet.create({
     flex: 1,
     height: "100%",
     fontSize: 18,
-    color: "#0B3B33",
+    color: Cores.texto,
+    outlineStyle: "solid",
+    outlineWidth: 0,
   },
 
   categorias: { gap: 8, paddingRight: 10 },
-  erroCategorias: { color: "#D64545", fontSize: 12, marginTop: 6 },
+  erroCategorias: { color: Cores.textoNegativo, fontSize: 12, marginTop: 6 },
 
   categoria: {
     flexDirection: "row",
@@ -379,29 +415,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Cores.cartaoFundo,
     borderWidth: 1,
-    borderColor: "#E1EEE8",
+    borderColor: Cores.borda,
   },
 
   categoriaSelecionada: {
-    backgroundColor: "#DDF7EE",
-    borderColor: "#00C896",
+    backgroundColor: Cores.superficieVerdeSelecionada,
+    borderColor: Cores.principal,
   },
 
-  categoriaIcone: { fontSize: 15, marginRight: 5 },
 
   categoriaTexto: {
     fontSize: 11,
-    color: "#6B8F86",
+    color: Cores.textoSuave,
     fontWeight: "600",
   },
 
-  categoriaTextoSelecionado: { color: "#0B3B33" },
+  categoriaTextoSelecionado: { color: Cores.texto },
 
   botaoSalvar: {
     height: 54,
-    backgroundColor: "#00C896",
+    backgroundColor: Cores.principal,
     borderRadius: 15,
     justifyContent: "center",
     alignItems: "center",
@@ -413,7 +448,7 @@ const styles = StyleSheet.create({
   botaoSalvarTexto: {
     fontSize: 15,
     fontWeight: "700",
-    color: "#0B3B33",
+    color: Cores.textoSobrePrincipal,
   },
 
   botaoCancelar: {
@@ -426,6 +461,6 @@ const styles = StyleSheet.create({
   botaoCancelarTexto: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#6B8F86",
+    color: Cores.textoSuave,
   },
 });

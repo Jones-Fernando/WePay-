@@ -1,15 +1,19 @@
 """Testes das regras financeiras usando MySQL."""
 
-import pytest
-from decimal import Decimal
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
 from threading import Barrier
 
+import pytest
+from mysql.connector.errors import InternalError
+
+from app import create_app
 from database.connection import cursor_for, get_connection_context
 from models.despesa_model import DespesaModel
 from models.despesa_pessoal_model import DespesaPessoalModel
 from models.grupo_model import GrupoModel
 from models.participante_model import ParticipanteModel
+from services.financeiro_pagamento_service import IdempotencyConflictError
 from services.financeiro_service import FinanceiroService
 from services.notificacao_service import NotificacaoService
 from services.push_outbox_worker import processar_proxima
@@ -32,6 +36,11 @@ def test_participantes_validos_normaliza_ids_e_rejeita_ids_ausentes():
             FinanceiroService._participantes_validos(conn, gid, [999999999])
         with pytest.raises(ValueError, match="O grupo precisa ter participantes"):
             FinanceiroService._participantes_validos(conn, gid, [])
+
+
+def test_participantes_validos_rejeita_listas_acima_do_limite():
+    with pytest.raises(ValueError, match="no maximo 100"):
+        FinanceiroService._participantes_validos(None, 1, range(1, 102))
 
 
 def criar_base():
@@ -194,6 +203,188 @@ def test_pagamentos_concorrentes_nao_usam_o_mesmo_saldo_devedor():
 
     assert sorted(resultados) == ["pago", "saldo_insuficiente"]
     assert saldos_por_usuario(gid)[ids[1]] == Decimal("0.00")
+
+
+def test_pagamento_com_mesma_chave_concorrente_e_aplicado_uma_vez():
+    ids, gid = criar_base()
+    FinanceiroService.criar_despesa(
+        gid, ids[0], "Conta", 50, participantes=ids, criador_id=ids[0]
+    )
+    barreira = Barrier(2)
+    chave = "pagamento-retry-concorrente"
+
+    def pagar():
+        barreira.wait()
+        return FinanceiroService.registrar_pagamento(
+            gid,
+            ids[1],
+            ids[0],
+            5,
+            data_pagamento="2026-11-15",
+            idempotency_key=chave,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        resultados = list(executor.map(lambda _: pagar(), range(2)))
+
+    assert resultados[0] == resultados[1]
+    assert saldos_por_usuario(gid)[ids[1]] == Decimal("-11.67")
+    with get_connection_context() as conn:
+        cursor = cursor_for(conn)
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM pagamentos "
+                "WHERE grupo_id = ? AND pagador_id = ? AND idempotency_key = ?",
+                (gid, ids[1], chave),
+            )
+            assert cursor.fetchone()["total"] == 1
+        finally:
+            cursor.close()
+
+
+def test_idempotency_key_reuse_with_different_payment_data_conflicts():
+    ids, gid = criar_base()
+    FinanceiroService.criar_despesa(
+        gid, ids[0], "Conta", 50, participantes=ids, criador_id=ids[0]
+    )
+    chave = "payment-payload-conflict"
+    FinanceiroService.registrar_pagamento(
+        gid,
+        ids[1],
+        ids[0],
+        5,
+        data_pagamento="2026-11-15",
+        idempotency_key=chave,
+    )
+
+    with pytest.raises(
+        IdempotencyConflictError, match="chave de idempotencia"
+    ):
+        FinanceiroService.registrar_pagamento(
+            gid,
+            ids[1],
+            ids[0],
+            6,
+            data_pagamento="2026-11-15",
+            idempotency_key=chave,
+        )
+
+    assert saldos_por_usuario(gid)[ids[1]] == Decimal("-11.67")
+
+
+@pytest.mark.parametrize("error_number", [1205, 1213])
+def test_criar_despesa_retries_lock_errors_after_rolling_back_all_changes(
+    monkeypatch, error_number
+):
+    ids, gid = criar_base()
+    original = NotificacaoService.notificar_nova_despesa
+    calls = 0
+
+    def deadlock_once(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise InternalError(msg="simulated lock error", errno=error_number)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        NotificacaoService,
+        "notificar_nova_despesa",
+        staticmethod(deadlock_once),
+    )
+
+    despesa_id = FinanceiroService.criar_despesa(
+        gid,
+        ids[0],
+        "Despesa com retry",
+        50,
+        participantes=ids,
+        criador_id=ids[0],
+    )
+
+    assert calls == 2
+    with get_connection_context() as conn:
+        cursor = cursor_for(conn)
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM despesas "
+                "WHERE grupo_id = ? AND descricao = ?",
+                (gid, "Despesa com retry"),
+            )
+            assert cursor.fetchone()["total"] == 1
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM despesa_divisoes "
+                "WHERE despesa_id = ?",
+                (despesa_id,),
+            )
+            assert cursor.fetchone()["total"] == len(ids)
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM notificacoes "
+                "WHERE grupo_id = ? AND referencia_id = ? "
+                "AND tipo = 'nova_despesa'",
+                (gid, despesa_id),
+            )
+            assert cursor.fetchone()["total"] == len(ids) - 1
+        finally:
+            cursor.close()
+
+    assert saldos_por_usuario(gid) == {
+        usuario_id: valor
+        for usuario_id, valor in FinanceiroService._delta_despesa(
+            ids[0],
+            Decimal("50.00"),
+            FinanceiroService.calcular_divisoes(50, ids),
+        ).items()
+    }
+
+
+def test_concurrent_expenses_keep_notifications_and_balances_consistent():
+    ids, gid = criar_base()
+    barrier = Barrier(2)
+
+    def create_expense(description):
+        barrier.wait()
+        return FinanceiroService.criar_despesa(
+            gid,
+            ids[0],
+            description,
+            50,
+            participantes=ids,
+            criador_id=ids[0],
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        expense_ids = list(
+            executor.map(create_expense, ("Conta concorrente A", "Conta concorrente B"))
+        )
+
+    assert len(set(expense_ids)) == 2
+    with get_connection_context() as conn:
+        cursor = cursor_for(conn)
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM despesas WHERE grupo_id = ?",
+                (gid,),
+            )
+            assert cursor.fetchone()["total"] == 2
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM notificacoes "
+                "WHERE grupo_id = ? AND tipo = 'nova_despesa'",
+                (gid,),
+            )
+            assert cursor.fetchone()["total"] == 2 * (len(ids) - 1)
+        finally:
+            cursor.close()
+
+    delta_por_despesa = FinanceiroService._delta_despesa(
+        ids[0],
+        Decimal("50.00"),
+        FinanceiroService.calcular_divisoes(50, ids),
+    )
+    assert saldos_por_usuario(gid) == {
+        usuario_id: valor * 2
+        for usuario_id, valor in delta_por_despesa.items()
+    }
 
 
 def test_pagamento_aplica_delta_sem_recalcular_o_grupo(monkeypatch):
@@ -376,6 +567,36 @@ def test_nova_despesa_enfileira_push_e_worker_envia_apos_commit(monkeypatch):
             cursor.close()
 
 
+def test_nova_despesa_notifica_demais_membros_excluindo_o_criador():
+    ids, gid = criar_base()
+
+    FinanceiroService.criar_despesa(
+        gid,
+        ids[1],
+        "Compra do grupo",
+        90,
+        participantes=ids,
+        criador_id=ids[0],
+    )
+
+    with get_connection_context() as conn:
+        cursor = cursor_for(conn)
+        try:
+            cursor.execute(
+                "SELECT usuario_id, referencia_id FROM notificacoes "
+                "WHERE grupo_id = ? AND tipo = 'nova_despesa' "
+                "ORDER BY usuario_id",
+                (gid,),
+            )
+            notificacoes = cursor.fetchall()
+            destinatarios = [row["usuario_id"] for row in notificacoes]
+            assert all(row["referencia_id"] is not None for row in notificacoes)
+        finally:
+            cursor.close()
+
+    assert destinatarios == sorted(ids[1:])
+
+
 def test_edicao_aplica_deltas_sem_duplicar_despesa():
     ids, gid = criar_base()
     did = FinanceiroService.criar_despesa(
@@ -500,6 +721,37 @@ def test_reconciliacao_detecta_corrige_e_eh_idempotente():
             cursor.close()
 
     assert FinanceiroService.reconciliar_saldos(gid)["divergencias"] == []
+
+
+def test_reconcile_balances_check_only_returns_failure_without_changing_saldos():
+    ids, gid = criar_base()
+    FinanceiroService.criar_despesa(
+        gid, ids[0], "Conta", 60, participantes=ids, criador_id=ids[0]
+    )
+    with get_connection_context() as conn:
+        cursor = cursor_for(conn)
+        try:
+            cursor.execute(
+                "UPDATE saldos SET saldo = 999 WHERE grupo_id = ? AND usuario_id = ?",
+                (gid, ids[0]),
+            )
+            conn.commit()
+        finally:
+            cursor.close()
+
+    resultado = create_app().test_cli_runner().invoke(
+        args=[
+            "reconcile-balances",
+            "--group-id",
+            str(gid),
+            "--check-only",
+        ]
+    )
+
+    assert resultado.exit_code != 0
+    assert f"Grupo {gid}: 1 divergência(s) encontradas." in resultado.output
+    assert "execute sem --check-only" in resultado.output
+    assert saldos_por_usuario(gid)[ids[0]] == Decimal("999.00")
 
 
 def test_reconciliacao_remove_saldos_quando_livro_nao_tem_participantes():

@@ -4,6 +4,7 @@ from controllers.auth_controller import AuthController
 from controllers.usuario_controller import UsuarioController
 from middlewares.auth_middleware import token_required
 from utils.rate_limiter import limiter
+from utils.rate_limit_keys import password_reset_email_or_ip
 
 
 usuario_bp = Blueprint("usuario_bp", __name__)
@@ -13,6 +14,11 @@ _limite_solicitacao = limiter.shared_limit(
     Config.RATE_LIMIT_PASSWORD_RESET_REQUEST,
     scope="password-reset-request",
 )
+_limite_solicitacao_por_email = limiter.shared_limit(
+    "3 per hour",
+    scope="password-reset-account",
+    key_func=password_reset_email_or_ip,
+)
 _limite_confirmacao = limiter.shared_limit(
     Config.RATE_LIMIT_PASSWORD_RESET_CONFIRM,
     scope="password-reset-confirm",
@@ -20,13 +26,17 @@ _limite_confirmacao = limiter.shared_limit(
 usuario_bp.add_url_rule(
     "/recover",
     endpoint="recuperar_senha_alias",
-    view_func=_limite_solicitacao(AuthController.esqueci_senha),
+    view_func=_limite_solicitacao_por_email(
+        _limite_solicitacao(AuthController.esqueci_senha)
+    ),
     methods=["POST"],
 )
 usuario_bp.add_url_rule(
     "/recuperar-senha",
     endpoint="recuperar_senha",
-    view_func=_limite_solicitacao(AuthController.esqueci_senha),
+    view_func=_limite_solicitacao_por_email(
+        _limite_solicitacao(AuthController.esqueci_senha)
+    ),
     methods=["POST"],
 )
 usuario_bp.add_url_rule(

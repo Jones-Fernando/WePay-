@@ -26,6 +26,14 @@ Consulte os guias de cada componente para requisitos, configuração e comandos:
 O CI executa lint, verificação de tipos e testes do frontend; no backend,
 executa Ruff, testes com MySQL e os limites de cobertura definidos pelo projeto.
 
+## Release e staging
+
+O [workflow de CI](./.github/workflows/ci.yml) valida testes, lint, auditorias
+de dependências e export dos bundles; ele não publica nem configura staging.
+Antes de produção, faça o ensaio em um staging com banco e segredos próprios,
+usando dados sintéticos ou anonimizados. A sequência de deploy, smoke tests e
+rollback está documentada no [runbook do backend](./backend/README.md#staging-release-e-rollback).
+
 ## Segurança e privacidade
 
 - Não versione arquivos `.env`, credenciais ou chaves.

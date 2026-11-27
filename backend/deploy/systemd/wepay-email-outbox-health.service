@@ -1,0 +1,16 @@
+[Unit]
+Description=Check WePay password recovery email outbox health
+OnFailure=wepay-email-outbox-alert@%n.service
+
+[Service]
+Type=oneshot
+User=wepay
+Group=wepay
+WorkingDirectory=/opt/wepay/backend
+Environment=APP_ENV=production
+Environment=EMAIL_OUTBOX_HEARTBEAT_FILE=/run/wepay/email-outbox.heartbeat
+ExecStart=/opt/wepay/backend/.venv/bin/python -m services.email_outbox_worker --health-check --max-pending-count 100 --max-pending-age-seconds 300 --max-failed-count 0 --heartbeat-max-age-seconds 15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true

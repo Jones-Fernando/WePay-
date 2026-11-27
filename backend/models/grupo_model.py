@@ -1,15 +1,18 @@
 from database.connection import get_connection_context, cursor_for, fetch_one, fetch_all
 
+_ICON_UNSET = object()
+
 
 class GrupoModel:
     @staticmethod
-    def criar(nome, descricao, criado_por, conn=None):
+    def criar(nome, descricao, criado_por, conn=None, icone=None):
         if conn is not None:
             cursor = cursor_for(conn)
             try:
                 cursor.execute(
-                    "INSERT INTO grupos (nome, descricao, criado_por) VALUES (?, ?, ?)",
-                    (nome, descricao, criado_por),
+                    "INSERT INTO grupos (nome, descricao, criado_por, icone) "
+                    "VALUES (?, ?, ?, ?)",
+                    (nome, descricao, criado_por, icone),
                 )
                 return cursor.lastrowid
             finally:
@@ -19,8 +22,9 @@ class GrupoModel:
             cursor = cursor_for(connection)
             try:
                 cursor.execute(
-                    "INSERT INTO grupos (nome, descricao, criado_por) VALUES (?, ?, ?)",
-                    (nome, descricao, criado_por),
+                    "INSERT INTO grupos (nome, descricao, criado_por, icone) "
+                    "VALUES (?, ?, ?, ?)",
+                    (nome, descricao, criado_por, icone),
                 )
                 group_id = cursor.lastrowid
                 connection.commit()
@@ -48,6 +52,7 @@ class GrupoModel:
                 cursor.execute(
                     """
                     SELECT g.id, g.nome, g.descricao, g.criado_por,
+                           g.icone,
                            COALESCE(s.saldo, 0) AS saldo,
                            COUNT(DISTINCT u2.id) AS participantes
                     FROM (
@@ -70,7 +75,7 @@ class GrupoModel:
                     LEFT JOIN usuarios u2
                       ON u2.id = p2.usuario_id
                      AND u2.excluido_em IS NULL
-                    GROUP BY g.id, g.nome, g.descricao, g.criado_por, s.saldo
+                    GROUP BY g.id, g.nome, g.descricao, g.icone, g.criado_por, s.saldo
                     ORDER BY pagina.nome, pagina.id
                     """,
                     (usuario_id, limit, offset, usuario_id),
@@ -95,14 +100,24 @@ class GrupoModel:
                 cursor.close()
 
     @staticmethod
-    def atualizar(grupo_id, nome, descricao, conn=None):
+    def atualizar(grupo_id, nome, descricao, conn=None, icone=_ICON_UNSET):
+        if icone is _ICON_UNSET:
+            query = (
+                "UPDATE grupos SET nome = ?, descricao = ?, "
+                "atualizado_em = CURRENT_TIMESTAMP WHERE id = ?"
+            )
+            params = (nome, descricao, grupo_id)
+        else:
+            query = (
+                "UPDATE grupos SET nome = ?, descricao = ?, icone = ?, "
+                "atualizado_em = CURRENT_TIMESTAMP WHERE id = ?"
+            )
+            params = (nome, descricao, icone, grupo_id)
+
         if conn is not None:
             cursor = cursor_for(conn)
             try:
-                cursor.execute(
-                    "UPDATE grupos SET nome = ?, descricao = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?",
-                    (nome, descricao, grupo_id),
-                )
+                cursor.execute(query, params)
             finally:
                 cursor.close()
             return
@@ -110,10 +125,7 @@ class GrupoModel:
         with get_connection_context() as connection:
             cursor = cursor_for(connection)
             try:
-                cursor.execute(
-                    "UPDATE grupos SET nome = ?, descricao = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?",
-                    (nome, descricao, grupo_id),
-                )
+                cursor.execute(query, params)
                 connection.commit()
             finally:
                 cursor.close()

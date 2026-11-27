@@ -24,7 +24,9 @@ import {
 } from "@/services/pushNotifications";
 import { Usuario } from "@/types/usuario";
 
-type DadosPerfil = Pick<Usuario, "nome" | "email" | "telefone">;
+type DadosPerfil = Partial<
+  Pick<Usuario, "nome" | "email" | "telefone" | "avatarUrl" | "pixChave">
+>;
 
 type UsuarioContexto = {
   usuario: Usuario | null;
@@ -52,6 +54,7 @@ function obterIniciais(nome: string) {
 export function UsuarioProvider({ children }: PropsWithChildren) {
   const segments = useSegments();
   const isAuthRoute = segments[0] === "(auth)";
+  const isPublicRoute = isAuthRoute || segments[0] === "redefinir-senha";
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [erroRestauracao, setErroRestauracao] = useState<string | null>(null);
@@ -78,6 +81,8 @@ export function UsuarioProvider({ children }: PropsWithChildren) {
         email: data.email,
         telefone: data.telefone ?? "",
         iniciais: obterIniciais(data.nome),
+        avatarUrl: data.avatar_url ?? undefined,
+        pixChave: data.pix_chave ?? "",
         saldoTotal: Number(data.saldo_total),
       });
     } catch (erro) {
@@ -97,9 +102,9 @@ export function UsuarioProvider({ children }: PropsWithChildren) {
   }, []);
 
   useEffect(() => {
-    if (carregando || usuario || isAuthRoute) return;
+    if (carregando || usuario || isPublicRoute) return;
     router.replace("/(auth)/login");
-  }, [carregando, isAuthRoute, usuario]);
+  }, [carregando, isPublicRoute, usuario]);
 
   useEffect(() => {
     const unsubscribe = subscribeSessionExpired(() => {
@@ -132,6 +137,8 @@ export function UsuarioProvider({ children }: PropsWithChildren) {
           email: data.user.email,
           telefone: "",
           iniciais: obterIniciais(data.user.nome),
+          avatarUrl: data.user.avatar_url ?? undefined,
+          pixChave: data.user.pix_chave ?? "",
           saldoTotal: Number(data.user.saldo_total),
         });
       },
@@ -183,7 +190,9 @@ export function UsuarioProvider({ children }: PropsWithChildren) {
             ? {
                 ...atual,
                 ...dados,
-                iniciais: obterIniciais(dados.nome) || atual.iniciais,
+                iniciais: dados.nome
+                  ? obterIniciais(dados.nome) || atual.iniciais
+                  : atual.iniciais,
               }
             : null
         );

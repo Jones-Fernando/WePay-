@@ -88,7 +88,12 @@ def test_data_retention_deletes_in_bounded_batches_and_keeps_failed_pushes(
         query for query, _params in connection.statements
         if query.lstrip().startswith("DELETE")
     ]
-    assert all("ORDER BY id" in query and "LIMIT ?" in query for query in delete_queries)
+    assert all("LIMIT ?" in query for query in delete_queries)
+    assert all(
+        "ORDER BY id" in query
+        or "ORDER BY data_utc, usuario_id, modelo" in query
+        for query in delete_queries
+    )
     push_rule = dict(RETENTION_RULES)["push_outbox"]
     assert "status = 'sent'" in push_rule
     assert "failed" not in push_rule
@@ -142,6 +147,15 @@ def test_data_retention_applies_real_mysql_deadlines_and_outbox_cascade():
                 ("Retention test group", owner_id),
             )
             group_id = cursor.lastrowid
+            cursor.execute(
+                "INSERT INTO gemini_usage_diaria "
+                "(data_utc, usuario_id, modelo, solicitacoes) "
+                "VALUES "
+                "(DATE_SUB(UTC_DATE(), INTERVAL 366 DAY), ?, 'retention-user-old', 1), "
+                "(DATE_SUB(UTC_DATE(), INTERVAL 364 DAY), ?, 'retention-user-recent', 1), "
+                "(DATE_SUB(UTC_DATE(), INTERVAL 366 DAY), 0, 'retention-global-old', 1)",
+                (owner_id, owner_id),
+            )
 
             for token_hash, days_ago in (
                 ("1" * 64, 31),
@@ -232,6 +246,7 @@ def test_data_retention_applies_real_mysql_deadlines_and_outbox_cascade():
         "recuperacao_tokens": 2,
         "convites_grupo": 2,
         "push_outbox": 1,
+        "gemini_usage_diaria": 2,
     }
 
     with get_connection_context() as connection:
@@ -244,6 +259,7 @@ def test_data_retention_applies_real_mysql_deadlines_and_outbox_cascade():
                 ("convites_grupo", 4),
                 ("push_outbox", 5),
                 ("push_outbox_destinatarios", 5),
+                ("gemini_usage_diaria", 3),
             ):
                 cursor.execute(f"SELECT COUNT(*) AS total FROM {table}")
                 assert cursor.fetchone()["total"] == expected_count
@@ -263,6 +279,7 @@ def test_data_retention_applies_real_mysql_deadlines_and_outbox_cascade():
                 ("convites_grupo", 2),
                 ("push_outbox", 4),
                 ("push_outbox_destinatarios", 4),
+                ("gemini_usage_diaria", 1),
             ):
                 cursor.execute(f"SELECT COUNT(*) AS total FROM {table}")
                 assert cursor.fetchone()["total"] == expected_count

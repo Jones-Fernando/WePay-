@@ -10,3 +10,9 @@ dashboard_bp = Blueprint("dashboard_bp", __name__)
 @token_required
 def obter_dados(current_user_id):
     return DashboardController.obter_dados(current_user_id)
+
+
+@dashboard_bp.route("/pendencias", methods=["GET"])
+@token_required
+def obter_pendencias(current_user_id):
+    return DashboardController.obter_pendencias(current_user_id)

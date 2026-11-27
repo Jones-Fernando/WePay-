@@ -3,9 +3,18 @@ from utils.response_utils import ResponseUtils
 from database.connection import get_connection_context, cursor_for, fetch_one
 from services.lembrete_service import LembreteService
 from services.financeiro_service import FinanceiroService, money
+from services.financeiro_saldo_service import FinanceiroSaldoService
 
 
 class DashboardController:
+    @staticmethod
+    def obter_pendencias(current_user_id):
+        return ResponseUtils.sucesso(
+            dados=FinanceiroSaldoService.listar_pendencias_usuario(
+                current_user_id
+            )
+        )
+
     @staticmethod
     def obter_dados(current_user_id):
         with get_connection_context() as conn:

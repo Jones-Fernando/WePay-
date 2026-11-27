@@ -1,6 +1,10 @@
+import { useAppTheme, useAppThemeScheme } from "@/hooks/useAppTheme";
+import type { PaletaSemantica } from "@/constants/Cores";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
+  Pressable,
   RefreshControl,
   SafeAreaView,
   ScrollView,
@@ -11,7 +15,10 @@ import {
   View,
 } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { despesasGrupoApi } from "@/services/api";
+import { Feather } from "@expo/vector-icons";
+import { IconeCategoria } from "@/components/IconeCategoria";
+import { despesasGrupoApi, gruposApi } from "@/services/api";
+import { Alert } from "@/services/feedback";
 import type { DespesaGrupo, PaginacaoLista } from "@/types/api";
 import { formatDateTimeForDisplay } from "@/utils/financeInput";
 import { formatCurrencyBRL } from "@/utils/financeFormat";
@@ -19,9 +26,36 @@ import {
   appendUniqueById,
   createPaginationRequestGate,
 } from "@/utils/paginationRequestGate";
+import { CATEGORIAS_GRUPO } from "@/constants/financeCategories";
+import type { CategoriaOpcao } from "@/constants/financeCategories";
+import { useCategoriasFinanceiras } from "@/hooks/useCategoriasFinanceiras";
 
-const CORES = { paper: "#F5FBF7", ink: "#0B3B33", surface: "#FFFFFF", accent: "#00C896", accentDark: "#00A17A", muted: "#6B8F86", line: "#E1EEE8", field: "#F0F8F4" };
-const ICONES_CATEGORIA: Record<string, string> = { "Alimentação": "🛒", Transporte: "🚕", Casa: "🏠", Moradia: "🏘️", Saúde: "💊", Educação: "📚", Lazer: "🎮", Assinatura: "🎬", Assinaturas: "🎬", Compras: "🛍️", Pets: "🐾", Viagem: "✈️", Impostos: "🧾", Mercado: "🛒", "Contas da casa": "💡", "Internet e telefone": "📶", Limpeza: "🧹", "Manutenção e reparos": "🔧", Hospedagem: "🏨", Passagens: "✈️", Combustível: "⛽", "Pedágios e estacionamento": "🅿️", "Passeios e ingressos": "🎟️", Outros: "📦" };
+const ICONES_CATEGORIA: Record<string, string> = {
+  "Alimentação": "🛒",
+  Transporte: "🚕",
+  Casa: "🏠",
+  Moradia: "🏘️",
+  Saúde: "💊",
+  Educação: "📚",
+  Lazer: "🎮",
+  Assinatura: "🎬",
+  Assinaturas: "🎬",
+  Compras: "🛍️",
+  Pets: "🐾",
+  Viagem: "✈️",
+  Impostos: "🧾",
+  Mercado: "🛒",
+  "Contas da casa": "💡",
+  "Internet e telefone": "📶",
+  Limpeza: "🧹",
+  "Manutenção e reparos": "🔧",
+  Hospedagem: "🏨",
+  Passagens: "✈️",
+  Combustível: "⛽",
+  "Pedágios e estacionamento": "🅿️",
+  "Passeios e ingressos": "🎟️",
+  Outros: "📦",
+};
 const CORES_CATEGORIA: Record<string, string> = {
   Alimentação: "#00C896",
   Transporte: "#FF6B5C",
@@ -49,13 +83,30 @@ const CORES_CATEGORIA: Record<string, string> = {
   Outros: "#A6BDB5",
 };
 
-const iconeCategoria = (categoria: string | null | undefined) => (categoria && ICONES_CATEGORIA[categoria]) || "📦";
+const iconeCategoria = (
+  categoria: string | null | undefined,
+  categorias: readonly CategoriaOpcao[],
+) =>
+  (categoria && categorias.find((item) => item.nome === categoria)?.icone)
+  || (categoria && ICONES_CATEGORIA[categoria])
+  || "📦";
 const TAMANHO_PAGINA = 50;
 
 export default function DespesasGrupo() {
+  const CORES = useAppTheme();
+  const styles = createStyles(CORES);
+  const esquema = useAppThemeScheme();
+  const { categorias: categoriasFinanceiras } = useCategoriasFinanceiras(
+    "grupo",
+    CATEGORIAS_GRUPO,
+  );
   const params = useLocalSearchParams();
   const groupId = String(params.groupId ?? "");
-  const grupoNome = String(params.grupoNome ?? "Meu grupo");
+  const grupoNomeParam = String(params.grupoNome ?? "Meu grupo");
+  const [grupoNome, setGrupoNome] = useState(grupoNomeParam);
+  const [podeEditar, setPodeEditar] = useState(false);
+  const [erroGrupo, setErroGrupo] = useState<string | null>(null);
+  const [excluindoGrupo, setExcluindoGrupo] = useState(false);
   const [filtro, setFiltro] = useState<"Todas" | "Recentes">("Todas");
   const [despesas, setDespesas] = useState<DespesaGrupo[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -65,6 +116,23 @@ export default function DespesasGrupo() {
   const [erroCarregamento, setErroCarregamento] = useState<string | null>(null);
   const [erroCarregamentoMais, setErroCarregamentoMais] = useState<string | null>(null);
   const requestGate = useRef(createPaginationRequestGate());
+
+  const carregarGrupo = useCallback(async () => {
+    if (!groupId || Number(groupId) <= 0) return;
+    setErroGrupo(null);
+    try {
+      const resposta = await gruposApi.buscar(Number(groupId));
+      setGrupoNome(resposta.data.nome);
+      setPodeEditar(resposta.data.pode_editar === true);
+    } catch (falha) {
+      setPodeEditar(false);
+      setErroGrupo(
+        falha instanceof Error
+          ? falha.message
+          : "Não foi possível carregar as permissões do grupo.",
+      );
+    }
+  }, [groupId]);
 
   const carregarDespesas = useCallback(async (mostrarLoading = true) => {
     const generation = requestGate.current.beginFirstPage();
@@ -108,8 +176,9 @@ export default function DespesasGrupo() {
   useFocusEffect(useCallback(() => {
     requestGate.current.activate();
     void carregarDespesas();
+    void carregarGrupo();
     return () => requestGate.current.invalidate();
-  }, [carregarDespesas]));
+  }, [carregarDespesas, carregarGrupo]));
 
   const carregarMais = useCallback(async () => {
     if (!paginacao?.has_more || !groupId) return;
@@ -171,14 +240,59 @@ export default function DespesasGrupo() {
     router.push({ pathname: "/(main)/group/saldos", params: { groupId, grupoNome } });
   }
 
+  async function excluirGrupo() {
+    if (excluindoGrupo) return;
+    setExcluindoGrupo(true);
+    try {
+      await gruposApi.deletar(Number(groupId));
+      router.replace("/(main)/group");
+    } catch (falha) {
+      Alert.alert(
+        "Erro",
+        falha instanceof Error
+          ? falha.message
+          : "Não foi possível excluir o grupo.",
+      );
+      setExcluindoGrupo(false);
+    }
+  }
+
+  function confirmarExclusaoGrupo() {
+    if (excluindoGrupo) return;
+    const mensagem =
+      "A exclusão é permanente e remove as despesas, pagamentos, saldos e participantes do grupo.";
+
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm(mensagem)) {
+        void excluirGrupo();
+      }
+      return;
+    }
+
+    Alert.alert("Excluir grupo", mensagem, [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Excluir grupo",
+        style: "destructive",
+        onPress: () => void excluirGrupo(),
+      },
+    ]);
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={esquema === "dark" ? "light-content" : "dark-content"} />
       <View style={styles.header}>
         <TouchableOpacity style={styles.botaoVoltar} onPress={() => router.back()}><Text style={styles.iconeVoltar}>‹</Text></TouchableOpacity>
         <View style={styles.headerTextos}><Text style={styles.titulo}>Despesas em grupo</Text><Text style={styles.subtitulo}>{grupoNome}</Text></View>
-        <TouchableOpacity style={styles.botaoParticipantes} onPress={abrirParticipantes} accessibilityLabel="Ver participantes"><Text style={styles.iconeParticipantes}>👥</Text></TouchableOpacity>
       </View>
+      {erroGrupo && (
+        <View style={styles.erroInline} accessibilityRole="alert">
+          <Text style={styles.erroTexto}>
+            Não foi possível carregar as permissões do grupo: {erroGrupo}
+          </Text>
+        </View>
+      )}
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.conteudo} showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={atualizando} onRefresh={() => carregarDespesas(false)} tintColor={CORES.accentDark} />}>
@@ -223,7 +337,13 @@ export default function DespesasGrupo() {
             return <TouchableOpacity key={item.id} style={styles.cartaoDespesa} onPress={() => abrirDespesa(item.id)} activeOpacity={0.8} accessibilityRole="button">
               <View style={styles.cartaoDespesaConteudo}>
                 <View style={styles.cartaoDespesaTopo}>
-                  <Text style={styles.despesaTitulo} numberOfLines={1}>{iconeCategoria(categoria)} {item.descricao}</Text>
+                  <View style={styles.despesaTituloLinha}>
+                    <IconeCategoria
+                      icone={iconeCategoria(categoria, categoriasFinanceiras)}
+                      tamanho={16}
+                    />
+                    <Text style={styles.despesaTitulo} numberOfLines={1}>{item.descricao}</Text>
+                  </View>
                   <Text style={styles.despesaValor}>{formatCurrencyBRL(item.valor)}</Text>
                 </View>
                 <Text style={styles.despesaInfo} numberOfLines={1}>{categoria}</Text>
@@ -270,6 +390,56 @@ export default function DespesasGrupo() {
           <TouchableOpacity style={styles.acaoSecundaria} onPress={abrirParticipantes}><Text style={styles.acaoIcone}>👥</Text><Text style={styles.acaoTexto}>Participantes</Text><Text style={styles.seta}>›</Text></TouchableOpacity>
           <TouchableOpacity style={styles.acaoSecundaria} onPress={abrirSaldos}><Text style={styles.acaoIcone}>⚖️</Text><Text style={styles.acaoTexto}>Saldos e acertos</Text><Text style={styles.seta}>›</Text></TouchableOpacity>
         </View>
+        {podeEditar && (
+          <View style={styles.acoesAdmin}>
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: "/(main)/group/editar",
+                  params: { groupId },
+                })
+              }
+              accessibilityRole="button"
+              accessibilityLabel="Editar grupo"
+              style={({ pressed }) => [
+                styles.botaoEditarGrupo,
+                pressed && styles.botaoPressionado,
+              ]}
+            >
+              <Feather
+                name="edit-2"
+                size={16}
+                color={CORES.textoSobrePrincipal}
+                accessible={false}
+              />
+              <Text style={styles.textoBotaoEditar}>Editar grupo</Text>
+            </Pressable>
+            <Pressable
+              onPress={confirmarExclusaoGrupo}
+              disabled={excluindoGrupo}
+              accessibilityRole="button"
+              accessibilityLabel="Excluir grupo"
+              style={({ pressed }) => [
+                styles.botaoExcluirGrupo,
+                (pressed || excluindoGrupo) && styles.botaoPressionado,
+              ]}
+            >
+              {excluindoGrupo ? (
+                <ActivityIndicator color={CORES.textoNegativo} />
+              ) : (
+                <>
+                  <Feather
+                    name="trash-2"
+                    size={16}
+                    color={CORES.textoNegativo}
+                    accessible={false}
+                  />
+                  <Text style={styles.textoExcluirGrupo}>Excluir grupo</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        )}
       </ScrollView>
 
       <TouchableOpacity style={styles.fab} onPress={abrirNovaDespesa} accessibilityLabel="Nova despesa"><Text style={styles.fabText}>+</Text></TouchableOpacity>
@@ -277,25 +447,59 @@ export default function DespesasGrupo() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (CORES: PaletaSemantica) => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: CORES.paper },
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 12, paddingBottom: 18 },
   botaoVoltar: { width: 42, height: 42, borderRadius: 21, backgroundColor: CORES.surface, borderWidth: 1, borderColor: CORES.line, justifyContent: "center", alignItems: "center", marginRight: 12 },
   iconeVoltar: { fontSize: 32, color: CORES.ink, lineHeight: 34, marginTop: -3 }, headerTextos: { flex: 1 },
   titulo: { fontSize: 23, fontWeight: "700", color: CORES.ink }, subtitulo: { fontSize: 12, color: CORES.muted, marginTop: 4 },
-  botaoParticipantes: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#E8F9F2", justifyContent: "center", alignItems: "center" }, iconeParticipantes: { fontSize: 18 },
   scroll: { flex: 1 }, conteudo: { paddingHorizontal: 20, paddingBottom: 122 },
+  acoesAdmin: { marginTop: 24, gap: 10 },
+  botaoEditarGrupo: {
+    height: 50,
+    backgroundColor: CORES.accentDark,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  textoBotaoEditar: {
+    color: CORES.textoSobrePrincipal,
+    fontSize: 14,
+    fontWeight: "800",
+    fontFamily: "sans-serif",
+  },
+  botaoExcluirGrupo: {
+    height: 48,
+    backgroundColor: CORES.superficieNegativa,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: CORES.bordaNegativoSuave,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  textoExcluirGrupo: {
+    color: CORES.textoNegativo,
+    fontSize: 13,
+    fontWeight: "800",
+    fontFamily: "sans-serif",
+  },
+  botaoPressionado: { opacity: 0.75 },
   cardResumo: { backgroundColor: CORES.field, borderRadius: 16, padding: 14, marginBottom: 18 },
-  grupoChip: { alignSelf: "flex-start", backgroundColor: "#DDF7EE", borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4, marginBottom: 10 }, grupoChipTexto: { color: CORES.ink, fontSize: 10, fontWeight: "700" },
+  grupoChip: { alignSelf: "flex-start", backgroundColor: CORES.superficieVerdeSelecionada, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4, marginBottom: 10 }, grupoChipTexto: { color: CORES.ink, fontSize: 10, fontWeight: "700" },
   resumoLabel: { fontSize: 11, color: CORES.muted }, resumoValor: { marginTop: 5, fontSize: 25, fontWeight: "600", color: CORES.ink }, resumoNota: { marginTop: 5, fontSize: 11, color: CORES.muted },
   barraCategorias: { flexDirection: "row", height: 6, borderRadius: 4, overflow: "hidden", gap: 2, marginTop: 12 },
   segmentoCategoria: { height: 6, borderRadius: 3 },
   linhaTitulo: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }, secaoTitulo: { color: CORES.ink, fontSize: 16, fontWeight: "700" }, quantidade: { minWidth: 22, textAlign: "center", color: CORES.muted, fontSize: 11, fontWeight: "700" },
-  filtros: { flexDirection: "row", gap: 8, marginBottom: 8 }, filtro: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, backgroundColor: CORES.surface, borderWidth: 1, borderColor: CORES.line }, filtroAtivo: { backgroundColor: "#DDF7EE", borderColor: CORES.accent }, filtroTexto: { color: CORES.muted, fontSize: 11, fontWeight: "600" }, filtroTextoAtivo: { color: CORES.ink },
+  filtros: { flexDirection: "row", gap: 8, marginBottom: 8 }, filtro: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, backgroundColor: CORES.surface, borderWidth: 1, borderColor: CORES.line }, filtroAtivo: { backgroundColor: CORES.superficieVerdeSelecionada, borderColor: CORES.accent }, filtroTexto: { color: CORES.muted, fontSize: 11, fontWeight: "600" }, filtroTextoAtivo: { color: CORES.ink },
   listaDespesas: { marginTop: 2 },
   cartaoDespesa: { backgroundColor: CORES.surface, borderWidth: 1, borderColor: CORES.line, borderRadius: 14, marginBottom: 10 },
   cartaoDespesaConteudo: { padding: 12 },
   cartaoDespesaTopo: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  despesaTituloLinha: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 6 },
   despesaTitulo: { flex: 1, minWidth: 0, color: CORES.ink, fontSize: 13, fontWeight: "700" },
   despesaInfo: { color: CORES.muted, fontSize: 11, marginTop: 4 },
   despesaCriadaEm: { color: CORES.muted, fontSize: 10, marginTop: 3 },
@@ -306,11 +510,11 @@ const styles = StyleSheet.create({
   participantesChipTexto: { color: CORES.ink, fontSize: 9, fontWeight: "700" },
   botaoCarregarMais: { minHeight: 44, alignItems: "center", justifyContent: "center", marginTop: 2, marginBottom: 10 },
   textoCarregarMais: { color: CORES.accentDark, fontSize: 13, fontWeight: "700" },
-  erroInline: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, backgroundColor: "#FCE8E6", padding: 12, borderRadius: 10, marginBottom: 12 },
-  erroPaginacao: { alignItems: "center", backgroundColor: "#FCE8E6", paddingHorizontal: 12, borderRadius: 10, marginBottom: 10 },
-  erroTexto: { flex: 1, color: "#A72F2F", fontSize: 12, textAlign: "center" },
-  erroAcao: { color: "#A72F2F", fontSize: 12, fontWeight: "700" },
-  estado: { paddingTop: 60, alignItems: "center" }, estadoErro: { paddingTop: 48, paddingHorizontal: 25, alignItems: "center" }, botaoTentarNovamente: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, marginTop: 12, backgroundColor: "#DDF7EE", borderRadius: 12 }, estadoTexto: { color: CORES.muted, fontSize: 12, marginTop: 12 }, vazio: { paddingTop: 55, paddingHorizontal: 25, alignItems: "center" }, vazioIcone: { fontSize: 36, marginBottom: 12 }, vazioTitulo: { color: CORES.ink, fontSize: 14, fontWeight: "700" }, vazioTexto: { color: CORES.muted, fontSize: 11, textAlign: "center", lineHeight: 17, marginTop: 7 },
+  erroInline: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, backgroundColor: CORES.superficieErro, padding: 12, borderRadius: 10, marginBottom: 12 },
+  erroPaginacao: { alignItems: "center", backgroundColor: CORES.superficieErro, paddingHorizontal: 12, borderRadius: 10, marginBottom: 10 },
+  erroTexto: { flex: 1, color: CORES.textoErro, fontSize: 12, textAlign: "center" },
+  erroAcao: { color: CORES.textoErro, fontSize: 12, fontWeight: "700" },
+  estado: { paddingTop: 60, alignItems: "center" }, estadoErro: { paddingTop: 48, paddingHorizontal: 25, alignItems: "center" }, botaoTentarNovamente: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, marginTop: 12, backgroundColor: CORES.superficieVerdeSelecionada, borderRadius: 12 }, estadoTexto: { color: CORES.muted, fontSize: 12, marginTop: 12 }, vazio: { paddingTop: 55, paddingHorizontal: 25, alignItems: "center" }, vazioIcone: { fontSize: 36, marginBottom: 12 }, vazioTitulo: { color: CORES.ink, fontSize: 14, fontWeight: "700" }, vazioTexto: { color: CORES.muted, fontSize: 11, textAlign: "center", lineHeight: 17, marginTop: 7 },
   acoesSecundarias: { gap: 10, marginTop: 14 }, acaoSecundaria: { backgroundColor: CORES.surface, borderWidth: 1, borderColor: CORES.line, borderRadius: 14, padding: 14, flexDirection: "row", alignItems: "center" }, acaoIcone: { fontSize: 19, marginRight: 12 }, acaoTexto: { flex: 1, color: CORES.ink, fontWeight: "700", fontSize: 13 }, seta: { color: CORES.accentDark, fontSize: 24, marginTop: -2 },
-  fab: { position: "absolute", right: 20, bottom: 82, width: 54, height: 54, borderRadius: 18, backgroundColor: CORES.accent, alignItems: "center", justifyContent: "center", elevation: 6, shadowColor: CORES.ink, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.2, shadowRadius: 9 }, fabText: { color: CORES.ink, fontSize: 28, fontWeight: "600", marginTop: -2 },
+  fab: { position: "absolute", right: 20, bottom: 82, width: 54, height: 54, borderRadius: 18, backgroundColor: CORES.accent, alignItems: "center", justifyContent: "center", elevation: 6, shadowColor: CORES.ink, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.2, shadowRadius: 9 }, fabText: { color: CORES.textoSobrePrincipal, fontSize: 28, fontWeight: "600", marginTop: -2 },
 });

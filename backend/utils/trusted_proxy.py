@@ -17,6 +17,10 @@ class TrustedProxyFix:
             )
         except ValueError as exc:
             raise ValueError("TRUSTED_PROXY_CIDRS contém uma rede inválida.") from exc
+        if any(network.prefixlen == 0 for network in self._trusted_networks):
+            raise ValueError(
+                "TRUSTED_PROXY_CIDRS não pode conter uma rede universal."
+            )
 
         self._proxy_fix = ProxyFix(
             app,

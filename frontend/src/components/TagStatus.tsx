@@ -6,31 +6,33 @@
 
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Cores } from '../constants/Cores';
+import { useAppTheme } from '@/hooks/useAppTheme';
 
 interface TagStatusProps {
   valor: number; // Se for positivo fica verde, se for negativo fica vermelho
 }
 
 export const TagStatus: React.FC<TagStatusProps> = ({ valor }) => {
+  const cores = useAppTheme();
+  const estilos = criarEstilos();
   const ehPositivo = valor >= 0;
-
+  
   const valorFormatado = new Intl.NumberFormat('pt-BR', {
     style: 'currency',
     currency: 'BRL',
   }).format(Math.abs(valor));
 
   return (
-    <View
+    <View 
       style={[
-        estilos.container,
-        { backgroundColor: ehPositivo ? 'rgba(0, 200, 150, 0.12)' : 'rgba(229, 57, 53, 0.12)' }
+        estilos.container, 
+        { backgroundColor: ehPositivo ? cores.superficieVerde : cores.superficieNegativa }
       ]}
     >
-      <Text
+      <Text 
         style={[
-          estilos.texto,
-          { color: ehPositivo ? Cores.destaque : Cores.alerta }
+          estilos.texto, 
+          { color: ehPositivo ? cores.textoPositivo : cores.alerta }
         ]}
       >
         {ehPositivo ? `+ ${valorFormatado}` : `- ${valorFormatado}`}
@@ -39,7 +41,7 @@ export const TagStatus: React.FC<TagStatusProps> = ({ valor }) => {
   );
 };
 
-const estilos = StyleSheet.create({
+const criarEstilos = () => StyleSheet.create({
   container: {
     paddingHorizontal: 12,
     paddingVertical: 4,

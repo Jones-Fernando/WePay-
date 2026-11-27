@@ -36,7 +36,19 @@ def listar(current_user_id):
     return NotificacaoController.listar(current_user_id)
 
 
+@notificacao_bp.route("/ler-todas", methods=["PUT"])
+@token_required
+def marcar_todas_lidas(current_user_id):
+    return NotificacaoController.marcar_todas_lidas(current_user_id)
+
+
 @notificacao_bp.route("/<int:notificacao_id>/ler", methods=["PUT"])
 @token_required
 def marcar_lida(current_user_id, notificacao_id):
     return NotificacaoController.marcar_lida(current_user_id, notificacao_id)
+
+
+@notificacao_bp.route("/grupos/<int:grupo_id>/cobrar", methods=["POST"])
+@token_required
+def cobrar(current_user_id, grupo_id):
+    return NotificacaoController.cobrar(current_user_id, grupo_id)

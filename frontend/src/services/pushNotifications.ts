@@ -10,14 +10,16 @@ const PUSH_TOKEN_KEY = "wepay_expo_push_token";
 const LEGACY_PUSH_TOKEN_KEY = "@wepay:expo_push_token";
 let somAtivado = true;
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: somAtivado,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+if (Platform.OS !== "web") {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldPlaySound: somAtivado,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+}
 
 export function configurarSomNotificacoes(ativado: boolean) {
   somAtivado = ativado;

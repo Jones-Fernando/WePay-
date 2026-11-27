@@ -76,18 +76,41 @@ def test_preferencias_de_notificacao_sao_persistidas(client):
     assert inicial.get_json()["data"] == {
         "notificacoes": False,
         "sons": True,
+        "despesas": True,
+        "cobrancas": True,
     }
 
     atualizada = client.put(
         "/api/notificacoes/preferencias",
         headers=headers,
-        json={"notificacoes": True, "sons": False},
+        json={"notificacoes": True, "sons": False, "despesas": False},
     )
 
     assert atualizada.status_code == 200
     assert client.get(
         "/api/notificacoes/preferencias", headers=headers
-    ).get_json()["data"] == {"notificacoes": True, "sons": False}
+    ).get_json()["data"] == {
+        "notificacoes": True,
+        "sons": False,
+        "despesas": False,
+        "cobrancas": True,
+    }
+
+
+def test_preferencias_de_despesa_e_cobranca_sao_independentes(client):
+    _, headers = criar_usuario_autenticado(
+        client, "push-category-preferences@example.com"
+    )
+
+    resposta = client.put(
+        "/api/notificacoes/preferencias",
+        headers=headers,
+        json={"cobrancas": False},
+    )
+
+    assert resposta.status_code == 200
+    assert resposta.get_json()["data"]["cobrancas"] is False
+    assert resposta.get_json()["data"]["despesas"] is True
 
 
 def test_preferencias_rejeitam_valores_nao_booleanos(client):
@@ -323,6 +346,10 @@ def test_push_consulta_recibos_com_endpoint_do_expo(monkeypatch):
     capturado = _mock_expo_connection(
         monkeypatch, b'{"data":{"ticket-1":{"status":"ok"}}}'
     )
+    monkeypatch.setattr(
+        "services.notificacao_service.Config.EXPO_ACCESS_TOKEN",
+        "expo-test-access",
+    )
     recibos = NotificacaoService._consultar_recibos(["ticket-1"])
 
     assert capturado["host"] == "exp.host"
@@ -330,7 +357,22 @@ def test_push_consulta_recibos_com_endpoint_do_expo(monkeypatch):
     assert capturado["method"] == "POST"
     assert capturado["payload"] == {"ids": ["ticket-1"]}
     assert capturado["timeout"] == 5
+    assert capturado["headers"]["Authorization"] == "Bearer expo-test-access"
     assert recibos == {"ticket-1": {"status": "ok"}}
+
+
+def test_push_consulta_recibos_sem_token_expo_nao_envia_autorizacao(monkeypatch):
+    capturado = _mock_expo_connection(
+        monkeypatch, b'{"data":{"ticket-1":{"status":"ok"}}}'
+    )
+    monkeypatch.setattr(
+        "services.notificacao_service.Config.EXPO_ACCESS_TOKEN",
+        "",
+    )
+
+    NotificacaoService._consultar_recibos(["ticket-1"])
+
+    assert "Authorization" not in capturado["headers"]
 
 
 def test_push_rejeita_endpoint_expo_nao_permitido():
@@ -389,9 +431,20 @@ def test_notificacoes_sao_listadas_e_marcadas_com_escopo_do_usuario(client):
     assert client.put(
         "/api/notificacoes/999999/ler", headers=primeiro_headers
     ).status_code == 404
-    assert client.put(
-        f"/api/notificacoes/{primeiro_id}/ler", headers=primeiro_headers
-    ).status_code == 200
+    marcar_outro_usuario = client.put(
+        "/api/notificacoes/ler-todas", headers=segundo_headers
+    )
+    assert marcar_outro_usuario.status_code == 200
+    assert marcar_outro_usuario.get_json()["data"]["atualizadas"] == 0
+    assert client.get(
+        "/api/notificacoes?nao_lidas=true", headers=primeiro_headers
+    ).get_json()["data"]
+
+    marcar_todas = client.put(
+        "/api/notificacoes/ler-todas", headers=primeiro_headers
+    )
+    assert marcar_todas.status_code == 200
+    assert marcar_todas.get_json()["data"]["atualizadas"] == 1
     assert client.get(
         "/api/notificacoes?nao_lidas=true", headers=primeiro_headers
     ).get_json()["data"] == []
@@ -490,6 +543,125 @@ def test_notification_model_adds_group_notifications_in_shared_transaction(clien
     assert notificacoes.get_json()["data"][0]["mensagem"] == (
         "A despesa 'Jantar' de R$ 25.50 foi adicionada ao grupo."
     )
+
+
+def test_endpoint_cobra_saldo_atual_e_impede_cobranca_repetida(client):
+    from services.financeiro_service import FinanceiroService
+
+    credor, credor_headers = criar_usuario_autenticado(
+        client, "charge-creditor@example.com"
+    )
+    devedor, devedor_headers = criar_usuario_autenticado(
+        client, "charge-debtor@example.com"
+    )
+    credor_id = credor["user"]["id"]
+    devedor_id = devedor["user"]["id"]
+    grupo_id = client.post(
+        "/api/grupos",
+        headers=credor_headers,
+        json={"nome": "Grupo cobranca", "participantes": [devedor_id]},
+    ).get_json()["data"]["id"]
+    sem_divida = client.post(
+        f"/api/notificacoes/grupos/{grupo_id}/cobrar",
+        headers=credor_headers,
+        json={"devedor_id": devedor_id},
+    )
+    assert sem_divida.status_code == 409
+
+    FinanceiroService.criar_despesa(
+        grupo_id,
+        credor_id,
+        "Conta compartilhada",
+        60,
+        participantes=[credor_id, devedor_id],
+        criador_id=credor_id,
+    )
+
+    assert client.put(
+        "/api/notificacoes/preferencias",
+        headers=devedor_headers,
+        json={"cobrancas": False},
+    ).status_code == 200
+    desativada = client.post(
+        f"/api/notificacoes/grupos/{grupo_id}/cobrar",
+        headers=credor_headers,
+        json={"devedor_id": devedor_id},
+    )
+    assert desativada.status_code == 409
+    assert client.put(
+        "/api/notificacoes/preferencias",
+        headers=devedor_headers,
+        json={"cobrancas": True},
+    ).status_code == 200
+
+    resposta = client.post(
+        f"/api/notificacoes/grupos/{grupo_id}/cobrar",
+        headers=credor_headers,
+        json={"devedor_id": devedor_id},
+    )
+
+    assert resposta.status_code == 201
+    notificacoes = client.get(
+        "/api/notificacoes", headers=devedor_headers
+    ).get_json()["data"]
+    assert notificacoes[0]["tipo"] == "cobranca"
+    assert "R$ 30,00" in notificacoes[0]["mensagem"]
+
+    with get_connection_context() as connection:
+        cursor = cursor_for(connection)
+        try:
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS total FROM push_outbox o
+                JOIN notificacoes n ON n.id = o.notificacao_id
+                WHERE n.usuario_id = ? AND n.grupo_id = ? AND n.tipo = 'cobranca'
+                """,
+                (devedor_id, grupo_id),
+            )
+            assert cursor.fetchone()["total"] == 1
+        finally:
+            cursor.close()
+
+    repetida = client.post(
+        f"/api/notificacoes/grupos/{grupo_id}/cobrar",
+        headers=credor_headers,
+        json={"devedor_id": devedor_id},
+    )
+    assert repetida.status_code == 429
+
+
+def test_nova_despesa_respeita_preferencia_do_destinatario(client):
+    dono, dono_headers = criar_usuario_autenticado(
+        client, "expense-pref-owner@example.com"
+    )
+    membro, membro_headers = criar_usuario_autenticado(
+        client, "expense-pref-member@example.com"
+    )
+    grupo_id = client.post(
+        "/api/grupos",
+        headers=dono_headers,
+        json={
+            "nome": "Grupo sem avisos de despesa",
+            "participantes": [membro["user"]["id"]],
+        },
+    ).get_json()["data"]["id"]
+    assert client.put(
+        "/api/notificacoes/preferencias",
+        headers=membro_headers,
+        json={"despesas": False},
+    ).status_code == 200
+
+    with get_connection_context() as connection:
+        destinatarios = NotificacaoService.notificar_nova_despesa(
+            grupo_id,
+            dono["user"]["id"],
+            "Conta",
+            20,
+            connection,
+        )
+        connection.commit()
+
+    assert destinatarios == []
 
 
 def test_worker_confirma_evento_sem_dispositivos(monkeypatch):

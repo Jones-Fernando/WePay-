@@ -4,7 +4,7 @@
  * Vantagem para o TCC: O TypeScript prevê erros antes mesmo do app rodar. Ele impede, por exemplo, que o sistema tente somar um texto com um número.
  */
 
-// 'CategoriaDespesa' restringe as opções de categoria.
+// 'CategoriaDespesa' restringe as opções de categoria. 
 // O usuário só poderá escolher uma destas opções, evitando erros de digitação no banco de dados.
 export type CategoriaDespesa = 'alimentacao' | 'transporte' | 'lazer' | 'moradia' | 'outros';
 
@@ -17,8 +17,8 @@ export interface Despesa {
   categoria: CategoriaDespesa; // Deve ser obrigatoriamente um dos valores do 'type' definido acima
   pagoPor: string;             // Nome ou ID da pessoa que efetuou o pagamento
   ehPessoal: boolean;          // Define a regra de negócio: 'true' para gasto individual, 'false' para gasto do grupo
-
+  
   // O ponto de interrogação (?) significa que o comprovante é OPCIONAL.
   // Uma despesa pode ser criada manualmente sem enviar uma foto do recibo.
-  comprovanteUrl?: string;
+  comprovanteUrl?: string;     
 }

@@ -1,0 +1,6 @@
+[Unit]
+Description=Report WePay balance reconciliation failure for %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -p daemon.crit -t wepay-balance-reconcile "Balance reconciliation failed for %i; inspect journalctl -u wepay-balance-reconcile.service"

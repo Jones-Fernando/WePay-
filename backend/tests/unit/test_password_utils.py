@@ -1,4 +1,3 @@
-import hashlib
 import pytest
 
 from utils.password_utils import (
@@ -12,13 +11,32 @@ from utils.password_utils import (
 
 
 def test_senha_deve_atingir_minimo_de_caracteres():
-    assert validar_senha("a" * (MIN_PASSWORD_LENGTH - 1))
-    assert validar_senha("a" * MIN_PASSWORD_LENGTH) is None
+    assert validar_senha("Ab1!c"[: MIN_PASSWORD_LENGTH - 1])
+    assert validar_senha("Ab1!cd") is None
+
+
+def test_senha_deve_conter_maiuscula_numero_e_simbolo():
+    assert validar_senha("ab1!cd") == "Senha deve conter pelo menos uma letra maiuscula."
+    assert validar_senha("Abc!de") == "Senha deve conter pelo menos um numero."
+    assert validar_senha("Abc123") == (
+        "Senha deve conter pelo menos um caractere especial valido "
+        "(como !, @ ou #); espacos nao contam."
+    )
+
+
+@pytest.mark.parametrize("password", ["Ab1 cd", "Ab1€cd"])
+def test_espacos_e_simbolos_nao_permitidos_nao_satisfazem_regra(password):
+    assert validar_senha(password) == (
+        "Senha deve conter pelo menos um caractere especial valido "
+        "(como !, @ ou #); espacos nao contam."
+    )
 
 
 def test_senha_nao_pode_exceder_limite_de_bytes_do_bcrypt():
-    assert validar_senha("a" * (MAX_PASSWORD_BYTES + 1))
-    assert validar_senha("é" * (MAX_PASSWORD_BYTES // 2 + 1))
+    assert validar_senha("A1!" + "a" * (MAX_PASSWORD_BYTES - 2))
+    assert validar_senha("A1!" + "é" * 35) == (
+        f"Senha deve ter no maximo {MAX_PASSWORD_BYTES} bytes."
+    )
 
 
 def test_senha_deve_ser_texto():
@@ -26,10 +44,10 @@ def test_senha_deve_ser_texto():
 
 
 def test_senha_com_unicode_invalido_e_rejeitada():
-    assert validar_senha("\ud800" + "a" * (MIN_PASSWORD_LENGTH - 1))
+    assert validar_senha("\ud800A1!xy") == "Senha contem caracteres invalidos."
 
 
-def test_hash_password_preserva_compatibilidade_com_hashes_legados():
+def test_hash_password_gera_um_hash():
     assert hash_password("123456")
 
 
@@ -39,15 +57,13 @@ def test_hash_password_rejeita_valores_que_nao_sao_texto(password):
         hash_password(password)
 
 
-def test_check_password_valida_bcrypt_e_hashes_legados():
+def test_check_password_valida_apenas_bcrypt():
     password = "SenhaSegura123!"
     hashed_password = hash_password(password)
     assert check_password(password, hashed_password) is True
     assert check_password("OutraSenha123!", hashed_password) is False
 
-    legacy_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
-    assert check_password(password, legacy_hash) is True
-    assert check_password("OutraSenha123!", legacy_hash) is False
+    assert check_password(password, "a" * 64) is False
 
 
 def test_is_legacy_password_hash_recognizes_sha256_hex_only():
@@ -66,7 +82,7 @@ def test_check_password_rejeita_valores_ausentes_ou_hash_invalido():
 
 @pytest.mark.parametrize(
     "password",
-    ["", "          a"],
+    ["", "Ab1!c", "          a"],
 )
 def test_senhas_curta_sao_rejeitadas(password):
     assert validar_senha(password) is not None

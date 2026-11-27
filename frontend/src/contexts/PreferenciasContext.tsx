@@ -7,12 +7,13 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Alert, Appearance, Platform } from "react-native";
+import { Appearance, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import * as Notifications from "expo-notifications";
 
 import { useUsuario } from "@/contexts/UsuarioContext";
 import { notificacoesApi } from "@/services/api";
+import { Alert } from "@/services/feedback";
 import {
   configurarSomNotificacoes,
   limparTokenPushSalvo,
@@ -24,6 +25,8 @@ import {
 export type Preferencias = {
   notificacoes: boolean;
   som: boolean;
+  despesas: boolean;
+  cobrancas: boolean;
   tema: "Sistema" | "Claro" | "Escuro";
 };
 
@@ -37,6 +40,8 @@ const CHAVE_PREFERENCIAS = "@wepay:preferencias";
 const PADRAO: Preferencias = {
   notificacoes: false,
   som: true,
+  despesas: true,
+  cobrancas: true,
   tema: "Sistema",
 };
 
@@ -45,6 +50,8 @@ const PreferenciasContext = createContext<PreferenciasContexto | undefined>(
 );
 
 function aplicarTema(tema: Preferencias["tema"]) {
+  if (Platform.OS === "web") return;
+
   Appearance.setColorScheme(
     tema === "Sistema" ? "auto" : tema.toLowerCase() as "light" | "dark",
   );
@@ -61,6 +68,14 @@ function normalizarPreferencias(valor: unknown): Preferencias {
         ? dados.notificacoes
         : PADRAO.notificacoes,
     som: typeof dados.som === "boolean" ? dados.som : PADRAO.som,
+    despesas:
+      typeof dados.despesas === "boolean"
+        ? dados.despesas
+        : PADRAO.despesas,
+    cobrancas:
+      typeof dados.cobrancas === "boolean"
+        ? dados.cobrancas
+        : PADRAO.cobrancas,
     tema:
       dados.tema === "Claro" || dados.tema === "Escuro"
         ? dados.tema
@@ -135,6 +150,8 @@ export function PreferenciasProvider({ children }: PropsWithChildren) {
           ...preferenciasRef.current,
           notificacoes,
           som,
+          despesas: resposta.data.despesas,
+          cobrancas: resposta.data.cobrancas,
         };
         preferenciasRef.current = sincronizadas;
         setPreferencias(sincronizadas);
@@ -198,6 +215,8 @@ export function PreferenciasProvider({ children }: PropsWithChildren) {
   }, [carregandoLocal, carregandoUsuario, usuarioId]);
 
   useEffect(() => {
+    if (Platform.OS === "web") return;
+
     let respostaTratada: string | null = null;
     function abrirNotificacao(
       resposta: Notifications.NotificationResponse,
@@ -213,14 +232,31 @@ export function PreferenciasProvider({ children }: PropsWithChildren) {
       const groupId = conteudo.groupId;
       const grupoNome = conteudo.grupoNome;
       if (
-        conteudo.tipo === "nova_despesa"
+        (conteudo.tipo === "nova_despesa" || conteudo.tipo === "cobranca")
         && (typeof groupId === "string" || typeof groupId === "number")
         && typeof grupoNome === "string"
       ) {
-        router.push({
-          pathname: "/(main)/group/despesas-grupo",
-          params: { groupId: String(groupId), grupoNome },
-        });
+        const referenciaId = conteudo.referenciaId;
+        if (
+          conteudo.tipo === "nova_despesa"
+          && (typeof referenciaId === "string" || typeof referenciaId === "number")
+        ) {
+          router.push({
+            pathname: "/(main)/group/detalhes-despesa",
+            params: {
+              id: String(referenciaId),
+              groupId: String(groupId),
+              grupoNome,
+            },
+          });
+        } else {
+          router.push({
+            pathname: conteudo.tipo === "cobranca"
+              ? "/(main)/group/saldos"
+              : "/(main)/group/despesas-grupo",
+            params: { groupId: String(groupId), grupoNome },
+          });
+        }
       }
     }
 
@@ -244,7 +280,9 @@ export function PreferenciasProvider({ children }: PropsWithChildren) {
     let erroRemocaoDispositivo = false;
     const alterouNotificacoes =
       atualizacao.notificacoes !== undefined
-      || atualizacao.som !== undefined;
+      || atualizacao.som !== undefined
+      || atualizacao.despesas !== undefined
+      || atualizacao.cobrancas !== undefined;
     const desativouNotificacoes =
       usuario
       && anteriores.notificacoes
@@ -271,10 +309,7 @@ export function PreferenciasProvider({ children }: PropsWithChildren) {
       }
 
       if (usuario && alterouNotificacoes) {
-        await notificacoesApi.atualizarPreferencias(
-          novas.notificacoes,
-          novas.som,
-        );
+        await notificacoesApi.atualizarPreferencias(novas);
       }
       if (desativouNotificacoes) {
         const tokenSalvo = await obterTokenPushSalvo();
@@ -306,7 +341,7 @@ export function PreferenciasProvider({ children }: PropsWithChildren) {
     } catch {
       Alert.alert(
         "Preferências não salvas neste dispositivo",
-        "As alterações de notificações foram sincronizadas com sua conta, mas não puderam ser salvas localmente.",
+        "As alterações foram aplicadas, mas não puderam ser salvas neste dispositivo.",
       );
     }
     if (erroRemocaoDispositivo) {

@@ -14,6 +14,10 @@ def test_criacao_repropaga_erro_de_banco_inesperado(monkeypatch):
         "controllers.categoria_controller.CategoriaModel.criar",
         falhar,
     )
+    monkeypatch.setattr(
+        "controllers.categoria_controller.CategoriaModel.nome_em_uso",
+        lambda *_args, **_kwargs: False,
+    )
 
     with Flask(__name__).test_request_context(
         "/api/categorias",
@@ -26,7 +30,12 @@ def test_criacao_repropaga_erro_de_banco_inesperado(monkeypatch):
 
 @pytest.mark.parametrize(
     "payload",
-    [[], {"nome": ["Viagem"]}, {"nome": "x" * 101}],
+    [
+        [],
+        {"nome": ["Viagem"]},
+        {"nome": "x" * 101},
+        {"nome": "Viagem", "icone": "não permitido"},
+    ],
 )
 def test_categoria_rejeita_corpo_ou_nome_invalido(payload):
     with Flask(__name__).test_request_context(
