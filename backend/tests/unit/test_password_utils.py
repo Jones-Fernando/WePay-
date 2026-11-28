@@ -3,6 +3,7 @@ import pytest
 from utils.password_utils import (
     MAX_PASSWORD_BYTES,
     MIN_PASSWORD_LENGTH,
+    check_legacy_password,
     check_password,
     hash_password,
     is_legacy_password_hash,
@@ -11,20 +12,26 @@ from utils.password_utils import (
 
 
 def test_senha_deve_atingir_minimo_de_caracteres():
-    assert validar_senha("Ab1!c"[: MIN_PASSWORD_LENGTH - 1])
-    assert validar_senha("Ab1!cd") is None
+    password = "Ab1!cdefghij"
+    assert validar_senha(password[: MIN_PASSWORD_LENGTH - 1])
+    assert validar_senha(password) is None
 
 
 def test_senha_deve_conter_maiuscula_numero_e_simbolo():
-    assert validar_senha("ab1!cd") == "Senha deve conter pelo menos uma letra maiuscula."
-    assert validar_senha("Abc!de") == "Senha deve conter pelo menos um numero."
-    assert validar_senha("Abc123") == (
+    assert validar_senha("abcdef1!ghij") == (
+        "Senha deve conter pelo menos uma letra maiuscula."
+    )
+    assert validar_senha("Abcdefgh!jkl") == "Senha deve conter pelo menos um numero."
+    assert validar_senha("Abcdefgh1234") == (
         "Senha deve conter pelo menos um caractere especial valido "
         "(como !, @ ou #); espacos nao contam."
     )
 
 
-@pytest.mark.parametrize("password", ["Ab1 cd", "Ab1€cd"])
+@pytest.mark.parametrize(
+    "password",
+    ["Ab1 cdefghij", "Ab1€cdefghij"],
+)
 def test_espacos_e_simbolos_nao_permitidos_nao_satisfazem_regra(password):
     assert validar_senha(password) == (
         "Senha deve conter pelo menos um caractere especial valido "
@@ -44,7 +51,7 @@ def test_senha_deve_ser_texto():
 
 
 def test_senha_com_unicode_invalido_e_rejeitada():
-    assert validar_senha("\ud800A1!xy") == "Senha contem caracteres invalidos."
+    assert validar_senha("A1!abcdefgh\ud800") == "Senha contem caracteres invalidos."
 
 
 def test_hash_password_gera_um_hash():
@@ -78,6 +85,17 @@ def test_check_password_rejeita_valores_ausentes_ou_hash_invalido():
     assert check_password(None, "hash") is False
     assert check_password("password", None) is False
     assert check_password("password", "malformed-hash") is False
+
+
+def test_check_legacy_password_verifies_sha256_case_sensitively():
+    import hashlib
+
+    password = "SenhaSegura123!"
+    legacy_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+    assert check_legacy_password(password, legacy_hash) is True
+    assert check_legacy_password("SenhaErrada456!", legacy_hash) is False
+    assert check_legacy_password(password, legacy_hash.upper()) is False
 
 
 @pytest.mark.parametrize(

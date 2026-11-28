@@ -43,7 +43,7 @@ def create_app():
         resources={r"/api/*": {"origins": Config.CORS_ORIGINS}},
         supports_credentials=True,
         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization"],
+        allow_headers=["Content-Type", "Authorization", "Idempotency-Key"],
     )
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(usuario_bp, url_prefix="/api/usuarios")

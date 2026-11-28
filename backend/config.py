@@ -18,12 +18,15 @@ APP_ENV = (
     or _default_values.get("APP_ENV")
     or "development"
 ).strip().lower()
-if APP_ENV not in {"development", "testing", "production"}:
+if APP_ENV not in {"development", "testing", "production", "migration"}:
     raise RuntimeError(
-        "APP_ENV deve ser development, testing ou production."
+        "APP_ENV deve ser development, testing, production ou migration."
     )
 
-ENV_FILE = BASE_DIR / (".env.test" if APP_ENV == "testing" else ".env")
+ENV_FILE = BASE_DIR / {
+    "testing": ".env.test",
+    "migration": ".env.migrate",
+}.get(APP_ENV, ".env")
 if not ENV_FILE.exists() and APP_ENV == "testing":
     ENV_FILE = BASE_DIR / ".env"
 for _key, _value in dotenv_values(ENV_FILE).items():
@@ -148,7 +151,7 @@ class Config:
         )
     if not SECRET_KEY:
         SECRET_KEY = "development-only-change-this-secret"
-    if ENVIRONMENT == "production":
+    if ENVIRONMENT in {"production", "migration"}:
         _validate_production_database_credentials(DB_USER, DB_PASSWORD)
         DB_SSL_CA = _validate_production_database_tls(DB_SSL_CA)
 

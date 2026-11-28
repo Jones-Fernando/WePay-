@@ -1,4 +1,4 @@
-export const MIN_PASSWORD_LENGTH = 6;
+export const MIN_PASSWORD_LENGTH = 12;
 export const PASSWORD_SPECIAL_CHARACTERS = "!@#$%^&*()-_=+[]{};:,.?";
 
 export function validarSenhaNova(senha: string): string | null {

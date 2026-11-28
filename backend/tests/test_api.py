@@ -2101,21 +2101,21 @@ def test_signup_rejects_password_below_the_minimum_length(client):
         json={
             "nome": "Senha Curta",
             "email": "senha-curta@example.com",
-            "senha": "Ab1!c",
+            "senha": "Ab1!cdefghi",
         },
     )
 
     assert resposta.status_code == 400
-    assert "6 caracteres" in resposta.get_json()["message"]
+    assert "12 caracteres" in resposta.get_json()["message"]
 
 
 @pytest.mark.parametrize(
     ("senha", "mensagem"),
     [
-        ("ab1!cd", "letra maiuscula"),
-        ("Abc!de", "pelo menos um numero"),
-        ("Abc123", "caractere especial"),
-        ("Ab1 cd", "caractere especial"),
+        ("abcdefghijk!", "letra maiuscula"),
+        ("Abcdefgh!jkl", "pelo menos um numero"),
+        ("Abcdef123456", "caractere especial"),
+        ("Ab1 cdefghij", "caractere especial"),
     ],
 )
 def test_signup_rejects_password_missing_a_required_character_type(
@@ -2134,7 +2134,7 @@ def test_signup_rejects_password_missing_a_required_character_type(
 
 
 def test_signup_accepts_password_at_minimum_length(client):
-    senha = "Ab1!cd"
+    senha = "Ab1!cdefghij"
     resposta = client.post(
         "/api/auth/cadastro",
         json={

@@ -24,6 +24,13 @@ except ImportError:  # pragma: no cover - dependência obrigatória em runtime
 BASE_DIR = Path(__file__).resolve().parent.parent
 SCHEMA_FILE = BASE_DIR / "database" / "wepay.sql"
 SCHEMA_VERSION = "2026-11-22_binary_group_cover_icon_key"
+_LEGACY_INSTALLMENT_TABLES = (
+    "parcela_pagamentos",
+    "parcela_eventos",
+    "parcela_rateios",
+    "parcelas",
+    "parcelamentos",
+)
 _connection_pool: Any = None
 _connection_pool_lock = Lock()
 
@@ -54,7 +61,7 @@ def _connect_mysql(database: str | None = None) -> Any:
         "user": Config.DB_USER,
         "password": Config.DB_PASSWORD,
     }
-    if Config.ENVIRONMENT == "production":
+    if Config.ENVIRONMENT in {"production", "migration"}:
         params.update(
             ssl_ca=Config.DB_SSL_CA,
             ssl_verify_cert=True,
@@ -403,19 +410,12 @@ def _apply_installment_removal_migration(
     cursor: _MigrationCursor,
     connection: Any,
 ) -> None:
-    tables = (
-        "parcela_pagamentos",
-        "parcela_eventos",
-        "parcela_rateios",
-        "parcelas",
-        "parcelamentos",
-    )
-    placeholders = ", ".join("%s" for _ in tables)
+    placeholders = ", ".join("%s" for _ in _LEGACY_INSTALLMENT_TABLES)
     cursor.execute(
         "SELECT TABLE_NAME FROM information_schema.TABLES "
         "WHERE TABLE_SCHEMA = DATABASE() "
         f"AND TABLE_NAME IN ({placeholders})",
-        tables,
+        _LEGACY_INSTALLMENT_TABLES,
     )
     existing_tables = {str(row[0]) for row in cursor.fetchall()}
     if not existing_tables:
@@ -462,7 +462,7 @@ def _apply_installment_removal_migration(
 
     connection.commit()
 
-    for table in tables:
+    for table in _LEGACY_INSTALLMENT_TABLES:
         if table in existing_tables:
             cursor.execute(f"DROP TABLE IF EXISTS {quote_mysql_identifier(table)}")
 
@@ -1337,8 +1337,36 @@ def _apply_compatibility_migrations() -> None:
         connection.close()
 
 
+def _reject_legacy_installment_removal() -> None:
+    connection = _connect_mysql()
+    try:
+        cursor = connection.cursor()
+        try:
+            placeholders = ", ".join("%s" for _ in _LEGACY_INSTALLMENT_TABLES)
+            cursor.execute(
+                "SELECT TABLE_NAME FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA = %s "
+                f"AND TABLE_NAME IN ({placeholders})",
+                (Config.DB_NAME, *_LEGACY_INSTALLMENT_TABLES),
+            )
+            existing_tables = sorted(str(row[0]) for row in cursor.fetchall())
+        finally:
+            cursor.close()
+    finally:
+        connection.close()
+
+    if existing_tables:
+        raise RuntimeError(
+            "A inicialização foi bloqueada: há tabelas legadas de parcelamento "
+            "que a migração removeria junto com registros financeiros. "
+            "Faça backup e defina um plano de conversão antes de continuar."
+        )
+
+
 def initialize_database() -> None:
     """Cria o banco e as tabelas quando a aplicação é iniciada."""
+    if Config.ENVIRONMENT != "testing":
+        _reject_legacy_installment_removal()
     _ensure_schema()
     _apply_compatibility_migrations()
     _record_schema_version()

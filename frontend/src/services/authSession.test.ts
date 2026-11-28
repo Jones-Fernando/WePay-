@@ -46,6 +46,25 @@ describe("authSession", () => {
     jest.restoreAllMocks();
   });
 
+  it("does not call the backend to refresh a session when the API is disabled", async () => {
+    let disabledRefresh: Promise<string | null> | undefined;
+    const fetchMock = jest.spyOn(globalThis, "fetch");
+
+    jest.isolateModules(() => {
+      jest.doMock("@/services/apiConfig", () => ({
+        API_BASE_URL: "",
+        API_ENABLED: false,
+      }));
+      const isolatedAuthSession = require("@/services/authSession") as
+        typeof import("@/services/authSession");
+      disabledRefresh = isolatedAuthSession.refreshAccessToken();
+    });
+    jest.dontMock("@/services/apiConfig");
+
+    await expect(disabledRefresh).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("migrates a legacy native access token to secure storage", async () => {
     secureGetItem.mockResolvedValueOnce(null);
     asyncGetItem.mockResolvedValueOnce("legacy-access-token");
@@ -134,6 +153,15 @@ describe("authSession", () => {
     expect(secureDeleteItem).not.toHaveBeenCalled();
     expect(AsyncStorage.multiRemove).not.toHaveBeenCalled();
   });
+
+  it.each([0, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects an invalid refresh timeout (%s)",
+    async (timeoutMs) => {
+      await expect(refreshAccessToken({ timeoutMs })).rejects.toThrow(
+        "timeoutMs deve ser um número maior que zero.",
+      );
+    },
+  );
 
   it("aborts a stalled refresh when its timeout expires", async () => {
     asyncGetItem.mockResolvedValueOnce("usable-refresh-token");

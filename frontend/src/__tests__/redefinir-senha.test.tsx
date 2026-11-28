@@ -126,8 +126,8 @@ describe("RedefinirSenha screen", () => {
     );
 
     await act(async () => {
-      fields[0].props.onChangeText("Ab1!cd");
-      fields[1].props.onChangeText("Ab1!cd");
+      fields[0].props.onChangeText("Ab1!cdefghij");
+      fields[1].props.onChangeText("Ab1!cdefghij");
     });
 
     const submit = root.container.queryAll(
@@ -141,7 +141,7 @@ describe("RedefinirSenha screen", () => {
 
     expect(authApi.redefinirSenha).toHaveBeenCalledWith(
       "reset-token",
-      "Ab1!cd",
+      "Ab1!cdefghij",
     );
     const alertCall = jest.mocked(Alert.alert).mock.calls.find(
       ([title]) => title === "Senha redefinida",

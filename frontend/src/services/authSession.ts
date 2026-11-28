@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
-import { API_BASE_URL } from "@/services/apiConfig";
+import { API_BASE_URL, API_ENABLED } from "@/services/apiConfig";
 import {
   API_REQUEST_TIMEOUT_MS,
   ApiTimeoutError,
@@ -272,6 +272,9 @@ export function refreshAccessToken(
     return Promise.reject(
       new RangeError("timeoutMs deve ser um número maior que zero."),
     );
+  }
+  if (!API_ENABLED) {
+    return Promise.resolve(null);
   }
   if (signal?.aborted) return Promise.reject(getAbortError(signal));
 

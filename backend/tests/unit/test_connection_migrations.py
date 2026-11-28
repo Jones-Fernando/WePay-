@@ -180,10 +180,13 @@ def test_ensure_mysql_database_does_not_create_an_existing_database(monkeypatch)
     assert connection.closed
 
 
-def test_production_database_connections_verify_ca_and_identity(monkeypatch):
+@pytest.mark.parametrize("environment", ["production", "migration"])
+def test_secure_database_connections_verify_ca_and_identity(
+    monkeypatch, environment
+):
     connected = []
     monkeypatch.setattr(database_connection, "_connection_pool", None)
-    monkeypatch.setattr(database_connection.Config, "ENVIRONMENT", "production")
+    monkeypatch.setattr(database_connection.Config, "ENVIRONMENT", environment)
     monkeypatch.setattr(database_connection.Config, "DB_SSL_CA", "C:\\certs\\mysql-ca.pem")
     monkeypatch.setattr(
         database_connection,
@@ -209,6 +212,98 @@ def test_production_database_connections_verify_ca_and_identity(monkeypatch):
         {key: params[key] for key in expected_tls} == expected_tls
         for params in connected
     )
+
+
+def test_initialization_refuses_legacy_installment_tables(monkeypatch):
+    class Cursor:
+        def __init__(self):
+            self.query = ""
+            self.parameters = ()
+            self.closed = False
+
+        def execute(self, query, parameters):
+            self.query = query
+            self.parameters = parameters
+
+        def fetchall(self):
+            return [("parcelamentos",)]
+
+        def close(self):
+            self.closed = True
+
+    class Connection:
+        def __init__(self, cursor):
+            self.cursor_instance = cursor
+            self.closed = False
+
+        def cursor(self):
+            return self.cursor_instance
+
+        def close(self):
+            self.closed = True
+
+    cursor = Cursor()
+    connection = Connection(cursor)
+    monkeypatch.setattr(
+        database_connection,
+        "_connect_mysql",
+        lambda: connection,
+    )
+    monkeypatch.setattr(
+        database_connection.Config,
+        "DB_NAME",
+        "wepay_production",
+    )
+
+    with pytest.raises(RuntimeError, match="tabelas legadas de parcelamento"):
+        database_connection._reject_legacy_installment_removal()
+
+    assert "information_schema.TABLES" in cursor.query
+    assert cursor.parameters == (
+        "wepay_production",
+        *database_connection._LEGACY_INSTALLMENT_TABLES,
+    )
+    assert cursor.closed
+    assert connection.closed
+
+
+@pytest.mark.parametrize(
+    "environment",
+    ["development", "production", "migration"],
+)
+def test_non_test_initialization_preflights_before_schema_changes(
+    monkeypatch, environment
+):
+    calls = []
+    monkeypatch.setattr(
+        database_connection.Config,
+        "ENVIRONMENT",
+        environment,
+    )
+    monkeypatch.setattr(
+        database_connection,
+        "_reject_legacy_installment_removal",
+        lambda: calls.append("preflight"),
+    )
+    monkeypatch.setattr(
+        database_connection,
+        "_ensure_schema",
+        lambda: calls.append("schema"),
+    )
+    monkeypatch.setattr(
+        database_connection,
+        "_apply_compatibility_migrations",
+        lambda: calls.append("compatibility"),
+    )
+    monkeypatch.setattr(
+        database_connection,
+        "_record_schema_version",
+        lambda: calls.append("version"),
+    )
+
+    database_connection.initialize_database()
+
+    assert calls == ["preflight", "schema", "compatibility", "version"]
 
 
 def _legacy_cursor(counts=None):

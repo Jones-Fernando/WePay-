@@ -111,7 +111,7 @@ def test_refresh_rotaciona_token_e_rejeita_reutilizacao(client):
     ).status_code == 200
 
 
-def test_login_rejeita_hash_sha256_e_migracao_exige_reset_de_senha(client):
+def test_login_atualiza_hash_sha256_legado_para_bcrypt(client):
     email = "legacy-password-login@example.com"
     password = "SenhaSegura123!"
     sessao = criar_sessao(client, email)
@@ -133,74 +133,35 @@ def test_login_rejeita_hash_sha256_e_migracao_exige_reset_de_senha(client):
         json={"email": email, "senha": password},
     )
 
-    assert resposta.status_code == 401
-    dry_run = app.test_cli_runner().invoke(
-        args=["invalidate-legacy-passwords"]
-    )
-    assert dry_run.exit_code == 0
-    assert "Dry-run: 1 conta(s)" in dry_run.output
+    assert resposta.status_code == 200
     with get_connection_context() as connection:
         cursor = cursor_for(connection)
         try:
             cursor.execute(
-                "SELECT senha FROM usuarios WHERE email = ?",
+                "SELECT senha, auth_version FROM usuarios WHERE email = ?",
                 (email,),
             )
-            assert cursor.fetchone()["senha"] == legacy_hash
+            usuario_atualizado = cursor.fetchone()
         finally:
             cursor.close()
+    assert usuario_atualizado["senha"] != legacy_hash
+    assert check_password(password, usuario_atualizado["senha"]) is True
+    assert usuario_atualizado["auth_version"] == 0
+
+    dry_run = app.test_cli_runner().invoke(
+        args=["invalidate-legacy-passwords"]
+    )
+    assert dry_run.exit_code == 0
+    assert "Dry-run: 0 conta(s)" in dry_run.output
 
     resultado = app.test_cli_runner().invoke(
         args=["invalidate-legacy-passwords", "--apply"]
     )
     assert resultado.exit_code == 0
-    assert "1 conta(s) atualizada(s)" in resultado.output
-
-    with get_connection_context() as connection:
-        cursor = cursor_for(connection)
-        try:
-            cursor.execute(
-                "SELECT id, senha, auth_version FROM usuarios WHERE email = ?",
-                (email,),
-            )
-            usuario = cursor.fetchone()
-            cursor.execute(
-                "SELECT COUNT(*) AS total FROM refresh_tokens "
-                "WHERE usuario_id = ? AND revogado_em IS NULL",
-                (usuario["id"],),
-            )
-            sessoes_ativas = cursor.fetchone()["total"]
-        finally:
-            cursor.close()
-
-    assert usuario["senha"] != legacy_hash
-    assert check_password(password, usuario["senha"]) is False
-    assert usuario["auth_version"] == 1
-    assert sessoes_ativas == 0
+    assert "0 conta(s) atualizada(s)" in resultado.output
     assert client.get(
         "/api/auth/me",
         headers=cabecalho_autorizacao(sessao["token"]),
-    ).status_code == 401
-    assert client.post(
-        "/api/auth/refresh",
-        json={"refresh_token": sessao["refresh_token"]},
-    ).status_code == 401
-
-    token_reset = client.post(
-        "/api/auth/esqueci-senha",
-        json={"email": email},
-    ).get_json()["data"]["token_teste"]
-    redefinir = client.post(
-        "/api/auth/redefinir-senha",
-        json={
-            "token": token_reset,
-            "nova_senha": "NovaSenhaSegura456!",
-        },
-    )
-    assert redefinir.status_code == 200
-    assert client.post(
-        "/api/auth/login",
-        json={"email": email, "senha": "NovaSenhaSegura456!"},
     ).status_code == 200
 
 

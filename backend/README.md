@@ -31,7 +31,8 @@ administrador ativo.
 2. Preencha as credenciais do MySQL.
 3. Ajuste `DB_POOL_SIZE` ao número de threads da API e aos limites de conexões
    do MySQL (padrão: 5; máximo: 32 por processo).
-4. Use `APP_ENV=development`, `testing` ou `production`. Valores desconhecidos
+4. Use `APP_ENV=development`, `testing` ou `production` para executar a API.
+   `APP_ENV=migration` é reservado ao script de migração. Valores desconhecidos
    interrompem a inicialização.
    Para testar em celular ou abrir o frontend por outro dispositivo da rede,
    configure `HOST=0.0.0.0`, use o IP atual do computador em
@@ -77,20 +78,28 @@ conta usada por `scripts/run_db_migrations.ps1` é separada da conta da API e
 precisa das permissões de DDL e de dados exigidas pelas migrações. Um erro
 `DELETE command denied` durante a migração indica uma permissão ausente nessa
 conta; não resolva ampliando os privilégios da conta de runtime.
+O script exige host, porta, usuário dedicado, senha e `DB_SSL_CA`; a conexão
+verifica certificado e identidade do servidor. Fora do ambiente de testes,
+`init-db` para antes de qualquer migração quando encontra tabelas legadas de
+parcelamento, pois a migração atual apagaria pagamentos/despesas associados e
+removeria essas tabelas. Faça backup e defina uma conversão aprovada antes de
+autorizar qualquer remoção; esta auditoria não executou migrações.
 
-Senhas criadas ou alteradas devem ter pelo menos 6 caracteres, uma letra
+Senhas criadas ou alteradas devem ter pelo menos 12 caracteres, uma letra
 maiúscula ASCII (`A`-`Z`), um número (`0`-`9`) e pelo menos um símbolo desta
 lista: `! @ # $ % ^ & * ( ) - _ = + [ ] { } ; : , . ?`. Espaços não contam como
 símbolos. O backend também limita a senha a 72 bytes UTF-8 (limite do bcrypt).
 Essas regras se aplicam ao cadastro, à alteração e à redefinição; senhas
 existentes armazenadas com bcrypt continuam válidas no login, sem migração do
-banco para essa regra. Seis caracteres ainda oferecem pouca proteção, então
-prefira senhas únicas e mais longas.
+banco para essa regra. O login também aceita hashes SHA-256 legados: após uma
+senha correta com até 72 bytes UTF-8, o hash é atualizado condicionalmente para
+bcrypt, sem revogar sessões nem exigir redefinição. Hashes legados associados
+a senhas acima do limite do bcrypt continuam exigindo redefinição.
 
-Hashes SHA-256 legados não são aceitos no login. Se ainda houver hashes desse
-tipo no banco, comunique aos usuários afetados que será necessário redefinir a
-senha e faça backup do banco. Com a API parada, execute primeiro a simulação e
-depois a migração:
+Não é necessária uma migração em massa para hashes SHA-256: cada conta é
+atualizada no próximo login válido. O comando abaixo continua disponível para
+invalidar contas legadas manualmente, se houver uma necessidade operacional
+específica. Com a API parada, execute primeiro a simulação e depois a migração:
 
 ```bash
 APP_ENV=production flask --app app invalidate-legacy-passwords

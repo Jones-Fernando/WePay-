@@ -73,4 +73,26 @@ describe("lerReciboComIa", () => {
       "O serviço de leitura está temporariamente ocupado.",
     );
   });
+
+  it("does not start a receipt request when the backend is disabled", async () => {
+    let request: Promise<unknown> | undefined;
+
+    jest.isolateModules(() => {
+      jest.doMock("@/services/apiConfig", () => ({
+        API_BASE_URL: "",
+        API_ENABLED: false,
+      }));
+      const { lerReciboComIa: lerReciboComIaSemApi } = require(
+        "@/services/leitorIaServico",
+      ) as typeof import("@/services/leitorIaServico");
+      request = lerReciboComIaSemApi({ uri: "file:///receipt.jpg" });
+    });
+    jest.dontMock("@/services/apiConfig");
+
+    await expect(request).rejects.toThrow(
+      "A leitura de recibos não está disponível enquanto o backend não estiver publicado.",
+    );
+    expect(XMLHttpRequestDouble.instances).toHaveLength(0);
+    expect(getAccessToken).not.toHaveBeenCalled();
+  });
 });

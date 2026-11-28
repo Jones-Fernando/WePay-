@@ -2,7 +2,7 @@ import {
   getAccessToken,
   refreshAccessToken,
 } from "@/services/authSession";
-import { API_BASE_URL } from "@/services/apiConfig";
+import { API_BASE_URL, API_ENABLED } from "@/services/apiConfig";
 
 export type DadosRecibo = {
   estabelecimento?: string | null;
@@ -28,6 +28,12 @@ export async function lerReciboComIa(imagem: {
   fileName?: string | null;
   mimeType?: string | null;
 }): Promise<DadosRecibo> {
+  if (!API_ENABLED) {
+    throw new Error(
+      "A leitura de recibos não está disponível enquanto o backend não estiver publicado.",
+    );
+  }
+
   let token = await getAccessToken();
   if (!token) throw new Error("Faça login para ler um recibo.");
 

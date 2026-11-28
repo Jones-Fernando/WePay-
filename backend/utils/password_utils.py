@@ -1,6 +1,9 @@
+import hashlib
+import hmac
+
 import bcrypt
 
-MIN_PASSWORD_LENGTH = 6
+MIN_PASSWORD_LENGTH = 12
 MAX_PASSWORD_BYTES = 72
 PASSWORD_SPECIAL_CHARACTERS = frozenset("!@#$%^&*()-_=+[]{};:,.?")
 
@@ -11,6 +14,16 @@ def is_legacy_password_hash(hashed_password):
         and len(hashed_password) == 64
         and all(character in "0123456789abcdef" for character in hashed_password)
     )
+
+
+def check_legacy_password(password: str, hashed_password: str) -> bool:
+    if not isinstance(password, str) or not is_legacy_password_hash(hashed_password):
+        return False
+    try:
+        password_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(password_hash, hashed_password)
 
 
 def validar_senha(password: object) -> str | None:

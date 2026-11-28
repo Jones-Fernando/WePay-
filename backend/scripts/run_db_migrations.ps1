@@ -28,16 +28,53 @@ foreach ($line in Get-Content -LiteralPath $envFile) {
     $values[$key] = $value
 }
 
-foreach ($required in @('DB_NAME', 'DB_USER', 'DB_PASSWORD')) {
+foreach ($required in @(
+    'DB_HOST',
+    'DB_PORT',
+    'DB_NAME',
+    'DB_USER',
+    'DB_PASSWORD',
+    'DB_SSL_CA'
+)) {
     if (-not $values.ContainsKey($required) -or -not $values[$required]) {
         throw "Missing $required in backend/.env.migrate."
     }
 }
 
-$env:APP_ENV = 'development'
+$dbPort = 0
+if (-not [int]::TryParse($values['DB_PORT'], [ref]$dbPort) -or
+    $dbPort -lt 1 -or $dbPort -gt 65535) {
+    throw 'DB_PORT in backend/.env.migrate must be between 1 and 65535.'
+}
+
+$environmentKeys = @(
+    'APP_ENV',
+    'DB_HOST',
+    'DB_PORT',
+    'DB_NAME',
+    'DB_USER',
+    'DB_PASSWORD',
+    'DB_SSL_CA'
+)
+$previousEnvironment = @{}
+$previousEnvironment['APP_ENV'] = [Environment]::GetEnvironmentVariable(
+    'APP_ENV',
+    'Process'
+)
+foreach ($key in $environmentKeys | Where-Object { $_ -ne 'APP_ENV' }) {
+    $previousEnvironment[$key] = [Environment]::GetEnvironmentVariable(
+        $key,
+        'Process'
+    )
+}
+
+$env:APP_ENV = 'migration'
+$env:DB_HOST = $values['DB_HOST']
+$env:DB_PORT = [string]$dbPort
 $env:DB_NAME = $values['DB_NAME']
 $env:DB_USER = $values['DB_USER']
 $env:DB_PASSWORD = $values['DB_PASSWORD']
+$env:DB_SSL_CA = $values['DB_SSL_CA']
 $exitCode = 0
 
 Push-Location $backendRoot
@@ -47,10 +84,13 @@ try {
 }
 finally {
     Pop-Location
-    Remove-Item Env:DB_USER -ErrorAction SilentlyContinue
-    Remove-Item Env:DB_PASSWORD -ErrorAction SilentlyContinue
-    Remove-Item Env:DB_NAME -ErrorAction SilentlyContinue
-    Remove-Item Env:APP_ENV -ErrorAction SilentlyContinue
+    foreach ($key in $environmentKeys) {
+        [Environment]::SetEnvironmentVariable(
+            $key,
+            $previousEnvironment[$key],
+            'Process'
+        )
+    }
 }
 
 exit $exitCode

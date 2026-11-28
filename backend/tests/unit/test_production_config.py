@@ -34,7 +34,7 @@ def test_other_environments_use_only_configured_cors_origins():
     ) == ["https://wepay.example.com"]
 
 
-@pytest.mark.parametrize("environment", ["development", "production"])
+@pytest.mark.parametrize("environment", ["development", "production", "migration"])
 def test_non_test_environment_rejects_the_backend_test_database(environment):
     with pytest.raises(RuntimeError, match="reservado aos testes"):
         _validate_database_name_for_environment(environment, "wepay_test")

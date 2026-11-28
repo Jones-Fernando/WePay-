@@ -497,6 +497,15 @@ describe("API request timeout and cancellation", () => {
     jest.restoreAllMocks();
   });
 
+  it.each([0, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects an invalid request timeout (%s)",
+    async (timeoutMs) => {
+      await expect(request("/categorias", { timeoutMs })).rejects.toThrow(
+        "timeoutMs deve ser um número maior que zero.",
+      );
+    },
+  );
+
   it("reports connection failures with a network-specific message", async () => {
     const notifications: { type: string; message: string }[] = [];
     const unsubscribe = subscribeFeedback((notice) => {
@@ -753,5 +762,32 @@ describe("pagamentosApi", () => {
 
     const [, options] = jest.mocked(globalThis.fetch).mock.calls[0];
     expect(options?.headers).toMatchObject({ "Idempotency-Key": key });
+  });
+});
+
+describe("API disabled", () => {
+  afterEach(() => {
+    jest.dontMock("@/services/apiConfig");
+    jest.restoreAllMocks();
+  });
+
+  it("does not send requests to the backend", async () => {
+    let disabledRequest: Promise<unknown> | undefined;
+    const fetchMock = jest.spyOn(globalThis, "fetch");
+
+    jest.isolateModules(() => {
+      jest.doMock("@/services/apiConfig", () => ({
+        API_BASE_URL: "",
+        API_ENABLED: false,
+      }));
+      const isolatedApi = require("@/services/api") as
+        typeof import("@/services/api");
+      disabledRequest = isolatedApi.request("/categorias");
+    });
+
+    await expect(disabledRequest).rejects.toThrow(
+      "O backend do WEPAY ainda não está disponível.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

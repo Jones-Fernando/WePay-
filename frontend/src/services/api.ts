@@ -4,7 +4,7 @@ import {
   getRefreshToken,
   refreshAccessToken,
 } from "@/services/authSession";
-import { API_BASE_URL } from "@/services/apiConfig";
+import { API_BASE_URL, API_ENABLED } from "@/services/apiConfig";
 import {
   API_REQUEST_TIMEOUT_MS,
   ApiTimeoutError,
@@ -109,6 +109,12 @@ export async function request<T>(
   } = options;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new RangeError("timeoutMs deve ser um número maior que zero.");
+  }
+
+  if (!API_ENABLED) {
+    throw new Error(
+      "O backend do WEPAY ainda não está disponível. O acesso às funcionalidades será liberado após a publicação do servidor.",
+    );
   }
 
   if (signal?.aborted) throw getAbortError(signal);

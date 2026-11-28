@@ -71,7 +71,7 @@ export default function RedefinirSenha() {
               {...focusHandlers("senha")}
             />
             <Text style={styles.passwordHint}>
-              Use pelo menos 6 caracteres, uma letra maiúscula, um número e um símbolo (por exemplo, !, @ ou #). Espaços não contam como símbolo. Senhas mais longas são mais seguras.
+              Use pelo menos 12 caracteres, uma letra maiúscula, um número e um símbolo (por exemplo, !, @ ou #). Espaços não contam como símbolo. Senhas mais longas são mais seguras.
             </Text>
             <Text style={styles.rotulo}>Confirmar nova senha</Text>
             <TextInput

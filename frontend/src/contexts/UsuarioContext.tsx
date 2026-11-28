@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { router, useSegments } from "expo-router";
+import { API_ENABLED } from "@/services/apiConfig";
 
 import { ApiError, authApi } from "@/services/api";
 import {
@@ -64,11 +65,22 @@ export function UsuarioProvider({ children }: PropsWithChildren) {
   }, []);
 
   const restaurarSessao = useCallback(async () => {
+    if (!API_ENABLED) {
+      setUsuario(null);
+      setErroRestauracao(null);
+      setCarregando(false);
+      return;
+    }
+
     try {
       let token = await getAccessToken();
       setCarregando(true);
       setErroRestauracao(null);
-      if (!token) token = await refreshAccessToken();
+
+      if (!token) {
+        token = await refreshAccessToken();
+      }
+
       if (!token) {
         setUsuario(null);
         return;
